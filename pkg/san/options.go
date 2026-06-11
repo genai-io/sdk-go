@@ -3,12 +3,12 @@ package san
 import "github.com/genai-io/sdk-go/pkg/llm"
 
 type agentConfig struct {
-	id       string
-	llm      llm.LLM
-	system   string
-	tools    *ToolSet
-	maxSteps int
-	inboxBuf int
+	id        string
+	llm       llm.LLM
+	system    string
+	tools     *ToolSet
+	maxSteps  int
+	inboxBuf  int
 	outboxBuf int
 }
 

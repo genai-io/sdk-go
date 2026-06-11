@@ -1,0 +1,22 @@
+# Codecov configuration for sdk-go.
+
+coverage:
+  precision: 1
+  round: down
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 60%
+        threshold: 5%
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: false
+
+ignore:
+  - "**/*_test.go"

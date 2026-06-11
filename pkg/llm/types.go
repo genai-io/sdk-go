@@ -16,13 +16,13 @@ const (
 
 // Message is the unit exchanged between consumer and LLM.
 type Message struct {
-	Role              Role         `json:"role"`
-	Content           string       `json:"content,omitempty"`
-	Images            []Image      `json:"images,omitempty"`
-	Thinking          string       `json:"thinking,omitempty"`
-	ThinkingSignature string       `json:"thinking_signature,omitempty"`
-	ToolCalls         []ToolCall   `json:"tool_calls,omitempty"`
-	ToolResult        *ToolResult  `json:"tool_result,omitempty"`
+	Role              Role           `json:"role"`
+	Content           string         `json:"content,omitempty"`
+	Images            []Image        `json:"images,omitempty"`
+	Thinking          string         `json:"thinking,omitempty"`
+	ThinkingSignature string         `json:"thinking_signature,omitempty"`
+	ToolCalls         []ToolCall     `json:"tool_calls,omitempty"`
+	ToolResult        *ToolResult    `json:"tool_result,omitempty"`
 	Meta              map[string]any `json:"meta,omitempty"`
 }
 
@@ -168,11 +168,11 @@ const (
 // StreamChunk is a chunk in a streaming response from a provider.
 type StreamChunk struct {
 	Type     ChunkType
-	Text     string            // for text/thinking chunks
-	ToolID   string            // for tool_start chunks
-	ToolName string            // for tool_start chunks
+	Text     string              // for text/thinking chunks
+	ToolID   string              // for tool_start chunks
+	ToolName string              // for tool_start chunks
 	Response *CompletionResponse // for done chunks
-	Error    error             // for error chunks
+	Error    error               // for error chunks
 }
 
 // CompletionResponse is the aggregated response from a provider.

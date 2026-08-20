@@ -1,0 +1,24 @@
+# Binary
+bin/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Dependencies
+vendor/
+
+# Coverage
+coverage.out
+
+# Claude Code
+.claude/

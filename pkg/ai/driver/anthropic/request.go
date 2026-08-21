@@ -155,6 +155,9 @@ type Native struct {
 	DisableParallelToolUse bool
 }
 
+// NativeOptions marks this as one driver's request settings.
+func (Native) NativeOptions() {}
+
 // cacheControl maps the requested retention onto a cache_control marker. A nil
 // result means no breakpoint, which is what CacheNone asks for and what an
 // endpoint with no prompt cache gets.

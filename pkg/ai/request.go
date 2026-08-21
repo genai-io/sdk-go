@@ -66,7 +66,7 @@ type Request struct {
 	// A driver reads it with NativeAs. An absent value yields that driver's
 	// zero value; the wrong concrete type fails the request instead of
 	// silently dropping a setting when the caller swaps protocols.
-	Native any
+	Native NativeOptions
 }
 
 // Option sets one field of a Request.
@@ -152,7 +152,7 @@ func WithSamplingParams(params map[string]any) Option {
 }
 
 // WithNative supplies one driver's protocol-specific settings.
-func WithNative(native any) Option {
+func WithNative(native NativeOptions) Option {
 	return func(r *Request) { r.Native = native }
 }
 
@@ -267,12 +267,29 @@ const (
 	CacheLong CacheRetention = "long"
 )
 
+// NativeOptions is one driver's protocol-specific request settings.
+//
+// Go has no union type, so this cannot enumerate the drivers that implement
+// it; what it can do is stop Request.Native from being a bare any. The value
+// is whatever that driver defines — anthropic.Native, responses.Native, or a
+// type a driver outside this module declares — and the marker method is what
+// says it is meant to be one.
+//
+// A value of the wrong driver's type is still caught, by NativeAs, at the
+// moment the driver reads it.
+type NativeOptions interface {
+	// NativeOptions marks this type as one driver's request settings. A no-op:
+	//
+	//	func (Native) NativeOptions() {}
+	NativeOptions()
+}
+
 // NativeAs reads a driver's protocol-specific settings out of a request. A
 // non-nil value of the wrong concrete type is an invalid request.
 //
 //	native, err := ai.NativeAs[anthropic.Native](req)
 //	if native.ThinkingDisplay != "" { … }
-func NativeAs[T any](req *Request) (T, error) {
+func NativeAs[T NativeOptions](req *Request) (T, error) {
 	var zero T
 	if req.Native == nil {
 		return zero, nil

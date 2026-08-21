@@ -36,7 +36,7 @@ func BaseURL(v catalog.Vendor) string {
 // Deployment reads a vendor's deployment-scoped settings — the ones that name
 // where a model runs rather than who is calling — into the value its driver
 // expects as Config.Native. It returns nil for a vendor that has none.
-func Deployment(v catalog.Vendor) any {
+func Deployment(v catalog.Vendor) ai.NativeConfig {
 	if len(v.DeploymentEnv) == 0 {
 		return nil
 	}

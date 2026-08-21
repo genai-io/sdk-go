@@ -107,6 +107,9 @@ type Native struct {
 	PromptCacheKey string
 }
 
+// NativeOptions marks this as one driver's request settings.
+func (Native) NativeOptions() {}
+
 // toolChoice maps the neutral constraint onto the Responses union. A nil
 // result leaves the field off, which is the API's own default.
 func toolChoice(req *ai.Request) *wire.ResponseNewParamsToolChoiceUnion {

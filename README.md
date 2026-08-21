@@ -394,8 +394,13 @@ response, err := client.Complete(ctx, messages,
 	ai.WithNative(anthropic.Native{ThinkingDisplay: "omitted"}))
 ```
 
-A native value of the wrong type, or one sent to a protocol that defines none,
-is an invalid request. It is never ignored silently.
+Your type implements `ai.NativeOptions` — a one-line marker method — so the
+field is not a bare `any` and a value that was never meant to go there is a
+compile error. A value of the *wrong driver's* type, or one sent to a protocol
+that defines none, is an invalid request caught when that driver reads it. It
+is never ignored silently.
+
+Construction settings work the same way through `ai.NativeConfig`.
 
 ## Testing
 

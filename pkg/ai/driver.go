@@ -124,7 +124,7 @@ type Config struct {
 	//
 	// Read it with ConfigNativeAs. A wrong concrete type is rejected rather than
 	// silently losing construction settings.
-	Native any
+	Native NativeConfig
 }
 
 // MergedHeaders returns the headers to send: the model's, then the Config's
@@ -250,11 +250,23 @@ func (e *UnregisteredAPIError) Error() string {
 	return fmt.Sprintf("ai: no driver registered for API %q (registered: %v)", e.API, names)
 }
 
+// NativeConfig is one driver's protocol-specific construction settings — the
+// Config-level counterpart to NativeOptions.
+//
+// ai.VertexConfig is the only one this module defines, and it lives in package
+// ai rather than beside its driver so a caller can fill it in without pulling
+// in Google Cloud auth.
+type NativeConfig interface {
+	// NativeConfig marks this type as one driver's construction settings. A
+	// no-op, as NativeOptions.NativeOptions is.
+	NativeConfig()
+}
+
 // ConfigNativeAs reads a driver's protocol-specific construction settings out
 // of a Config.
 //
 //	vertex, err := ai.ConfigNativeAs[ai.VertexConfig](cfg)
-func ConfigNativeAs[T any](config Config) (T, error) {
+func ConfigNativeAs[T NativeConfig](config Config) (T, error) {
 	var zero T
 	if config.Native == nil {
 		return zero, nil

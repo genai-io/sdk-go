@@ -49,6 +49,9 @@ type VertexConfig struct {
 	Region string
 }
 
+// NativeConfig marks VertexConfig as a driver's construction settings.
+func (VertexConfig) NativeConfig() {}
+
 // Modality is a kind of content a model accepts as input.
 //
 // A list rather than a set of booleans: providers keep adding kinds, and a

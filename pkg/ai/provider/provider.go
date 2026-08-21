@@ -48,7 +48,7 @@ type Config struct {
 
 	// Native is passed through to every Config this provider builds — see
 	// Config.Native.
-	Native any
+	Native ai.NativeConfig
 
 	// Models is the static baseline: what is known without asking the
 	// endpoint. It may be empty for a provider that only has a live listing.

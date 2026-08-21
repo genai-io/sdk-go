@@ -1,0 +1,185 @@
+package catalog
+
+import "github.com/genai-io/sdk-go/pkg/ai"
+
+// The vocabulary a vendor entry is written in.
+//
+// A reasoning ladder, a protocol dialect, a rate card and a model shorthand are
+// each named once here and referred to from vendors.go, so the table stays a
+// table: thirty models a reader can scan, rather than thirty repetitions of the
+// same four literals.
+
+// ─── reasoning ladders ───
+//
+// A ladder is ordered least to most effort, and each rung carries what its
+// endpoint actually wants: Value for a level-taking field, Budget for a
+// token-taking one. Nothing here is translated in driver code — adding a
+// vendor's spelling is adding rungs.
+
+var (
+	// claudeAdaptive is output_config.effort for Claude 4.7 and later, where
+	// xhigh sits between high and max.
+	claudeAdaptive = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff},
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortMedium, Value: "medium"},
+		{Effort: ai.EffortHigh, Value: "high", Default: true},
+		{Effort: ai.EffortXHigh, Value: "xhigh"},
+		{Effort: ai.EffortMax, Value: "max"},
+	}
+	// claudeAdaptive46 is the same ladder for Claude 4.6, which predates xhigh.
+	claudeAdaptive46 = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff},
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortMedium, Value: "medium"},
+		{Effort: ai.EffortHigh, Value: "high", Default: true},
+		{Effort: ai.EffortMax, Value: "max"},
+	}
+	// claudeAlwaysOn drops the off rung: Fable 5 reasons unconditionally and
+	// rejects an explicit thinking: {"type": "disabled"} with a 400.
+	claudeAlwaysOn = []ai.ReasoningLevel{
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortMedium, Value: "medium"},
+		{Effort: ai.EffortHigh, Value: "high", Default: true},
+		{Effort: ai.EffortXHigh, Value: "xhigh"},
+		{Effort: ai.EffortMax, Value: "max"},
+	}
+	// budgetLadder is the same four rungs expressed as token budgets. Three
+	// unrelated protocols land on it — Anthropic's older thinking.budget_tokens
+	// (which no listed Claude still takes, but every Anthropic-compatible
+	// third party does), Gemini 2.5's thinkingConfig.thinkingBudget, and
+	// DashScope's thinking_budget — because the rungs are the same decision
+	// and only the field name differs. Which field it lands in is the driver's
+	// business, decided by Compat.
+	budgetLadder = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff, Default: true},
+		{Effort: ai.EffortLow, Budget: 5_000},
+		{Effort: ai.EffortMedium, Budget: 32_000},
+		{Effort: ai.EffortHigh, Budget: 128_000},
+	}
+
+	// openAIEfforts is reasoning.effort. "none" is a real value here, so "off"
+	// is expressible rather than something the catalog has to hide.
+	openAIEfforts = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff, Value: "none"},
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortMedium, Value: "medium", Default: true},
+		{Effort: ai.EffortHigh, Value: "high"},
+		{Effort: ai.EffortXHigh, Value: "xhigh"},
+	}
+	// openAIEffortsMax adds the top rung the 5.6 family accepts.
+	openAIEffortsMax = append(append([]ai.ReasoningLevel{}, openAIEfforts...),
+		ai.ReasoningLevel{Effort: ai.EffortMax, Value: "max"})
+
+	// geminiLevels is thinkingConfig.thinkingLevel — Gemini 3. MINIMAL exists
+	// in the enum but Gemini 3 rejects it, so there is no minimal rung.
+	geminiLevels = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff, Default: true},
+		{Effort: ai.EffortLow, Value: "LOW"},
+		{Effort: ai.EffortMedium, Value: "MEDIUM"},
+		{Effort: ai.EffortHigh, Value: "HIGH"},
+	}
+	// deepseekEfforts is reasoning_effort, with "off" sent as a thinking
+	// object instead — see ai.ThinkingEffortOrDisable.
+	deepseekEfforts = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff},
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortHigh, Value: "high", Default: true},
+		{Effort: ai.EffortXHigh, Value: "xhigh"},
+		{Effort: ai.EffortMax, Value: "max"},
+	}
+
+	// thinkingSwitch is for endpoints whose reasoning is a boolean, sent as
+	// thinking: {"type": "enabled"}. ResolveLevel snaps an in-between request
+	// onto one of these.
+	thinkingSwitch = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff, Default: true},
+		{Effort: ai.EffortHigh, Value: "enabled"},
+	}
+
+	// effortLadder is the same four rungs as plain level strings, for every
+	// endpoint that takes OpenAI's spelling — including OpenRouter, which
+	// normalizes its upstreams onto reasoning: {"effort": …}.
+	effortLadder = []ai.ReasoningLevel{
+		{Effort: ai.EffortOff, Default: true},
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortMedium, Value: "medium"},
+		{Effort: ai.EffortHigh, Value: "high"},
+	}
+
+	// gptOSSEfforts is reasoning_effort for the open-weight gpt-oss models,
+	// which reason unconditionally: there is no rung that turns it off, and
+	// ResolveLevel snaps a request for one onto low.
+	gptOSSEfforts = []ai.ReasoningLevel{
+		{Effort: ai.EffortLow, Value: "low"},
+		{Effort: ai.EffortMedium, Value: "medium", Default: true},
+		{Effort: ai.EffortHigh, Value: "high"},
+	}
+)
+
+// ─── protocol behavior ───
+
+var (
+	// Claude 4.7 and later also reject a non-default temperature.
+	claudeAdaptiveNoTemp = ai.AnthropicCompat{ForceAdaptiveThinking: true, NoTemperature: true}
+	claudeAdaptiveCompat = ai.AnthropicCompat{ForceAdaptiveThinking: true}
+)
+
+// ─── modalities ───
+
+var (
+	textOnly  = []ai.Modality{ai.ModalityText}
+	textImage = []ai.Modality{ai.ModalityText, ai.ModalityImage}
+)
+
+// usd and cny build a rate card from per-million-token prices.
+func usd(input, output, cacheWrite, cacheRead float64) ai.Pricing {
+	return ai.Pricing{Currency: ai.USD, Input: input, Output: output, CacheWrite: cacheWrite, CacheRead: cacheRead}
+}
+
+func cny(input, output, cacheWrite, cacheRead float64) ai.Pricing {
+	return ai.Pricing{Currency: ai.CNY, Input: input, Output: output, CacheWrite: cacheWrite, CacheRead: cacheRead}
+}
+
+// gpt5 builds an OpenAI reasoning-model entry. The whole GPT-5 family shares
+// one window and output cap.
+func gpt5(id, name string, pricing ai.Pricing) ai.Model {
+	return ai.Model{
+		ID: id, Name: name,
+		ContextWindow: 1_050_000, MaxOutput: 128_000,
+		Reasoning: openAIEfforts,
+		Pricing:   pricing,
+	}
+}
+
+// gpt56 is gpt5 with the extra top rung the 5.6 family accepts.
+func gpt56(id, name string, pricing ai.Pricing) ai.Model {
+	m := gpt5(id, name, pricing)
+	m.Reasoning = openAIEffortsMax
+	return m
+}
+
+// retired marks a model the vendor no longer serves, naming what replaces it.
+// The entry exists so that a stale configuration produces a sentence rather
+// than a 404.
+func retired(id, name, replacement string) ai.Model {
+	return ai.Model{
+		ID: id, Name: name,
+		Stage:       ai.StageRetired,
+		Replacement: replacement,
+		Reasoning:   NoReasoning,
+	}
+}
+
+// preview marks a model whose behavior may change without notice.
+func preview(m ai.Model) ai.Model {
+	m.Stage = ai.StagePreview
+	return m
+}
+
+// gemini builds a Gemini 3 entry. The family shares one window and output cap;
+// Google publishes no per-model rate card in the API docs, so no pricing is
+// stated rather than a guessed one.
+func gemini(id, name string) ai.Model {
+	return ai.Model{ID: id, Name: name, ContextWindow: 1_048_576, MaxOutput: 65_536}
+}

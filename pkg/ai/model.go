@@ -374,9 +374,6 @@ type Unsupported struct {
 	System bool `json:"system,omitempty"`
 	// Multiturn means the endpoint accepts a single message only.
 	Multiturn bool `json:"multiturn,omitempty"`
-	// Streaming means the endpoint has no streaming mode. The driver still
-	// presents one, delivering the whole answer as a single delta.
-	Streaming bool `json:"streaming,omitempty"`
 	// Schema means the endpoint cannot constrain output to a JSON schema; the
 	// shape has to be asked for in the prompt.
 	Schema bool `json:"schema,omitempty"`

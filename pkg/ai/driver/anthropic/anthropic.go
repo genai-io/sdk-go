@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"slices"
 	"strings"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
@@ -38,22 +37,13 @@ const Name = string(ai.APIAnthropicMessages)
 // OpenAI protocols there is no "leave it to the server" option.
 const defaultMaxTokens = 8192
 
-// extendedContextSuffix marks a model ID as the 1M-context variant of a model
-// that is otherwise identical, e.g. "claude-opus-4-6[1m]". The suffix is not
-// part of the ID Anthropic knows; it selects a beta header.
-const extendedContextSuffix = "[1m]"
-
-const extendedContextBeta = "context-1m-2025-08-07"
-
 func init() { ai.RegisterAPI(ai.APIAnthropicMessages, New) }
 
 // Driver talks to one Anthropic-protocol endpoint.
 type Driver struct {
-	client  sdk.Client
-	model   ai.Model
-	modelID string
-	reqOpts []option.RequestOption
-	compat  ai.AnthropicCompat
+	client sdk.Client
+	model  ai.Model
+	compat ai.AnthropicCompat
 }
 
 // New builds a driver from a Config. It is registered as the factory for
@@ -94,11 +84,7 @@ func ClientOptions(cfg ai.Config) []option.RequestOption {
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	// Model headers first so a Config header of the same name wins.
-	for k, v := range cfg.Model.Headers {
-		opts = append(opts, option.WithHeader(k, v))
-	}
-	for k, v := range cfg.Headers {
+	for k, v := range cfg.MergedHeaders() {
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	return opts
@@ -111,21 +97,15 @@ func ClientOptions(cfg ai.Config) []option.RequestOption {
 // whatever produced the client, so a transport that the Config cannot express
 // supplies its own client rather than forking the driver.
 func NewWithClient(client sdk.Client, cfg ai.Config) (ai.Driver, error) {
-	modelID, extended := strings.CutSuffix(cfg.Model.ID, extendedContextSuffix)
-	if modelID == "" {
+	if cfg.Model.ID == "" {
 		return nil, fmt.Errorf("%s: model ID is required", Name)
 	}
 
-	d := &Driver{
-		client:  client,
-		model:   cfg.Model,
-		modelID: modelID,
-		compat:  ai.CompatOf[ai.AnthropicCompat](cfg.Model),
-	}
-	if extended {
-		d.reqOpts = append(d.reqOpts, option.WithHeader("anthropic-beta", extendedContextBeta))
-	}
-	return d, nil
+	return &Driver{
+		client: client,
+		model:  cfg.Model,
+		compat: ai.CompatOf[ai.AnthropicCompat](cfg.Model),
+	}, nil
 }
 
 // Name identifies the driver.
@@ -145,9 +125,11 @@ func (d *Driver) Generate(ctx context.Context, req *ai.Request) iter.Seq2[ai.Del
 			return
 		}
 
-		reqOpts := d.reqOpts
+		// Betas are the only per-request header this protocol takes; there is
+		// nothing set at construction to layer them over.
+		var reqOpts []option.RequestOption
 		if betas := native.Betas; len(betas) > 0 {
-			reqOpts = append(slices.Clone(reqOpts), option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
+			reqOpts = append(reqOpts, option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
 		}
 
 		stream := d.client.Messages.NewStreaming(ctx, *params, reqOpts...)
@@ -291,7 +273,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	if !param.IsOmitted(params.Thinking) {
 		count.Thinking = params.Thinking
 	}
-	res, err := d.client.Messages.CountTokens(ctx, count, d.reqOpts...)
+	res, err := d.client.Messages.CountTokens(ctx, count)
 	if err != nil {
 		return 0, d.wrap(err)
 	}
@@ -313,7 +295,8 @@ func countTokenTools(tools []sdk.ToolUnionParam) []sdk.MessageCountTokensToolUni
 
 // Models lists the models the endpoint serves. Anthropic's listing carries IDs
 // and display names only — no limits — so callers wanting context windows
-// should merge catalog data over the result (see catalog.Enrich).
+// should merge catalog data over the result (see endpoint.Endpoint, which
+// does exactly that around a refresh).
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	pager := d.client.Models.ListAutoPaging(ctx, sdk.ModelListParams{})
 	var out []ai.Model

@@ -13,6 +13,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 )
 
 // The path an application actually walks to reach a vendor: an environment
@@ -504,5 +505,55 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ulta") || !strings.Contains(err.Error(), "ultra") {
 		t.Errorf("the error should name both the typo and what the model offers: %v", err)
+	}
+}
+
+// Models and the catalog hand out snapshots. The clone that used to sit on the
+// way out of Endpoint.Models was removed as redundant — every entry is built
+// fresh — so this is what proves it stayed redundant. A caller that appends to
+// a returned reasoning ladder must not be editing what the next caller reads.
+func TestReturnedModelsDoNotAliasWhatTheyCameFrom(t *testing.T) {
+	ep := endpoint.New(endpoint.Config{
+		ID:  "acme",
+		API: ai.APIOpenAIChat,
+		Models: []ai.Model{{
+			ID:        "acme-pro",
+			Reasoning: []ai.ReasoningLevel{{Effort: ai.EffortLow, Value: "low"}},
+			Headers:   map[string]string{"X-Tier": "pro"},
+		}},
+	})
+
+	first := ep.Models()
+	if len(first) != 1 {
+		t.Fatalf("Models() = %d entries, want 1", len(first))
+	}
+	first[0].Reasoning = append(first[0].Reasoning, ai.ReasoningLevel{Effort: ai.EffortMax})
+	first[0].Headers["X-Tier"] = "tampered"
+	first[0].ID = "renamed"
+
+	second := ep.Models()
+	if got := len(second[0].Reasoning); got != 1 {
+		t.Errorf("the ladder grew to %d rungs; a caller edited the endpoint's own model", got)
+	}
+	if got := second[0].Headers["X-Tier"]; got != "pro" {
+		t.Errorf("headers = %q, want the endpoint's own value", got)
+	}
+	if second[0].ID != "acme-pro" {
+		t.Errorf("ID = %q, want acme-pro", second[0].ID)
+	}
+
+	// The same guarantee from the catalog, whose tables are package-level.
+	m, err := catalog.Model("deepseek/deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("catalog.Model: %v", err)
+	}
+	rungs := len(m.Reasoning)
+	m.Reasoning = append(m.Reasoning, ai.ReasoningLevel{Effort: ai.EffortMax, Value: "tampered"})
+	again, err := catalog.Model("deepseek/deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("catalog.Model: %v", err)
+	}
+	if len(again.Reasoning) != rungs {
+		t.Errorf("the catalog ladder grew to %d rungs; a caller edited the shared table", len(again.Reasoning))
 	}
 }

@@ -26,9 +26,9 @@ import (
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
 
-// endpoint is a stub server that records the request body it was given and
+// stub is a fake server that records the request body it was given and
 // replays a scripted response.
-type endpoint struct {
+type stub struct {
 	server *httptest.Server
 	body   map[string]any
 	path   string
@@ -36,9 +36,9 @@ type endpoint struct {
 
 // sse replays server-sent events. Anthropic names its events; the others do
 // not, which is the only difference the framing has.
-func sse(t *testing.T, named bool, events ...[2]string) *endpoint {
+func sse(t *testing.T, named bool, events ...[2]string) *stub {
 	t.Helper()
-	e := &endpoint{}
+	e := &stub{}
 	e.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		e.path = r.URL.Path
@@ -56,9 +56,9 @@ func sse(t *testing.T, named bool, events ...[2]string) *endpoint {
 }
 
 // json replies once with a JSON body, for the non-streaming calls.
-func jsonEndpoint(t *testing.T, status int, body string) *endpoint {
+func jsonEndpoint(t *testing.T, status int, body string) *stub {
 	t.Helper()
-	e := &endpoint{}
+	e := &stub{}
 	e.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		e.path = r.URL.Path
@@ -95,12 +95,12 @@ func ask(t *testing.T, c *ai.Client) *ai.Response {
 func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 	tests := map[string]struct {
 		model  ai.Model
-		serve  func(*testing.T) *endpoint
+		serve  func(*testing.T) *stub
 		system func(body map[string]any) bool
 	}{
 		"anthropic": {
 			model: ai.Model{ID: "claude-test", API: ai.APIAnthropicMessages, MaxOutput: 1024},
-			serve: func(t *testing.T) *endpoint {
+			serve: func(t *testing.T) *stub {
 				return sse(t, true,
 					[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test",` +
 						`"usage":{"input_tokens":20,"cache_read_input_tokens":13}}}`},
@@ -115,7 +115,7 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 		},
 		"openai chat completions": {
 			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIChat},
-			serve: func(t *testing.T) *endpoint {
+			serve: func(t *testing.T) *stub {
 				return sse(t, false,
 					[2]string{"", `{"id":"1","model":"gpt-test","choices":[{"index":0,"delta":{"content":"Hi"}}]}`},
 					[2]string{"", `{"id":"1","model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],` +
@@ -131,7 +131,7 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 		},
 		"openai responses": {
 			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIResponses},
-			serve: func(t *testing.T) *endpoint {
+			serve: func(t *testing.T) *stub {
 				return sse(t, false,
 					[2]string{"", `{"type":"response.output_text.delta","delta":"Hi"}`},
 					[2]string{"", `{"type":"response.completed","response":{"id":"r1","model":"gpt-test",` +
@@ -142,7 +142,7 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 		},
 		"google gemini": {
 			model: ai.Model{ID: "gemini-test", API: ai.APIGoogleGenAI},
-			serve: func(t *testing.T) *endpoint {
+			serve: func(t *testing.T) *stub {
 				return sse(t, false,
 					[2]string{"", `{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},` +
 						`"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5}}`},

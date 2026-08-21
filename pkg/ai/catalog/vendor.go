@@ -160,7 +160,6 @@ func (v Vendor) ModelList() []ai.Model {
 // values shared by every caller, and a caller that appended to a returned
 // ladder would corrupt the catalog for everyone else.
 func (v Vendor) decorate(m ai.Model) ai.Model {
-	m = m.Clone()
 	m.Vendor = v.ID
 	m.API = v.API
 	if m.BaseURL == "" {
@@ -190,8 +189,10 @@ func (v Vendor) decorate(m ai.Model) ai.Model {
 	if m.Pricing.Known() && m.Pricing.Currency == "" {
 		m.Pricing.Currency = ai.USD
 	}
-	// Clone inherited collections before Infer: an inference function is allowed
-	// to edit its model argument, never the package-level catalog defaults.
+	// One clone, here: everything above is a whole-field assignment, so this
+	// is the first point at which m can share a slice or map with anyone —
+	// either the caller's model or the package-level vendor defaults just
+	// inherited. Infer is allowed to edit its argument, never those.
 	m = m.Clone()
 	// A retired model is a signpost, not an offer: leaving its limits at zero
 	// keeps it from looking usable in a picker that only reads the numbers.

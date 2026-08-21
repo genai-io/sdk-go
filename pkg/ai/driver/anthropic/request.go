@@ -85,7 +85,7 @@ func (d *Driver) buildParams(req *ai.Request, native Native) (*sdk.MessageNewPar
 	}
 
 	params := &sdk.MessageNewParams{
-		Model:     sdk.Model(d.modelID),
+		Model:     sdk.Model(d.model.ID),
 		MaxTokens: maxTokens,
 		Messages:  msgs,
 	}

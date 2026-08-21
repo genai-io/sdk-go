@@ -117,7 +117,10 @@ func (e *Endpoint) Models() []ai.Model {
 		}
 		merged[i] = MergeListing(merged[i], live)
 	}
-	return cloneAll(merged)
+	// No clone on the way out: every entry above is already a fresh value —
+	// the baseline through Clone, the overlay through cloneAll, a merged pair
+	// through MergeListing, which clones both sides.
+	return merged
 }
 
 // Model looks one model up by ID. Unlike Models it also answers for an ID the
@@ -221,10 +224,10 @@ func (e *Endpoint) decorate(m ai.Model) ai.Model {
 // quirks that no listing publishes — and a model stripped of its quirks stops
 // working.
 //
-// Endpoint uses it to merge a refresh over its static models; catalog.Enrich
-// uses it to merge the vendored table under a listing. Both directions are the
-// same operation, so they are the same function: a new Model field is handled
-// once or not at all.
+// Endpoint uses it to merge a refresh over its static models. It is exported
+// because a caller reconciling a listing against the catalog itself needs the
+// same rule, and two copies of it would let one path keep a field the other
+// dropped.
 func MergeListing(base, live ai.Model) ai.Model {
 	out := base.Clone()
 	live = live.Clone()

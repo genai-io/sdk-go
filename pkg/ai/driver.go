@@ -118,6 +118,21 @@ type Config struct {
 	Native any
 }
 
+// MergedHeaders returns the headers to send: the model's, then the Config's
+// over them, so a Config header of the same name wins.
+//
+// Every driver needs this same precedence, and four copies of it is four
+// chances for one protocol to resolve a header differently from the rest.
+func (c Config) MergedHeaders() map[string]string {
+	if len(c.Model.Headers) == 0 && len(c.Headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(c.Model.Headers)+len(c.Headers))
+	maps.Copy(out, c.Model.Headers)
+	maps.Copy(out, c.Headers)
+	return out
+}
+
 // URL returns the base URL to use: the Config override if set, otherwise the
 // model's, otherwise "" for the driver's default.
 //

@@ -9,7 +9,6 @@ import (
 	"io"
 	"iter"
 	"net/http"
-	"strings"
 )
 
 // The HTTP plumbing. Gemini has no Go SDK this driver depends on, so the
@@ -75,16 +74,19 @@ func sseEvents(r io.Reader) iter.Seq2[[]byte, error] {
 		// default 64KiB limit would cut one in half.
 		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 		for scanner.Scan() {
-			line := strings.TrimRight(scanner.Text(), "\r")
-			payload, ok := strings.CutPrefix(line, "data:")
+			// Bytes, not Text: this runs once per streamed delta, and the
+			// consumer only unmarshals the payload, which does not retain it.
+			// Going through a string would copy every line twice.
+			line := bytes.TrimRight(scanner.Bytes(), "\r")
+			payload, ok := bytes.CutPrefix(line, []byte("data:"))
 			if !ok {
 				continue
 			}
-			payload = strings.TrimSpace(payload)
-			if payload == "" || payload == "[DONE]" {
+			payload = bytes.TrimSpace(payload)
+			if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
 				continue
 			}
-			if !yield([]byte(payload), nil) {
+			if !yield(payload, nil) {
 				return
 			}
 		}

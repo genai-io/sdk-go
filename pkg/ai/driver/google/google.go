@@ -81,20 +81,11 @@ func New(cfg ai.Config) (ai.Driver, error) {
 		base = defaultBaseURL
 	}
 
-	// Model headers first, so a Config header of the same name wins.
-	headers := map[string]string{}
-	for k, v := range cfg.Model.Headers {
-		headers[k] = v
-	}
-	for k, v := range cfg.Headers {
-		headers[k] = v
-	}
-
 	return &Driver{
 		client:  client,
 		baseURL: strings.TrimSuffix(base, "/"),
 		apiKey:  cfg.APIKey,
-		headers: headers,
+		headers: cfg.MergedHeaders(),
 		model:   cfg.Model,
 		compat:  ai.CompatOf[ai.GoogleCompat](cfg.Model),
 	}, nil

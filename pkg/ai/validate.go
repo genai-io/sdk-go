@@ -78,6 +78,12 @@ func (m Model) validateCapabilities(req *Request) error {
 	if m.Unsupported.Tools && len(req.Tools) > 0 {
 		return m.unsupported("does not support tools, but %d were provided", len(req.Tools))
 	}
+	// These two are keyed off the protocol rather than off Unsupported because
+	// they are facts about the wire format, not about any one endpoint: the
+	// Anthropic and Gemini bodies have nowhere to put an OpenAI sampling
+	// extension, and Responses has no stop-sequence parameter. A per-model
+	// flag would have to be set on every row and would silently stop firing
+	// the first time someone forgot.
 	if len(req.SamplingParams) > 0 && (m.API == APIAnthropicMessages || m.API == APIGoogleGenAI) {
 		return m.unsupported("does not support OpenAI sampling parameter extensions")
 	}

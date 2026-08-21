@@ -69,11 +69,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	// Model headers first so a Config header of the same name wins.
-	for k, v := range cfg.Model.Headers {
-		opts = append(opts, option.WithHeader(k, v))
-	}
-	for k, v := range cfg.Headers {
+	for k, v := range cfg.MergedHeaders() {
 		opts = append(opts, option.WithHeader(k, v))
 	}
 

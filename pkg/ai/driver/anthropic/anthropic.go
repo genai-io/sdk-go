@@ -9,7 +9,7 @@
 //
 // # Where things live
 //
-//	anthropic.go  construction, Generate, Models and CountTokens
+//	anthropic.go  construction, Stream, Models and CountTokens
 //	request.go    an ai.Request translated into Messages params
 //	errors.go     this protocol's failures classified into ai.Error kinds
 //	vertex/       the same protocol served through Google Cloud Vertex AI,
@@ -111,8 +111,8 @@ func NewWithClient(client sdk.Client, cfg ai.Config) (ai.Driver, error) {
 // Name identifies the driver.
 func (d *Driver) Name() string { return Name }
 
-// Generate runs one Messages call.
-func (d *Driver) Generate(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+// Stream runs one Messages call.
+func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		native, err := ai.NativeAs[Native](req)
 		if err != nil {

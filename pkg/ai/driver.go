@@ -37,7 +37,16 @@ type Driver interface {
 	// speaks it.
 	Name() string
 
-	// Generate performs one inference call.
+	// Stream performs one inference call.
+	//
+	// Streaming is the only shape a driver implements. Client.Complete is
+	// built by draining this, not by a second code path, so there is one way
+	// a request reaches an endpoint and one way its output comes back.
+	//
+	// It shares a name with Client.Stream because it is the same operation one
+	// layer down; what differs is granularity. A driver yields raw Deltas as
+	// its protocol produces them, and the Client assembles those into the
+	// ordered block lifecycle its own Stream yields.
 	//
 	// It does nothing until the returned iterator is consumed, and stops when
 	// the iterator is abandoned or ctx is canceled.
@@ -48,7 +57,7 @@ type Driver interface {
 	//
 	// An error ends the iterator and must be its last element. Make it an
 	// *Error so IsAuth, IsRetryable and the rest can classify what happened.
-	Generate(ctx context.Context, req *Request) iter.Seq2[Delta, error]
+	Stream(ctx context.Context, req *Request) iter.Seq2[Delta, error]
 }
 
 // ModelLister is the optional capability of an endpoint that publishes the
@@ -63,7 +72,7 @@ type ModelLister interface {
 // EstimateTokens instead.
 type TokenCounter interface {
 	// CountTokens reports the request's exact size, as the provider's own
-	// tokenizer sees it. req is borrowed on the same terms as Generate's.
+	// tokenizer sees it. req is borrowed on the same terms as Stream's.
 	CountTokens(ctx context.Context, req *Request) (int, error)
 }
 

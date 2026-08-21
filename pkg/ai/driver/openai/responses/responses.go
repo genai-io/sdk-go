@@ -14,7 +14,7 @@
 //
 // # Where things live
 //
-//	responses.go  construction, Generate and Models
+//	responses.go  construction, Stream and Models
 //	request.go    an ai.Request translated into Responses params
 //	errors.go     this protocol's failures, including the ones that arrive
 //	              inside a 200
@@ -79,8 +79,8 @@ func New(cfg ai.Config) (ai.Driver, error) {
 // Name identifies the driver.
 func (d *Driver) Name() string { return Name }
 
-// Generate runs one Responses call.
-func (d *Driver) Generate(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+// Stream runs one Responses call.
+func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		params, err := d.buildParams(req)
 		if err != nil {

@@ -10,7 +10,7 @@
 //
 // # Where things live
 //
-//	chat.go     construction, Generate and Models
+//	chat.go     construction, Stream and Models
 //	request.go  an ai.Request translated into Chat params
 //
 // Failures are classified by driver/internal/openaierr, shared with the
@@ -83,8 +83,8 @@ func New(cfg ai.Config) (ai.Driver, error) {
 // Name identifies the driver.
 func (d *Driver) Name() string { return Name }
 
-// Generate runs one Chat Completions call.
-func (d *Driver) Generate(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+// Stream runs one Chat Completions call.
+func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		if err := ai.RejectNative(req, Name); err != nil {
 			yield(ai.Delta{}, err)

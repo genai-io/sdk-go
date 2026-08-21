@@ -114,7 +114,7 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 			return
 		}
 
-		for delta, err := range c.driver.Generate(ctx, req) {
+		for delta, err := range c.driver.Stream(ctx, req) {
 			if err != nil {
 				// One yield carries both: the error fires the caller's error
 				// branch, and the event carries what was produced before it.
@@ -221,7 +221,7 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 
 // Handler runs one model call: the seam every middleware wraps.
 //
-// It is the same shape as Driver.Generate, so a driver is already a Handler
+// It is the same shape as Driver.Stream, so a driver is already a Handler
 // and a middleware chain collapses back to one.
 type Handler func(ctx context.Context, req *Request) iter.Seq2[Delta, error]
 
@@ -252,14 +252,14 @@ type Middleware func(Handler) Handler
 // — instead of hiding it in a client setting, and it means a decorated driver
 // can be handed anywhere an undecorated one can.
 func Wrap(d Driver, mw ...Middleware) Driver {
-	h := Handler(d.Generate)
+	h := Handler(d.Stream)
 	for i := len(mw) - 1; i >= 0; i-- {
 		h = mw[i](h)
 	}
 	return wrapped{Driver: d, handler: h}
 }
 
-// wrapped forwards the optional driver capabilities as well as Generate: a
+// wrapped forwards the optional driver capabilities as well as Stream: a
 // decorated driver that silently stopped being a ModelLister would change what
 // the client can do depending on whether middleware happened to be attached.
 type wrapped struct {
@@ -267,7 +267,7 @@ type wrapped struct {
 	handler Handler
 }
 
-func (w wrapped) Generate(ctx context.Context, req *Request) iter.Seq2[Delta, error] {
+func (w wrapped) Stream(ctx context.Context, req *Request) iter.Seq2[Delta, error] {
 	return w.handler(ctx, req)
 }
 

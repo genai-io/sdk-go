@@ -20,7 +20,7 @@
 //
 // # Where things live
 //
-//	google.go     construction, Generate, Models and CountTokens
+//	google.go     construction, Stream, Models and CountTokens
 //	request.go    an ai.Request translated into a generate call
 //	wire.go       the protocol's own types, transcribed from the API definition
 //	transport.go  URLs, headers and the server-sent-event stream
@@ -94,8 +94,8 @@ func New(cfg ai.Config) (ai.Driver, error) {
 // Name identifies the driver.
 func (d *Driver) Name() string { return Name }
 
-// Generate runs one streamGenerateContent call.
-func (d *Driver) Generate(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+// Stream runs one streamGenerateContent call.
+func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		body, err := d.request(req)
 		if err != nil {

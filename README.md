@@ -375,7 +375,7 @@ The driver interface is two methods:
 ```go
 type Driver interface {
 	Name() string
-	Generate(context.Context, *ai.Request) iter.Seq2[ai.Delta, error]
+	Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error]
 }
 ```
 
@@ -407,7 +407,7 @@ type scripted struct{ deltas []ai.Delta }
 
 func (scripted) Name() string { return "scripted" }
 
-func (s scripted) Generate(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
+func (s scripted) Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		for _, d := range s.deltas {
 			if !yield(d, nil) {

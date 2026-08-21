@@ -295,7 +295,7 @@ func countTokenTools(tools []sdk.ToolUnionParam) []sdk.MessageCountTokensToolUni
 
 // Models lists the models the endpoint serves. Anthropic's listing carries IDs
 // and display names only — no limits — so callers wanting context windows
-// should merge catalog data over the result (see endpoint.Endpoint, which
+// should merge catalog data over the result (see provider.Provider, which
 // does exactly that around a refresh).
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	pager := d.client.Models.ListAutoPaging(ctx, sdk.ModelListParams{})

@@ -13,7 +13,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
+	"github.com/genai-io/sdk-go/pkg/ai/provider"
 )
 
 // The path an application actually walks to reach a vendor: an environment
@@ -513,7 +513,7 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 // fresh — so this is what proves it stayed redundant. A caller that appends to
 // a returned reasoning ladder must not be editing what the next caller reads.
 func TestReturnedModelsDoNotAliasWhatTheyCameFrom(t *testing.T) {
-	ep := endpoint.New(endpoint.Config{
+	ep := provider.New(provider.Config{
 		ID:  "acme",
 		API: ai.APIOpenAIChat,
 		Models: []ai.Model{{

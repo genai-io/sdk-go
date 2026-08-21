@@ -21,7 +21,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
-	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
+	"github.com/genai-io/sdk-go/pkg/ai/provider"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/openai/chat"
 )
@@ -43,7 +43,7 @@ func run(modelID, question string) error {
 
 	// An Endpoint is the right shape for a local server: what it serves changes
 	// as you pull and remove models, so ask it rather than trusting a table.
-	p, err := auth.Endpoint("ollama")
+	p, err := auth.Provider("ollama")
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func run(modelID, question string) error {
 	return nil
 }
 
-func show(p *endpoint.Endpoint) {
+func show(p *provider.Provider) {
 	models := p.Models()
 	fmt.Printf("\033[2m%d model(s) pulled locally:", len(models))
 	for i, m := range models {

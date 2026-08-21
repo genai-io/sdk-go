@@ -1,4 +1,4 @@
-package endpoint
+package provider
 
 import (
 	"context"
@@ -12,59 +12,59 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Endpoint is a configured endpoint: the models it serves, the credential to
+// Provider is a configured provider: the models it serves, the credential to
 // reach it with, and the protocol that talks to it.
 //
 // Reading its model list is synchronous and cannot fail — it returns what is
 // known now, which before the first Refresh is the static baseline it was
 // built with. Fetching is a separate, explicit verb. That split is what lets a
 // model picker render immediately and refresh behind the user, instead of
-// blocking on a round trip that a dead endpoint can hang.
+// blocking on a round trip that a dead provider can hang.
 //
-// A Endpoint is safe for concurrent use.
-type Endpoint struct {
+// An Provider is safe for concurrent use.
+type Provider struct {
 	cfg Config
 
 	mu      sync.RWMutex
 	overlay []ai.Model
 }
 
-// Config describes one endpoint.
+// Config describes one provider.
 type Config struct {
-	// ID is the short key this endpoint is known by, e.g. "deepseek".
+	// ID is the short key this provider is known by, e.g. "deepseek".
 	ID string
 	// Name is how it should be shown. Defaults to ID.
 	Name string
 
 	// BaseURL, APIKey, HTTPClient and Headers are applied to every model this
-	// endpoint opens. A model's own BaseURL and Headers layer underneath.
+	// provider opens. A model's own BaseURL and Headers layer underneath.
 	BaseURL    string
 	APIKey     string
 	HTTPClient *http.Client
 	Headers    map[string]string
 
-	// Native is passed through to every Config this endpoint builds — see
+	// Native is passed through to every Config this provider builds — see
 	// Config.Native.
 	Native any
 
 	// Models is the static baseline: what is known without asking the
-	// endpoint. It may be empty for an endpoint that only has a live listing.
+	// provider. It may be empty for an provider that only has a live listing.
 	Models []ai.Model
 
-	// API is the protocol this endpoint speaks. It is only needed when Models
+	// API is the protocol this provider speaks. It is only needed when Models
 	// is empty, so that Refresh knows which driver to ask; otherwise it is
 	// taken from the baseline.
 	API ai.API
 
 	// Fetch retrieves the live model list. Nil means the default: open a
-	// driver for this endpoint's protocol and call its Models. Set it for an
-	// endpoint whose listing lives somewhere other than the protocol's own
+	// driver for this provider's protocol and call its Models. Set it for an
+	// provider whose listing lives somewhere other than the protocol's own
 	// models call.
-	Fetch func(ctx context.Context, e *Endpoint) ([]ai.Model, error)
+	Fetch func(ctx context.Context, e *Provider) ([]ai.Model, error)
 }
 
-// New builds an endpoint from its parts.
-func New(cfg Config) *Endpoint {
+// New builds an provider from its parts.
+func New(cfg Config) *Provider {
 	cfg.Headers = maps.Clone(cfg.Headers)
 	cfg.Models = cloneAll(cfg.Models)
 	if cfg.Name == "" {
@@ -73,37 +73,37 @@ func New(cfg Config) *Endpoint {
 	if cfg.API == "" && len(cfg.Models) > 0 {
 		cfg.API = cfg.Models[0].API
 	}
-	return &Endpoint{cfg: cfg}
+	return &Provider{cfg: cfg}
 }
 
-// ID returns the endpoint's key.
-func (e *Endpoint) ID() string { return e.cfg.ID }
+// ID returns the provider's key.
+func (e *Provider) ID() string { return e.cfg.ID }
 
-// Name returns the endpoint's display name.
-func (e *Endpoint) Name() string { return e.cfg.Name }
+// Name returns the provider's display name.
+func (e *Provider) Name() string { return e.cfg.Name }
 
-// API returns the protocol this endpoint speaks.
-func (e *Endpoint) API() ai.API { return e.cfg.API }
+// API returns the protocol this provider speaks.
+func (e *Provider) API() ai.API { return e.cfg.API }
 
 // Models returns what is known now: the static baseline with the last fetched
 // listing merged over it. It never blocks and never fails — before the first
 // successful Refresh it is the baseline alone.
 //
 // The merge is field by field, not entry by entry. A listing carries what the
-// endpoint publishes, which for most OpenAI-compatible vendors is an ID and
+// provider publishes, which for most OpenAI-compatible vendors is an ID and
 // nothing else; replacing a baseline entry wholesale would discard its
 // pricing, its reasoning ladder and its protocol quirks, and a model stripped
-// of its quirks stops working. So the endpoint wins on every field it stated,
+// of its quirks stops working. So the provider wins on every field it stated,
 // and the baseline fills the rest.
-func (e *Endpoint) Models() []ai.Model {
+func (e *Provider) Models() []ai.Model {
 	e.mu.RLock()
 	overlay := cloneAll(e.overlay)
 	e.mu.RUnlock()
 
-	// Decorate the baseline as well as the listing. Every model an endpoint
-	// hands out carries that endpoint's identity and protocol, whether it came
+	// Decorate the baseline as well as the listing. Every model an provider
+	// hands out carries that provider's identity and protocol, whether it came
 	// from the baseline, from a refresh, or from an ID nobody has listed —
-	// otherwise Open would work for a model the endpoint has never heard of
+	// otherwise Open would work for a model the provider has never heard of
 	// and fail for one sitting in its own table.
 	merged := make([]ai.Model, 0, len(e.cfg.Models))
 	for _, m := range e.cfg.Models {
@@ -124,10 +124,10 @@ func (e *Endpoint) Models() []ai.Model {
 }
 
 // Model looks one model up by ID. Unlike Models it also answers for an ID the
-// endpoint has never heard of, by decorating it with the endpoint's protocol
-// and endpoint — an unlisted model is nearly always one newer than the
+// provider has never heard of, by decorating it with the provider's protocol
+// and provider — an unlisted model is nearly always one newer than the
 // catalog, not one that does not exist.
-func (e *Endpoint) Model(id string) (ai.Model, bool) {
+func (e *Provider) Model(id string) (ai.Model, bool) {
 	for _, m := range e.Models() {
 		if strings.EqualFold(m.ID, id) {
 			return m, true
@@ -137,11 +137,11 @@ func (e *Endpoint) Model(id string) (ai.Model, bool) {
 }
 
 // Refresh fetches the live model list and merges it in. A failure leaves the
-// previous list untouched, so an endpoint that went down keeps serving what it
+// previous list untouched, so an provider that went down keeps serving what it
 // last knew.
 //
-// A endpoint with no way to list — no Fetch and no protocol — is a no-op.
-func (e *Endpoint) Refresh(ctx context.Context) error {
+// An provider with no way to list — no Fetch and no protocol — is a no-op.
+func (e *Provider) Refresh(ctx context.Context) error {
 	fetch := e.cfg.Fetch
 	if fetch == nil {
 		if e.cfg.API == "" {
@@ -159,14 +159,14 @@ func (e *Endpoint) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// defaultFetch opens a client for the endpoint's protocol and asks it.
+// defaultFetch opens a client for the provider's protocol and asks it.
 //
 // The driver needs a model to be constructed with, and listing does not depend
-// on which one, so a placeholder stands in when the endpoint has no baseline
+// on which one, so a placeholder stands in when the provider has no baseline
 // to borrow from. Client.Models is what answers, rather than the driver
-// directly, so a protocol with no listing endpoint reports it the same way
+// directly, so a protocol with no listing provider reports it the same way
 // here as it does to any other caller.
-func defaultFetch(ctx context.Context, e *Endpoint) ([]ai.Model, error) {
+func defaultFetch(ctx context.Context, e *Provider) ([]ai.Model, error) {
 	probe := ai.Model{ID: "-", API: e.cfg.API}
 	if len(e.cfg.Models) > 0 {
 		probe = e.cfg.Models[0]
@@ -178,8 +178,8 @@ func defaultFetch(ctx context.Context, e *Endpoint) ([]ai.Model, error) {
 	return client.Models(ctx)
 }
 
-// ConfigFor builds the ai.Config for opening one of this endpoint's models.
-func (e *Endpoint) ConfigFor(m ai.Model) ai.Config {
+// ConfigFor builds the ai.Config for opening one of this provider's models.
+func (e *Provider) ConfigFor(m ai.Model) ai.Config {
 	return ai.Config{
 		Model:      m.Clone(),
 		APIKey:     e.cfg.APIKey,
@@ -190,24 +190,24 @@ func (e *Endpoint) ConfigFor(m ai.Model) ai.Config {
 	}
 }
 
-// Open returns a client for one of this endpoint's models. An ID the endpoint
-// does not list still opens, carrying the endpoint's protocol and endpoint.
-func (e *Endpoint) Open(modelID string, opts ...ai.Option) (*ai.Client, error) {
+// Open returns a client for one of this provider's models. An ID the provider
+// does not list still opens, carrying the provider's protocol and provider.
+func (e *Provider) Open(modelID string, opts ...ai.Option) (*ai.Client, error) {
 	// The bool is discarded on purpose: an unlisted ID is fine — Model
-	// decorates it with this endpoint's protocol. What is not fine is having
+	// decorates it with this provider's protocol. What is not fine is having
 	// no protocol to decorate it with.
 	m, _ := e.Model(modelID)
 	if m.API == "" {
 		return nil, &ai.Error{Kind: ai.KindInvalidRequest, Message: fmt.Sprintf(
-			"ai: endpoint %q states no protocol, so it cannot open model %q", e.cfg.ID, modelID)}
+			"ai: provider %q states no protocol, so it cannot open model %q", e.cfg.ID, modelID)}
 	}
 	return ai.Open(e.ConfigFor(m), opts...)
 }
 
-// decorate stamps a model with the endpoint's identity and protocol. It only
+// decorate stamps a model with the provider's identity and protocol. It only
 // fills an API the model does not state, so a set of mixed-protocol models
 // keeps its own.
-func (e *Endpoint) decorate(m ai.Model) ai.Model {
+func (e *Provider) decorate(m ai.Model) ai.Model {
 	m.Vendor = e.cfg.ID
 	if m.API == "" {
 		m.API = e.cfg.API
@@ -218,13 +218,13 @@ func (e *Endpoint) decorate(m ai.Model) ai.Model {
 // MergeListing layers a live model listing over a known baseline entry.
 //
 // The listing wins on every field it stated; everything it left zero comes
-// from the baseline. That asymmetry is the whole rule: an endpoint is
+// from the baseline. That asymmetry is the whole rule: an provider is
 // authoritative about which models exist and about any figure it reported,
 // while a baseline knows the pricing, the reasoning ladder and the protocol
 // quirks that no listing publishes — and a model stripped of its quirks stops
 // working.
 //
-// Endpoint uses it to merge a refresh over its static models. It is exported
+// Provider uses it to merge a refresh over its static models. It is exported
 // because a caller reconciling a listing against the catalog itself needs the
 // same rule, and two copies of it would let one path keep a field the other
 // dropped.
@@ -248,6 +248,17 @@ func MergeListing(base, live ai.Model) ai.Model {
 	}
 	if live.Pricing.Known() {
 		out.Pricing = live.Pricing
+	}
+	return out
+}
+
+// cloneAll snapshots a model list wherever one crosses in or out of an
+// Provider, so a caller may keep mutating its own builders and a refresh
+// running in another goroutine cannot rewrite a list someone is reading.
+func cloneAll(models []ai.Model) []ai.Model {
+	out := make([]ai.Model, len(models))
+	for i, m := range models {
+		out[i] = m.Clone()
 	}
 	return out
 }

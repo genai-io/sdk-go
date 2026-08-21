@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
+	"github.com/genai-io/sdk-go/pkg/ai/provider"
 )
 
 // A vendor is a row, not a package.
@@ -220,14 +220,14 @@ func (v Vendor) ResolveBaseURL(override string) string {
 	return override
 }
 
-// Endpoint builds a live endpoint for this vendor, seeded with its catalog
+// Provider builds a live provider for this vendor, seeded with its catalog
 // models as the static baseline.
 //
 // The caller supplies the credential and any transport settings; the vendor
 // supplies its identity, protocol, endpoint and models. Fields the caller
-// leaves unset fall back to the vendor's — so passing a zero endpoint.Config
+// leaves unset fall back to the vendor's — so passing a zero provider.Config
 // yields an endpoint that can already list and open models, just without a key.
-func (v Vendor) Endpoint(cfg endpoint.Config) *endpoint.Endpoint {
+func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	cfg.ID = v.ID
 	if cfg.Name == "" {
 		cfg.Name = v.DisplayName
@@ -242,5 +242,5 @@ func (v Vendor) Endpoint(cfg endpoint.Config) *endpoint.Endpoint {
 	if cfg.Headers == nil {
 		cfg.Headers = v.Headers
 	}
-	return endpoint.New(cfg)
+	return provider.New(cfg)
 }

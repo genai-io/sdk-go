@@ -47,7 +47,7 @@
 // it safe in a server holding several tenants' keys. Package auth is the
 // opt-in that does, and a command-line tool wants exactly that.
 //
-// Holding an ai/endpoint.Endpoint — a configured host with a live model list —
+// Holding an ai/provider.Provider — a configured host with a live model list —
 // its Open method is the same thing scoped to that host:
 //
 //	client, err := ep.Open("llama4")

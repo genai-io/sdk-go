@@ -341,11 +341,11 @@ Three layers, named for what tells them apart:
 | Type | What it is |
 | --- | --- |
 | `catalog.Vendor` | Data. A row you can read without a network. |
-| `endpoint.Endpoint` | That row configured and credentialed, with a model list you can refresh. |
+| `provider.Provider` | That row configured and credentialed, with a model list you can refresh. |
 | `ai.Client` | One model on it. |
 
 ```go
-ep, err := auth.Endpoint("ollama")
+ep, err := auth.Provider("ollama")
 models := ep.Models()      // synchronous, never blocks, never fails
 err = ep.Refresh(ctx)      // the only call that reaches the network
 client, err := ep.Open("llama4")

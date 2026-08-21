@@ -3,15 +3,15 @@ package auth
 import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
+	"github.com/genai-io/sdk-go/pkg/ai/provider"
 )
 
-// Endpoint builds a live endpoint for a catalog vendor, with its credential
+// Provider builds a live endpoint for a catalog vendor, with its credential
 // and endpoint resolved from the environment.
 //
 // It fails when the vendor needs a key and none of its variables are set,
 // rather than handing back an endpoint that will 401 on first use.
-func Endpoint(vendorID string) (*endpoint.Endpoint, error) {
+func Provider(vendorID string) (*provider.Provider, error) {
 	v, ok := catalog.Find(vendorID)
 	if !ok {
 		return nil, &UnknownVendorError{Vendor: vendorID}
@@ -21,7 +21,7 @@ func Endpoint(vendorID string) (*endpoint.Endpoint, error) {
 		if err != nil {
 			return nil, err
 		}
-		return v.Endpoint(endpoint.Config{
+		return v.Provider(provider.Config{
 			BaseURL:    cfg.BaseURL,
 			HTTPClient: cfg.HTTPClient,
 		}), nil
@@ -31,23 +31,23 @@ func Endpoint(vendorID string) (*endpoint.Endpoint, error) {
 	if key == "" && len(v.KeyEnv) > 0 {
 		return nil, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
 	}
-	return v.Endpoint(endpoint.Config{
+	return v.Provider(provider.Config{
 		APIKey:  key,
 		BaseURL: BaseURL(v),
 		Native:  Deployment(v),
 	}), nil
 }
 
-// Endpoints builds a live endpoint for every vendor with a usable credential, in
+// Providers builds a live endpoint for every vendor with a usable credential, in
 // catalog display order.
 //
 // Vendors with no credential are skipped rather than reported: this is the
 // "what can I actually use right now" question, and a missing key is the
 // normal answer for most of the catalog.
-func Endpoints() *endpoint.Set {
-	out := endpoint.NewSet()
+func Providers() *provider.Set {
+	out := provider.NewSet()
 	for _, v := range Available() {
-		if e, err := Endpoint(v.ID); err == nil {
+		if e, err := Provider(v.ID); err == nil {
 			out.Set(e)
 		}
 	}

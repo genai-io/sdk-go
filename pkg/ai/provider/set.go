@@ -13,7 +13,7 @@ import (
 //
 // It is a plain collection: reads are synchronous, Refresh fans out and
 // reports per-provider failures rather than returning one error, because a
-// single dead provider must not empty the list.
+// single dead endpoint must not empty the list.
 type Set struct {
 	mu sync.RWMutex
 	m  map[string]*Provider
@@ -28,17 +28,17 @@ func NewSet(list ...*Provider) *Set {
 	return s
 }
 
-// Set adds or replaces an provider by ID.
-func (s *Set) Set(e *Provider) {
+// Set adds or replaces a provider by ID.
+func (s *Set) Set(pr *Provider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.m == nil {
 		s.m = make(map[string]*Provider)
 	}
-	s.m[e.ID()] = e
+	s.m[pr.ID()] = pr
 }
 
-// Delete removes an provider.
+// Delete removes a provider.
 func (s *Set) Delete(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,7 +92,7 @@ func (s *Set) Model(ref string) (ai.Model, bool) {
 // RefreshResult reports what one fan-out refresh managed.
 type RefreshResult struct {
 	// Errors holds the failure for each provider that could not be refreshed.
-	// An provider absent from the map succeeded.
+	// A provider absent from the map succeeded.
 	Errors map[string]error
 }
 

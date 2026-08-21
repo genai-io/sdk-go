@@ -4,10 +4,11 @@ import "github.com/genai-io/sdk-go/pkg/llm"
 
 type agentConfig struct {
 	id        string
-	llm       llm.LLM
+	model     Model
 	system    string
 	tools     *ToolSet
 	maxSteps  int
+	options   *llm.Options
 	inboxBuf  int
 	outboxBuf int
 }
@@ -23,8 +24,8 @@ func defaultConfig() agentConfig {
 }
 
 func (c *agentConfig) validate() error {
-	if c.llm == nil {
-		return errMissingField("llm")
+	if c.model == nil {
+		return errMissingField("model")
 	}
 	if c.system == "" {
 		return errMissingField("system")
@@ -35,9 +36,10 @@ func (c *agentConfig) validate() error {
 // AgentOption is a functional option for configuring an Agent.
 type AgentOption func(*agentConfig)
 
-// WithLLM sets the LLM backend (required).
-func WithLLM(l llm.LLM) AgentOption {
-	return func(c *agentConfig) { c.llm = l }
+// WithModel sets the inference backend (required). An *llm.Client satisfies
+// Model.
+func WithModel(m Model) AgentOption {
+	return func(c *agentConfig) { c.model = m }
 }
 
 // WithSystem sets the system prompt (required).
@@ -58,6 +60,12 @@ func WithID(id string) AgentOption {
 // WithMaxSteps sets the max LLM inference steps per turn (0 = unlimited).
 func WithMaxSteps(n int) AgentOption {
 	return func(c *agentConfig) { c.maxSteps = n }
+}
+
+// WithOptions sets the inference options used for every turn — reasoning
+// effort, output cap, temperature. Nil leaves the model's own defaults alone.
+func WithOptions(o *llm.Options) AgentOption {
+	return func(c *agentConfig) { c.options = o }
 }
 
 type fieldError struct{ field string }

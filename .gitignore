@@ -20,5 +20,10 @@ vendor/
 # Coverage
 coverage.out
 
-# Claude Code
+# Coding agents and their local indexes
 .claude/
+.codegraph/
+.cursor/
+.gemini/
+.mcp.json
+GEMINI.md

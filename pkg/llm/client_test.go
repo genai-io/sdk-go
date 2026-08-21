@@ -1,636 +1,421 @@
-package llm
+package llm_test
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
 	"testing"
+
+	"github.com/genai-io/sdk-go/pkg/llm"
+	"github.com/genai-io/sdk-go/pkg/llm/llmtest"
 )
 
-// mockProvider implements Provider for testing.
-type mockProvider struct {
-	mu         sync.Mutex
-	name       string
-	models     []ModelInfo
-	streamFunc func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk
-}
+func TestClientAggregatesDeltas(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{
+		{Thinking: "let me "},
+		{Thinking: "think"},
+		{ThinkingSignature: "sig-a"},
+		{ThinkingSignature: "sig-b"},
+		{Text: "Hello, "},
+		{Text: "world"},
+		{Usage: &llm.Usage{Input: 12}},
+		{Usage: &llm.Usage{Output: 3, CacheRead: 100, Reasoning: 2}},
+		{StopReason: llm.StopEndTurn},
+	}}}}
 
-func (m *mockProvider) Name() string { return m.name }
-
-func (m *mockProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.models, nil
-}
-
-func (m *mockProvider) Stream(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-	if m.streamFunc != nil {
-		return m.streamFunc(ctx, opts)
-	}
-	return nil
-}
-
-func newMockProvider(name string) *mockProvider {
-	return &mockProvider{name: name}
-}
-
-func makeTextChunk(text string) StreamChunk {
-	return StreamChunk{Type: ChunkTypeText, Text: text}
-}
-
-func makeDoneChunk(content string) StreamChunk {
-	return StreamChunk{
-		Type: ChunkTypeDone,
-		Response: &CompletionResponse{
-			Content:    content,
-			StopReason: "end_turn",
-			Usage: Usage{
-				InputTokens:  100,
-				OutputTokens: 50,
-			},
-		},
-	}
-}
-
-func makeDoneChunkWithTools(content string, calls []ToolCall) StreamChunk {
-	return StreamChunk{
-		Type: ChunkTypeDone,
-		Response: &CompletionResponse{
-			Content:    content,
-			ToolCalls:  calls,
-			StopReason: "tool_use",
-			Usage: Usage{
-				InputTokens:  200,
-				OutputTokens: 100,
-			},
-		},
-	}
-}
-
-func makeErrorChunk(err error) StreamChunk {
-	return StreamChunk{Type: ChunkTypeError, Error: err}
-}
-
-func makeThinkingChunk(text string) StreamChunk {
-	return StreamChunk{Type: ChunkTypeThinking, Text: text}
-}
-
-// ── Client Tests ──
-
-func TestClient_Infer(t *testing.T) {
-	p := newMockProvider("test-provider")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 4)
-		go func() {
-			defer close(ch)
-			ch <- makeTextChunk("Hello ")
-			ch <- makeTextChunk("World")
-			ch <- makeDoneChunk("Hello World")
-		}()
-		return ch
-	}
-
-	c := NewClient(p, "test-model", 0)
-	ctx := context.Background()
-	ch, err := c.Infer(ctx, InferRequest{
-		System:   "You are helpful.",
-		Messages: []Message{UserMessage("hi", nil)},
-	})
+	resp, err := llmtest.Client(drv).Complete(context.Background(), &llm.Prompt{}, nil)
 	if err != nil {
-		t.Fatalf("Infer() error = %v", err)
+		t.Fatalf("Complete: %v", err)
 	}
-
-	var text string
-	var done bool
-	for chunk := range ch {
-		if chunk.Err != nil {
-			t.Fatalf("unexpected error chunk: %v", chunk.Err)
-		}
-		if chunk.Done {
-			done = true
-			if chunk.Response == nil {
-				t.Fatal("done chunk has nil Response")
-			}
-			if chunk.Response.Content != "Hello World" {
-				t.Errorf("expected 'Hello World', got %q", chunk.Response.Content)
-			}
-			if chunk.Response.TokensIn != 100 || chunk.Response.TokensOut != 50 {
-				t.Errorf("expected tokens (100, 50), got (%d, %d)",
-					chunk.Response.TokensIn, chunk.Response.TokensOut)
-			}
-		}
-		text += chunk.Text
+	if resp.Content != "Hello, world" {
+		t.Errorf("Content = %q, want %q", resp.Content, "Hello, world")
 	}
-	if !done {
-		t.Fatal("stream closed without done chunk")
+	if resp.Thinking != "let me think" {
+		t.Errorf("Thinking = %q", resp.Thinking)
 	}
-	if text != "Hello World" {
-		t.Errorf("expected text 'Hello World', got %q", text)
+	// Signature fragments append; usage fields merge across deltas rather than
+	// replacing wholesale.
+	if resp.ThinkingSignature != "sig-asig-b" {
+		t.Errorf("ThinkingSignature = %q", resp.ThinkingSignature)
+	}
+	if want := (llm.Usage{Input: 12, Output: 3, CacheRead: 100, Reasoning: 2}); resp.Usage != want {
+		t.Errorf("Usage = %+v, want %+v", resp.Usage, want)
+	}
+	if resp.Usage.TotalInput() != 112 {
+		t.Errorf("TotalInput = %d, want 112", resp.Usage.TotalInput())
 	}
 }
 
-func TestClient_Infer_Error(t *testing.T) {
-	testErr := errors.New("provider error")
-	p := newMockProvider("test-provider")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 2)
-		go func() {
-			defer close(ch)
-			ch <- makeTextChunk("partial ")
-			ch <- makeErrorChunk(testErr)
-		}()
-		return ch
-	}
+func TestClientStreamEventOrder(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{
+		{Thinking: "hmm"},
+		{Text: "a"},
+		{ToolCall: &llm.ToolCall{ID: "1", Name: "ls", Input: "{}"}},
+	}}}}
 
-	c := NewClient(p, "test-model", 0)
-	ctx := context.Background()
-	ch, _ := c.Infer(ctx, InferRequest{
-		Messages: []Message{UserMessage("hi", nil)},
-	})
-
-	var gotErr error
-	for chunk := range ch {
-		if chunk.Err != nil {
-			gotErr = chunk.Err
+	var types []llm.EventType
+	var done *llm.Response
+	for event, err := range llmtest.Client(drv).Stream(context.Background(), &llm.Prompt{}, nil) {
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		types = append(types, event.Type)
+		if event.Type == llm.EventDone {
+			done = event.Response
 		}
 	}
-	if gotErr == nil {
-		t.Fatal("expected error in stream, got nil")
+
+	want := []llm.EventType{
+		llm.EventThinkingStart, llm.EventThinkingDelta, llm.EventThinkingEnd,
+		llm.EventTextStart, llm.EventTextDelta, llm.EventTextEnd,
+		llm.EventToolCall, llm.EventDone,
 	}
-	if !errors.Is(gotErr, testErr) {
-		t.Errorf("expected %v, got %v", testErr, gotErr)
+	if len(types) != len(want) {
+		t.Fatalf("events = %v, want %v", types, want)
+	}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Fatalf("events = %v, want %v", types, want)
+		}
+	}
+	// No driver reported a stop reason, but pending tool calls say what
+	// happened.
+	if done.StopReason != llm.StopToolUse {
+		t.Errorf("StopReason = %q, want %q", done.StopReason, llm.StopToolUse)
+	}
+	if len(done.ToolCalls) != 1 || done.ToolCalls[0].Name != "ls" {
+		t.Errorf("ToolCalls = %+v", done.ToolCalls)
 	}
 }
 
-func TestClient_Complete(t *testing.T) {
-	p := newMockProvider("test-provider")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 2)
-		go func() {
-			defer close(ch)
-			ch <- makeTextChunk("response")
-			ch <- makeDoneChunk("response")
-		}()
-		return ch
-	}
-
-	c := NewClient(p, "test-model", 0)
-	ctx := context.Background()
-	resp, err := c.Complete(ctx, InferRequest{
-		System:   "system",
-		Messages: []Message{UserMessage("hello", nil)},
-	})
+func TestClientInfersEndTurn(t *testing.T) {
+	resp, err := llmtest.Client(&llmtest.Driver{Turns: []llmtest.Turn{{
+		Deltas: []llm.Delta{{Text: "done"}},
+	}}}).Complete(context.Background(), &llm.Prompt{}, nil)
 	if err != nil {
-		t.Fatalf("Complete() error = %v", err)
+		t.Fatalf("Complete: %v", err)
 	}
-	if resp.Content != "response" {
-		t.Errorf("expected 'response', got %q", resp.Content)
-	}
-	if resp.StopReason != "end_turn" {
-		t.Errorf("expected 'end_turn', got %q", resp.StopReason)
+	if resp.StopReason != llm.StopEndTurn {
+		t.Errorf("StopReason = %q, want %q", resp.StopReason, llm.StopEndTurn)
 	}
 }
 
-func TestClient_Complete_Error(t *testing.T) {
-	testErr := errors.New("boom")
-	p := newMockProvider("test-provider")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			ch <- makeErrorChunk(testErr)
-		}()
-		return ch
-	}
-
-	c := NewClient(p, "test-model", 0)
-	_, err := c.Complete(context.Background(), InferRequest{
-		Messages: []Message{UserMessage("hi", nil)},
-	})
-	if err == nil {
-		t.Fatal("expected error from Complete(), got nil")
+func TestClientPropagatesError(t *testing.T) {
+	want := errors.New("boom")
+	_, err := llmtest.Client(llmtest.Fail(want)).Complete(context.Background(), &llm.Prompt{}, nil)
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
 	}
 }
 
-func TestClient_Complete_NoDone(t *testing.T) {
-	p := newMockProvider("test-provider")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 2)
-		go func() {
-			defer close(ch)
-			ch <- makeTextChunk("text")
-			ch <- makeTextChunk("more")
-		}()
-		return ch
+func TestNilOptionsMeansDefaults(t *testing.T) {
+	drv := llmtest.Text("ok")
+	client := llm.New(drv, llmtest.Model)
+	if _, err := client.Complete(context.Background(), &llm.Prompt{}, nil); err != nil {
+		t.Fatalf("Complete: %v", err)
 	}
-
-	c := NewClient(p, "test-model", 0)
-	_, err := c.Complete(context.Background(), InferRequest{
-		Messages: []Message{UserMessage("hi", nil)},
-	})
-	if err == nil {
-		t.Fatal("expected error from Complete() without done chunk")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected DeadlineExceeded, got %v", err)
+	if got := drv.Last().Options.MaxTokens; got != llmtest.Model.MaxOutput {
+		t.Errorf("MaxTokens = %d, want the model's %d", got, llmtest.Model.MaxOutput)
 	}
 }
 
-func TestClient_Name(t *testing.T) {
-	t.Run("with provider", func(t *testing.T) {
-		p := newMockProvider("anthropic")
-		c := NewClient(p, "claude", 0)
-		if c.Name() != "anthropic" {
-			t.Errorf("expected 'anthropic', got %q", c.Name())
-		}
-	})
-	t.Run("nil provider", func(t *testing.T) {
-		c := &Client{}
-		if c.Name() != "" {
-			t.Errorf("expected empty name, got %q", c.Name())
-		}
-	})
-}
+func TestClientDefaultsDoNotMutateCallerOptions(t *testing.T) {
+	drv := llmtest.Text("ok")
+	client := llm.New(drv, llmtest.Model, llm.WithMaxTokens(999), llm.WithTemperature(0.5))
 
-func TestClient_ModelID(t *testing.T) {
-	c := NewClient(nil, "claude-sonnet-4-6", 0)
-	if c.ModelID() != "claude-sonnet-4-6" {
-		t.Errorf("expected 'claude-sonnet-4-6', got %q", c.ModelID())
+	opts := &llm.Options{}
+	if _, err := client.Complete(context.Background(), &llm.Prompt{Messages: []llm.Message{llm.User("hi")}}, opts); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	if opts.MaxTokens != 0 || opts.Temperature != 0 {
+		t.Errorf("the caller's Options were mutated: %+v", opts)
+	}
+	sent := drv.Last().Options
+	if sent.MaxTokens != 999 || sent.Temperature != 0.5 {
+		t.Errorf("defaults not applied: MaxTokens=%d Temperature=%v", sent.MaxTokens, sent.Temperature)
 	}
 }
 
-func TestClient_Provider(t *testing.T) {
-	p := newMockProvider("openai")
-	c := NewClient(p, "gpt-5", 0)
-	if c.Provider() != p {
-		t.Error("Provider() returned wrong provider")
+func TestPerRequestOptionsBeatClientDefaults(t *testing.T) {
+	drv := llmtest.Text("ok")
+	client := llm.New(drv, llmtest.Model, llm.WithMaxTokens(999))
+
+	if _, err := client.Complete(context.Background(), &llm.Prompt{}, &llm.Options{MaxTokens: 42}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if got := drv.Last().Options.MaxTokens; got != 42 {
+		t.Errorf("MaxTokens = %d, want the per-request 42", got)
 	}
 }
 
-func TestClient_InputLimit(t *testing.T) {
-	t.Run("from models", func(t *testing.T) {
-		p := newMockProvider("test")
-		p.models = []ModelInfo{
-			{ID: "test-model", InputTokenLimit: 200000, OutputTokenLimit: 8192},
-		}
-		c := NewClient(p, "test-model", 0)
-		if c.InputLimit() != 200000 {
-			t.Errorf("expected 200000, got %d", c.InputLimit())
-		}
-	})
-	t.Run("model not found", func(t *testing.T) {
-		p := newMockProvider("test")
-		p.models = []ModelInfo{{ID: "other", InputTokenLimit: 100}}
-		c := NewClient(p, "unknown", 0)
-		if c.InputLimit() != 0 {
-			t.Errorf("expected 0, got %d", c.InputLimit())
-		}
-	})
-}
+// The model's sampling parameters sit underneath the caller's, so a caller can
+// override one without restating the rest.
+func TestSamplingParamsLayer(t *testing.T) {
+	model := llmtest.Model
+	model.SamplingParams = map[string]any{"top_p": 0.9, "top_k": 40}
 
-func TestClient_ThinkingEffort(t *testing.T) {
-	c := NewClient(nil, "model", 0)
-	if c.ThinkingEffort() != "" {
-		t.Errorf("expected empty, got %q", c.ThinkingEffort())
+	drv := llmtest.Text("ok")
+	client := llm.New(drv, model)
+	if _, err := client.Complete(context.Background(), &llm.Prompt{},
+		&llm.Options{SamplingParams: map[string]any{"top_p": 0.5}}); err != nil {
+		t.Fatalf("Complete: %v", err)
 	}
-	c.SetThinkingEffort("high")
-	if c.ThinkingEffort() != "high" {
-		t.Errorf("expected 'high', got %q", c.ThinkingEffort())
+
+	sent := drv.Last().Options.SamplingParams
+	if sent["top_p"] != 0.5 {
+		t.Errorf("top_p = %v, want the caller's 0.5", sent["top_p"])
+	}
+	if sent["top_k"] != 40 {
+		t.Errorf("top_k = %v, want the model's 40", sent["top_k"])
+	}
+	if model.SamplingParams["top_p"] != 0.9 {
+		t.Error("the model's own map was mutated")
 	}
 }
 
-func TestClient_ResolveMaxTokens(t *testing.T) {
+func TestSplitPromptTokens(t *testing.T) {
 	tests := []struct {
-		name       string
-		maxTokens  int
-		outputCap  int
-		want       int
+		prompt, cached     int
+		wantFresh, wantHit int
 	}{
-		{"explicit", 4096, 8192, 4096},
-		{"from provider", 0, 8192, 8192},
-		{"default fallback", 0, 0, defaultMaxTokens},
+		{100, 40, 60, 40},
+		{100, 0, 100, 0},
+		{100, 100, 0, 100},
+		// Malformed wire data must not push fresh below zero.
+		{100, 500, 0, 100},
+		{100, -5, 100, 0},
+		{-1, 10, 0, 0},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := newMockProvider("test")
-			if tt.outputCap > 0 {
-				p.models = []ModelInfo{
-					{ID: "model", OutputTokenLimit: tt.outputCap},
-				}
-			}
-			got := resolveMaxTokens(tt.maxTokens, p, "model")
-			if got != tt.want {
-				t.Errorf("resolveMaxTokens() = %d, want %d", got, tt.want)
-			}
-		})
+	for _, tc := range tests {
+		fresh, cached := llm.SplitPromptTokens(tc.prompt, tc.cached)
+		if fresh != tc.wantFresh || cached != tc.wantHit {
+			t.Errorf("SplitPromptTokens(%d, %d) = (%d, %d), want (%d, %d)",
+				tc.prompt, tc.cached, fresh, cached, tc.wantFresh, tc.wantHit)
+		}
 	}
 }
 
-func TestClient_Infer_ContextCancelled(t *testing.T) {
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			select {
-			case ch <- makeTextChunk("slow response"):
-			case <-ctx.Done():
-				return
-			}
-		}()
-		return ch
+func TestResponseMessageCarriesReasoningForward(t *testing.T) {
+	resp := &llm.Response{
+		Content:           "answer",
+		Thinking:          "reasoning",
+		ThinkingSignature: "sig",
+		Reasoning:         []llm.ReasoningItem{{ID: "r1", EncryptedContent: "enc"}},
+		ToolCalls:         []llm.ToolCall{{ID: "1", Name: "ls"}},
 	}
+	msg := resp.Message()
+	if msg.Role != llm.RoleAssistant || msg.Text() != "answer" {
+		t.Fatalf("message = %+v", msg)
+	}
+	if msg.ThinkingSignature != "sig" || len(msg.Reasoning) != 1 || len(msg.ToolCalls) != 1 {
+		t.Errorf("reasoning state was dropped: %+v", msg)
+	}
+}
 
-	c := NewClient(p, "model", 0)
+func TestOpenWithoutDriverExplainsItself(t *testing.T) {
+	_, err := llm.Open(llm.Config{Model: llm.Model{ID: "x", API: "no-such-protocol"}})
+	var unreg *llm.UnregisteredAPIError
+	if !errors.As(err, &unreg) {
+		t.Fatalf("err = %v, want *UnregisteredAPIError", err)
+	}
+}
+
+// A turn that streamed text and burned tokens before failing must hand both
+// back. Returning only an error throws away the partial answer and the
+// accounting for the spend that already happened.
+func TestFailedTurnCarriesPartialContentAndUsage(t *testing.T) {
+	want := errors.New("connection reset")
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{
+		Deltas: []llm.Delta{
+			{Text: "here is the first ha"},
+			{Usage: &llm.Usage{Input: 4_000, Output: 12}},
+		},
+		Err: want,
+	}}}
+
+	resp, err := llmtest.Client(drv).Complete(context.Background(), &llm.Prompt{}, nil)
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
+	}
+	if resp == nil {
+		t.Fatal("no response returned alongside the error")
+	}
+	if resp.Content != "here is the first ha" {
+		t.Errorf("Content = %q, want the text that arrived before the failure", resp.Content)
+	}
+	if resp.Usage.Input != 4_000 || resp.Usage.Output != 12 {
+		t.Errorf("Usage = %+v, want the tokens already billed", resp.Usage)
+	}
+	if resp.StopReason != llm.StopError {
+		t.Errorf("StopReason = %q, want %q", resp.StopReason, llm.StopError)
+	}
+	if !errors.Is(resp.Err, want) {
+		t.Error("Response.Err does not carry the failure")
+	}
+	if !resp.Failed() {
+		t.Error("Failed() should be true")
+	}
+}
+
+// A cancelled turn is not a failure to investigate — it is what the caller
+// asked for, so it reports separately from an error.
+func TestCancelledTurnReportsAborted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+	cancel()
 
-	ch, err := c.Infer(ctx, InferRequest{
-		Messages: []Message{UserMessage("hi", nil)},
-	})
-	if err != nil {
-		t.Fatalf("Infer() returned error: %v", err)
-	}
-
-	// Drain channel
-	for range ch {
-	}
-}
-
-func TestClient_Infer_ThinkingChunks(t *testing.T) {
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 3)
-		go func() {
-			defer close(ch)
-			ch <- makeThinkingChunk("Let me think...")
-			ch <- makeTextChunk("Here's the answer.")
-			ch <- makeDoneChunk("Here's the answer.")
-		}()
-		return ch
-	}
-
-	c := NewClient(p, "model", 0)
-	ch, _ := c.Infer(context.Background(), InferRequest{
-		Messages: []Message{UserMessage("q", nil)},
-	})
-
-	var thinking string
-	var text string
-	for chunk := range ch {
-		thinking += chunk.Thinking
-		text += chunk.Text
-	}
-	if thinking != "Let me think..." {
-		t.Errorf("expected thinking 'Let me think...', got %q", thinking)
-	}
-	if text != "Here's the answer." {
-		t.Errorf("expected text 'Here's the answer.', got %q", text)
-	}
-}
-
-func TestClient_Infer_MaxTokensFromProvider(t *testing.T) {
-	p := newMockProvider("test")
-	p.models = []ModelInfo{
-		{ID: "model", OutputTokenLimit: 4096},
-	}
-	var gotMaxTokens int
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		gotMaxTokens = opts.MaxTokens
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			ch <- makeDoneChunk("ok")
-		}()
-		return ch
-	}
-
-	c := NewClient(p, "model", 0) // maxTokens=0 -> resolve from provider
-	ch, _ := c.Infer(context.Background(), InferRequest{
-		Messages: []Message{UserMessage("hi", nil)},
-	})
-	for range ch {
-	}
-	if gotMaxTokens != 4096 {
-		t.Errorf("expected MaxTokens 4096 from provider, got %d", gotMaxTokens)
-	}
-}
-
-// ── Standalone Complete Tests ──
-
-func TestComplete(t *testing.T) {
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 2)
-		go func() {
-			defer close(ch)
-			ch <- makeTextChunk("Hello")
-			ch <- makeDoneChunk("Hello")
-		}()
-		return ch
-	}
-
-	resp, err := Complete(context.Background(), p, CompletionOptions{
-		Model:    "model",
-		Messages: []Message{UserMessage("hi", nil)},
-	})
-	if err != nil {
-		t.Fatalf("Complete() error = %v", err)
-	}
-	if resp.Content != "Hello" {
-		t.Errorf("expected 'Hello', got %q", resp.Content)
-	}
-}
-
-func TestComplete_WithTextAccumulation(t *testing.T) {
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			ch <- StreamChunk{
-				Type: ChunkTypeDone,
-				Response: &CompletionResponse{
-					Content:    "",
-					StopReason: "end_turn",
-					Usage:      Usage{InputTokens: 0, OutputTokens: 0},
-				},
-			}
-		}()
-		return ch
-	}
-
-	resp, err := Complete(context.Background(), p, CompletionOptions{
-		Model: "model",
-	})
-	if err != nil {
-		t.Fatalf("Complete() error = %v", err)
-	}
-	if resp.Content != "" {
-		t.Errorf("expected empty content, got %q", resp.Content)
-	}
-}
-
-func TestComplete_Error(t *testing.T) {
-	testErr := errors.New("provider failed")
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			ch <- makeErrorChunk(testErr)
-		}()
-		return ch
-	}
-
-	_, err := Complete(context.Background(), p, CompletionOptions{
-		Model: "model",
-	})
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{{Text: "never"}}}}}
+	resp, err := llmtest.Client(drv).Complete(ctx, &llm.Prompt{}, nil)
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected an error")
+	}
+	if resp == nil || resp.StopReason != llm.StopAborted {
+		t.Errorf("resp = %+v, want StopAborted", resp)
 	}
 }
 
-func TestComplete_NoDoneChunk(t *testing.T) {
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			ch <- makeTextChunk("text only")
-		}()
-		return ch
-	}
+// The streaming caller sees the same thing: one yield carries the error and
+// the partial response together.
+func TestStreamErrorEventCarriesPartial(t *testing.T) {
+	want := errors.New("boom")
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{
+		Deltas: []llm.Delta{{Text: "partial"}},
+		Err:    want,
+	}}}
 
-	_, err := Complete(context.Background(), p, CompletionOptions{
-		Model: "model",
-	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	var sawErr error
+	var partial *llm.Response
+	for event, err := range llmtest.Client(drv).Stream(context.Background(), &llm.Prompt{}, nil) {
+		if err != nil {
+			sawErr = err
+			partial = event.Response
+			break
+		}
 	}
-	if err.Error() != "stream closed without completion" {
-		t.Errorf("expected 'stream closed without completion', got %q", err.Error())
+	if !errors.Is(sawErr, want) {
+		t.Fatalf("err = %v", sawErr)
+	}
+	if partial == nil || partial.Content != "partial" {
+		t.Errorf("partial = %+v, want the streamed text", partial)
 	}
 }
 
-// ── Helper Tests ──
-
-func TestUserMessage(t *testing.T) {
-	msg := UserMessage("hello", nil)
-	if msg.Role != RoleUser {
-		t.Errorf("expected RoleUser, got %q", msg.Role)
+func TestResponseIDIsRecorded(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{
+		{ID: "msg_01abc", Model: "served-model"},
+		{Text: "hi"},
+		{StopReason: llm.StopEndTurn},
+	}}}}
+	resp, err := llmtest.Client(drv).Complete(context.Background(), &llm.Prompt{}, nil)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
 	}
-	if msg.Content != "hello" {
-		t.Errorf("expected 'hello', got %q", msg.Content)
+	if resp.ID != "msg_01abc" {
+		t.Errorf("ID = %q", resp.ID)
 	}
-}
-
-func TestUserMessage_WithImages(t *testing.T) {
-	images := []Image{{MediaType: "image/png", Data: "base64..."}}
-	msg := UserMessage("describe this", images)
-	if len(msg.Images) != 1 {
-		t.Errorf("expected 1 image, got %d", len(msg.Images))
-	}
-}
-
-func TestAssistantMessage(t *testing.T) {
-	calls := []ToolCall{{ID: "1", Name: "read_file", Input: `{"path":"a.go"}`}}
-	msg := AssistantMessage("result", "thinking...", calls)
-	if msg.Role != RoleAssistant {
-		t.Errorf("expected RoleAssistant, got %q", msg.Role)
-	}
-	if msg.Content != "result" {
-		t.Errorf("expected 'result', got %q", msg.Content)
-	}
-	if msg.Thinking != "thinking..." {
-		t.Errorf("expected 'thinking...', got %q", msg.Thinking)
-	}
-	if len(msg.ToolCalls) != 1 {
-		t.Errorf("expected 1 tool call, got %d", len(msg.ToolCalls))
+	// A gateway routing to a concrete model reports which one it served.
+	if resp.Model != "served-model" {
+		t.Errorf("Model = %q, want the model actually served", resp.Model)
 	}
 }
 
-func TestRoleConstants(t *testing.T) {
-	if RoleUser != "user" {
-		t.Errorf("RoleUser = %q, want 'user'", RoleUser)
+// A consumer has to be able to tell "the model started a second paragraph"
+// from "it kept typing" — the difference between opening a new bubble and
+// appending to the last one.
+func TestContentBlocksAreBounded(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{
+		{Thinking: "let me "},
+		{Thinking: "think"},
+		{Text: "first "},
+		{Text: "block"},
+		{EndBlock: true},
+		{Text: "second block"},
+		{StopReason: llm.StopEndTurn},
+	}}}}
+
+	type record struct {
+		kind  llm.EventType
+		index int
+		text  string
 	}
-	if RoleAssistant != "assistant" {
-		t.Errorf("RoleAssistant = %q, want 'assistant'", RoleAssistant)
+	var got []record
+	for event, err := range llmtest.Client(drv).Stream(context.Background(), &llm.Prompt{}, nil) {
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		if event.Type != llm.EventDone {
+			got = append(got, record{event.Type, event.Index, event.Text})
+		}
 	}
-	if RoleTool != "tool_result" {
-		t.Errorf("RoleTool = %q, want 'tool_result'", RoleTool)
+
+	want := []record{
+		{llm.EventThinkingStart, 0, ""},
+		{llm.EventThinkingDelta, 0, "let me "},
+		{llm.EventThinkingDelta, 0, "think"},
+		{llm.EventThinkingEnd, 0, "let me think"},
+		{llm.EventTextStart, 1, ""},
+		{llm.EventTextDelta, 1, "first "},
+		{llm.EventTextDelta, 1, "block"},
+		{llm.EventTextEnd, 1, "first block"},
+		// The explicit boundary is what separates two blocks of the same kind.
+		{llm.EventTextStart, 2, ""},
+		{llm.EventTextDelta, 2, "second block"},
+		{llm.EventTextEnd, 2, "second block"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events, want %d:\n%+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event %d = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 
-func TestStopReasonConstants(t *testing.T) {
-	if StopEndTurn != "end_turn" {
-		t.Errorf("StopEndTurn = %q", StopEndTurn)
+// A tool call closes whatever text was being written, so a consumer never has
+// an unterminated block.
+func TestToolCallClosesTheOpenBlock(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{
+		{Text: "let me look"},
+		{ToolCall: &llm.ToolCall{ID: "1", Name: "ls", Input: "{}"}},
+		{StopReason: llm.StopToolUse},
+	}}}}
+
+	var seen []llm.EventType
+	for event, err := range llmtest.Client(drv).Stream(context.Background(), &llm.Prompt{}, nil) {
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		seen = append(seen, event.Type)
 	}
-	if StopMaxTokens != "max_tokens" {
-		t.Errorf("StopMaxTokens = %q", StopMaxTokens)
+	want := []llm.EventType{
+		llm.EventTextStart, llm.EventTextDelta, llm.EventTextEnd,
+		llm.EventToolCall, llm.EventDone,
 	}
-	if StopToolUse != "tool_use" {
-		t.Errorf("StopToolUse = %q", StopToolUse)
-	}
-	if StopMaxSteps != "max_steps" {
-		t.Errorf("StopMaxSteps = %q", StopMaxSteps)
-	}
-	if StopCancelled != "cancelled" {
-		t.Errorf("StopCancelled = %q", StopCancelled)
+	for i := range want {
+		if i >= len(seen) || seen[i] != want[i] {
+			t.Fatalf("events = %v, want %v", seen, want)
+		}
 	}
 }
 
-func TestChunkTypeConstants(t *testing.T) {
-	if ChunkTypeText != "text" {
-		t.Errorf("ChunkTypeText = %q", ChunkTypeText)
-	}
-	if ChunkTypeThinking != "thinking" {
-		t.Errorf("ChunkTypeThinking = %q", ChunkTypeThinking)
-	}
-	if ChunkTypeDone != "done" {
-		t.Errorf("ChunkTypeDone = %q", ChunkTypeDone)
-	}
-	if ChunkTypeError != "error" {
-		t.Errorf("ChunkTypeError = %q", ChunkTypeError)
-	}
-}
+// A turn that dies mid-block still closes it, so a consumer's render state is
+// never left half-open.
+func TestFailureClosesTheOpenBlock(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{
+		Deltas: []llm.Delta{{Text: "half"}},
+		Err:    errors.New("boom"),
+	}}}
 
-// ── Test helpers that verify LLM interface compliance ──
-
-func TestClient_ImplementsLLM(t *testing.T) {
-	var _ LLM = (*Client)(nil) // compile-time check
-}
-
-func TestMockProvider_ImplementsProvider(t *testing.T) {
-	var _ Provider = (*mockProvider)(nil)
-}
-
-// ── Concurrent Access Tests ──
-
-func TestClient_ConcurrentAccess(t *testing.T) {
-	p := newMockProvider("test")
-	p.streamFunc = func(ctx context.Context, opts CompletionOptions) <-chan StreamChunk {
-		ch := make(chan StreamChunk, 1)
-		go func() {
-			defer close(ch)
-			ch <- makeDoneChunk("ok")
-		}()
-		return ch
+	var closed bool
+	for event, err := range llmtest.Client(drv).Stream(context.Background(), &llm.Prompt{}, nil) {
+		if event.Type == llm.EventTextEnd {
+			closed = true
+		}
+		if err != nil {
+			break
+		}
 	}
-	c := NewClient(p, "model", 0)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = c.Name()
-			_ = c.ModelID()
-			_ = c.ThinkingEffort()
-			c.SetThinkingEffort(fmt.Sprintf("effort-%d", i))
-			_ = c.InputLimit()
-		}()
+	if !closed {
+		t.Error("a block was left open when the turn failed")
 	}
-	wg.Wait()
 }

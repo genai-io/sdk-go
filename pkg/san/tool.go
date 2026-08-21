@@ -10,7 +10,7 @@ import (
 type Tool interface {
 	Name() string
 	Description() string
-	Schema() llm.ToolSchema
+	Schema() llm.Tool
 	Execute(ctx context.Context, input map[string]any) (string, error)
 }
 
@@ -40,8 +40,8 @@ func (ts *ToolSet) Get(name string) Tool {
 }
 
 // Schemas returns all tool schemas for sending to the LLM.
-func (ts *ToolSet) Schemas() []llm.ToolSchema {
-	schemas := make([]llm.ToolSchema, 0, len(ts.tools))
+func (ts *ToolSet) Schemas() []llm.Tool {
+	schemas := make([]llm.Tool, 0, len(ts.tools))
 	for _, t := range ts.tools {
 		schemas = append(schemas, t.Schema())
 	}

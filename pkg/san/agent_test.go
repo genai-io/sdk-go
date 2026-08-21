@@ -1,755 +1,519 @@
-package san
+package san_test
 
 import (
 	"context"
 	"errors"
-	"sync"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/genai-io/sdk-go/pkg/llm"
+	"github.com/genai-io/sdk-go/pkg/llm/llmtest"
+	"github.com/genai-io/sdk-go/pkg/san"
 )
 
-// ── Mocks ──
+// ── helpers ──
 
-// mockLLM implements llm.LLM for testing.
-type mockLLM struct {
-	mu         sync.Mutex
-	inferFunc  func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error)
-	inputLimit int
+type fakeTool struct {
+	name string
+	run  func(ctx context.Context, input map[string]any) (string, error)
 }
 
-func (m *mockLLM) Infer(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-	if m.inferFunc != nil {
-		return m.inferFunc(ctx, req)
+func (t *fakeTool) Name() string        { return t.name }
+func (t *fakeTool) Description() string { return t.name + " tool" }
+func (t *fakeTool) Schema() llm.Tool {
+	return llm.Tool{Name: t.name, Description: t.name, Parameters: map[string]any{"type": "object"}}
+}
+func (t *fakeTool) Execute(ctx context.Context, input map[string]any) (string, error) {
+	return t.run(ctx, input)
+}
+
+func toolSet(tools ...san.Tool) *san.ToolSet {
+	ts := san.NewToolSet()
+	for _, t := range tools {
+		ts.Add(t)
 	}
-	return nil, nil
+	return ts
 }
 
-func (m *mockLLM) InputLimit() int { return m.inputLimit }
-
-func newMockLLM() *mockLLM { return &mockLLM{inputLimit: 200000} }
-
-type mockTool struct {
-	name        string
-	description string
-	schema      llm.ToolSchema
-	executeFunc func(ctx context.Context, input map[string]any) (string, error)
-}
-
-func (t *mockTool) Name() string                       { return t.name }
-func (t *mockTool) Description() string                { return t.description }
-func (t *mockTool) Schema() llm.ToolSchema             { return t.schema }
-func (t *mockTool) Execute(ctx context.Context, input map[string]any) (string, error) {
-	return t.executeFunc(ctx, input)
-}
-
-func newMockTool(name, description string) *mockTool {
-	return &mockTool{
-		name:        name,
-		description: description,
-		schema: llm.ToolSchema{
-			Name:        name,
-			Description: description,
-			Parameters:  map[string]any{"type": "object"},
-		},
-		executeFunc: func(ctx context.Context, input map[string]any) (string, error) {
-			return name + ": done", nil
-		},
-	}
-}
-
-// ── Streaming Helpers for Mock LLM ──
-
-func makeTextChunk(text string) llm.Chunk {
-	return llm.Chunk{Text: text}
-}
-
-func makeDoneChunk(content string) llm.Chunk {
-	return llm.Chunk{
-		Done: true,
-		Response: &llm.InferResponse{
-			Content:    content,
-			StopReason: llm.StopEndTurn,
-			TokensIn:   10,
-			TokensOut:  5,
-		},
-	}
-}
-
-func makeToolDoneChunk(content string, calls []llm.ToolCall) llm.Chunk {
-	return llm.Chunk{
-		Done: true,
-		Response: &llm.InferResponse{
-			Content:    content,
-			ToolCalls:  calls,
-			StopReason: llm.StopToolUse,
-			TokensIn:   20,
-			TokensOut:  10,
-		},
-	}
-}
-
-func makeErrorChunk(err error) llm.Chunk {
-	return llm.Chunk{Err: err}
-}
-
-func makeCancelledDoneChunk() llm.Chunk {
-	return llm.Chunk{
-		Done: true,
-		Response: &llm.InferResponse{
-			StopReason: llm.StopCancelled,
-		},
-	}
-}
-
-// multiTurnMock returns an inferFunc that cycles through turn responses.
-// Each element of turns is passed to streamResponse for the corresponding call.
-func multiTurnMock(turns ...[]llm.Chunk) func(context.Context, llm.InferRequest) (<-chan llm.Chunk, error) {
-	return multiTurnMockT(nil, turns...)
-}
-
-// testingT is a dummy interface to avoid importing testing in the mock.
-type testingT interface{ Errorf(string, ...any) }
-
-// multiTurnMockT logs if there are more calls than configured turns.
-func multiTurnMockT(t testingT, turns ...[]llm.Chunk) func(context.Context, llm.InferRequest) (<-chan llm.Chunk, error) {
-	var mu sync.Mutex
-	call := 0
-	return func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-		mu.Lock()
-		idx := call
-		call++
-		mu.Unlock()
-		if idx >= len(turns) {
-			if t != nil {
-				t.Errorf("unexpected Infer call %d (only %d turns configured)", idx+1, len(turns))
-			}
-			// Return a simple done response so the test doesn't hang
-			ch := make(chan llm.Chunk, 1)
-			go func() {
-				defer close(ch)
-				ch <- makeDoneChunk("")
-			}()
-			return ch, nil
-		}
-		return streamResponse(turns[idx]...)(ctx, req)
-	}
-}
-
-func streamResponse(chunks ...llm.Chunk) func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-	return func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-		ch := make(chan llm.Chunk, len(chunks))
-		go func() {
-			defer close(ch)
-			for _, c := range chunks {
-				select {
-				case ch <- c:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-		return ch, nil
-	}
-}
-
-// ── Agent Construction Tests ──
-
-func TestNew_MissingLLM(t *testing.T) {
-	_, err := New(WithSystem("system prompt"))
-	if err == nil {
-		t.Fatal("expected error for missing llm, got nil")
-	}
-	if !errors.Is(err, fieldError{field: "llm"}) {
-		t.Errorf("expected fieldError{llm}, got %T: %v", err, err)
-	}
-}
-
-func TestNew_MissingSystem(t *testing.T) {
-	_, err := New(WithLLM(newMockLLM()))
-	if err == nil {
-		t.Fatal("expected error for missing system, got nil")
-	}
-}
-
-func TestNew_Defaults(t *testing.T) {
-	l := newMockLLM()
-	agent, err := New(WithLLM(l), WithSystem("you are helpful"))
+func newAgent(t *testing.T, drv *llmtest.Driver, opts ...san.AgentOption) *san.Agent {
+	t.Helper()
+	base := []san.AgentOption{san.WithModel(llmtest.Client(drv)), san.WithSystem("be helpful")}
+	a, err := san.New(append(base, opts...)...)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("New: %v", err)
 	}
-	if agent.ID() != "agent" {
-		t.Errorf("expected default id 'agent', got %q", agent.ID())
-	}
-	if agent.maxSteps != 0 {
-		t.Errorf("expected default maxSteps 0, got %d", agent.maxSteps)
+	return a
+}
+
+// ── construction ──
+
+func TestNewRequiresModel(t *testing.T) {
+	if _, err := san.New(san.WithSystem("hi")); err == nil {
+		t.Fatal("expected an error without a model")
 	}
 }
 
-func TestNew_WithAllOptions(t *testing.T) {
-	l := newMockLLM()
-	ts := NewToolSet()
-	ts.Add(newMockTool("echo", "echoes input"))
+func TestNewRequiresSystem(t *testing.T) {
+	if _, err := san.New(san.WithModel(llmtest.Client(llmtest.Text("x")))); err == nil {
+		t.Fatal("expected an error without a system prompt")
+	}
+}
 
-	agent, err := New(
-		WithLLM(l),
-		WithSystem("system"),
-		WithID("test-agent"),
-		WithTools(ts),
-		WithMaxSteps(10),
-	)
+func TestNewAppliesOptions(t *testing.T) {
+	a := newAgent(t, llmtest.Text("hi"), san.WithID("worker"), san.WithMaxSteps(3))
+	if a.ID() != "worker" {
+		t.Errorf("ID = %q", a.ID())
+	}
+	if len(a.Messages()) != 0 {
+		t.Errorf("a new agent should start with no history: %+v", a.Messages())
+	}
+}
+
+func TestSetMessagesCopies(t *testing.T) {
+	a := newAgent(t, llmtest.Text("hi"))
+	msgs := []llm.Message{llm.User("one")}
+	a.SetMessages(msgs)
+
+	msgs[0] = llm.User("mutated")
+	if got := a.Messages(); got[0].Text() != "one" {
+		t.Errorf("history aliases the caller's slice: %q", got[0].Text())
+	}
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	a := newAgent(t, llmtest.Text("hi"))
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// ── the think-act loop ──
+
+func TestThinkActSingleTurn(t *testing.T) {
+	a := newAgent(t, llmtest.Text("the answer"))
+	a.SetMessages([]llm.Message{llm.User("a question")})
+
+	result, err := a.ThinkAct(context.Background())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("ThinkAct: %v", err)
 	}
-	if agent.ID() != "test-agent" {
-		t.Errorf("expected id 'test-agent', got %q", agent.ID())
+	if result.Content != "the answer" {
+		t.Errorf("Content = %q", result.Content)
 	}
-	if agent.maxSteps != 10 {
-		t.Errorf("expected maxSteps 10, got %d", agent.maxSteps)
-	}
-	if agent.tools != ts {
-		t.Error("expected tool set to be set")
-	}
-}
-
-// ── Agent Accessor Tests ──
-
-func TestAgent_ID(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"), WithID("custom-id"))
-	if agent.ID() != "custom-id" {
-		t.Errorf("expected 'custom-id', got %q", agent.ID())
-	}
-}
-
-func TestAgent_Inbox(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	if agent.Inbox() == nil {
-		t.Fatal("Inbox() returned nil")
-	}
-}
-
-func TestAgent_Outbox(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	if agent.Outbox() == nil {
-		t.Fatal("Outbox() returned nil")
-	}
-}
-
-func TestAgent_Messages_InitiallyEmpty(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	msgs := agent.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages, got %d", len(msgs))
-	}
-}
-
-func TestAgent_SetMessages(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	input := []llm.Message{
-		{Content: "hello"},
-		{Content: "world"},
-	}
-	agent.SetMessages(input)
-	msgs := agent.Messages()
-	if len(msgs) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(msgs))
-	}
-	if msgs[0].Content != "hello" || msgs[1].Content != "world" {
-		t.Error("SetMessages did not preserve content")
-	}
-	// Mutating original should not affect agent
-	input[0] = llm.Message{Content: "modified"}
-	msgs2 := agent.Messages()
-	if msgs2[0].Content == "modified" {
-		t.Error("Messages() should return a copy, not reference")
-	}
-}
-
-// ── Agent Close Tests ──
-
-func TestAgent_Close(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	err := agent.Close()
-	if err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-	// Verify inbox is closed — sending to a closed channel panics.
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic when sending to closed inbox")
-		}
-	}()
-	agent.Inbox() <- llm.UserMessage("ping", nil)
-}
-
-func TestAgent_Close_Idempotent(t *testing.T) {
-	l := newMockLLM()
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	if err := agent.Close(); err != nil {
-		t.Fatalf("first Close() error = %v", err)
-	}
-	if err := agent.Close(); err != nil {
-		t.Fatalf("second Close() error = %v", err)
-	}
-}
-
-// ── ThinkAct Tests ──
-
-func TestThinkAct_SingleTurn(t *testing.T) {
-	l := newMockLLM()
-	l.inferFunc = streamResponse(
-		makeTextChunk("Hello"),
-		makeTextChunk(" world"),
-		makeDoneChunk("Hello world"),
-	)
-
-	agent, _ := New(WithLLM(l), WithSystem("you are helpful"))
-	agent.SetMessages([]llm.Message{llm.UserMessage("hi", nil)})
-
-	ctx := context.Background()
-	// Drain outbox in background
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	result, err := agent.ThinkAct(ctx)
-	if err != nil {
-		t.Fatalf("ThinkAct() error = %v", err)
-	}
-	if result.Content != "Hello world" {
-		t.Errorf("expected 'Hello world', got %q", result.Content)
+	if result.Steps != 1 || result.ToolUses != 0 {
+		t.Errorf("result = %+v", result)
 	}
 	if result.StopReason != llm.StopEndTurn {
-		t.Errorf("expected StopEndTurn, got %q", result.StopReason)
+		t.Errorf("StopReason = %q", result.StopReason)
+	}
+}
+
+func TestThinkActRunsToolsAndContinues(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{
+		{Deltas: []llm.Delta{
+			{ToolCall: &llm.ToolCall{ID: "1", Name: "echo", Input: `{"text":"hello"}`}},
+			{StopReason: llm.StopToolUse, Usage: &llm.Usage{Input: 10, Output: 2}},
+		}},
+		{Deltas: []llm.Delta{
+			{Text: "echo said hello"},
+			{StopReason: llm.StopEndTurn, Usage: &llm.Usage{Input: 20, Output: 3}},
+		}},
+	}}
+
+	var gotInput map[string]any
+	tool := &fakeTool{name: "echo", run: func(_ context.Context, in map[string]any) (string, error) {
+		gotInput = in
+		return "hello", nil
+	}}
+
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)))
+	a.SetMessages([]llm.Message{llm.User("say hello")})
+
+	result, err := a.ThinkAct(context.Background())
+	if err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+	if result.Steps != 2 || result.ToolUses != 1 {
+		t.Errorf("result = %+v", result)
+	}
+	// Tool arguments must be decoded as real JSON, not stuffed into a
+	// placeholder key.
+	if gotInput["text"] != "hello" {
+		t.Errorf("tool input = %+v", gotInput)
+	}
+	// Usage accumulates across every step of the turn.
+	if want := (llm.Usage{Input: 30, Output: 5}); result.Usage != want {
+		t.Errorf("Usage = %+v, want %+v", result.Usage, want)
+	}
+
+	// The history must pair the assistant's call with a single results turn,
+	// or the next request is rejected.
+	history := a.Messages()
+	if len(history) != 3 {
+		t.Fatalf("history = %d messages: %+v", len(history), history)
+	}
+	if len(history[1].ToolCalls) != 1 {
+		t.Errorf("assistant turn lost its tool calls: %+v", history[1])
+	}
+	if !history[2].IsToolResult() || len(history[2].ToolResults) != 1 {
+		t.Errorf("results turn = %+v", history[2])
+	}
+}
+
+func TestSeveralToolResultsShareOneTurn(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{
+		{Deltas: []llm.Delta{
+			{ToolCall: &llm.ToolCall{ID: "1", Name: "a", Input: "{}"}},
+			{ToolCall: &llm.ToolCall{ID: "2", Name: "a", Input: "{}"}},
+			{StopReason: llm.StopToolUse},
+		}},
+		{Deltas: []llm.Delta{{Text: "done"}, {StopReason: llm.StopEndTurn}}},
+	}}
+	tool := &fakeTool{name: "a", run: func(context.Context, map[string]any) (string, error) {
+		return "ok", nil
+	}}
+
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)))
+	a.SetMessages([]llm.Message{llm.User("do both")})
+	if _, err := a.ThinkAct(context.Background()); err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+
+	history := a.Messages()
+	last := history[len(history)-1]
+	if !last.IsToolResult() || len(last.ToolResults) != 2 {
+		t.Errorf("both results should ride in one turn: %+v", history)
+	}
+}
+
+func TestUnknownToolBecomesAToolError(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{
+		{Deltas: []llm.Delta{
+			{ToolCall: &llm.ToolCall{ID: "1", Name: "nope", Input: "{}"}},
+			{StopReason: llm.StopToolUse},
+		}},
+		{Deltas: []llm.Delta{{Text: "sorry"}, {StopReason: llm.StopEndTurn}}},
+	}}
+	a := newAgent(t, drv)
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	// The model asking for a tool that does not exist is its mistake to
+	// correct, not a reason to fail the turn.
+	result, err := a.ThinkAct(context.Background())
+	if err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+	if result.Content != "sorry" {
+		t.Errorf("Content = %q", result.Content)
+	}
+	res := a.Messages()[2].ToolResults[0]
+	if !res.IsError || !strings.Contains(res.Content, "unknown tool") {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestToolFailureIsReportedToTheModel(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{
+		{Deltas: []llm.Delta{
+			{ToolCall: &llm.ToolCall{ID: "1", Name: "boom", Input: "{}"}},
+			{StopReason: llm.StopToolUse},
+		}},
+		{Deltas: []llm.Delta{{Text: "recovered"}, {StopReason: llm.StopEndTurn}}},
+	}}
+	tool := &fakeTool{name: "boom", run: func(context.Context, map[string]any) (string, error) {
+		return "", errors.New("disk on fire")
+	}}
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)))
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	if _, err := a.ThinkAct(context.Background()); err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+	res := a.Messages()[2].ToolResults[0]
+	if !res.IsError || res.Content != "disk on fire" {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestMalformedToolInputIsReportedToTheModel(t *testing.T) {
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{
+		{Deltas: []llm.Delta{
+			{ToolCall: &llm.ToolCall{ID: "1", Name: "echo", Input: `{"text":`}},
+			{StopReason: llm.StopToolUse},
+		}},
+		{Deltas: []llm.Delta{{Text: "retrying"}, {StopReason: llm.StopEndTurn}}},
+	}}
+	var ran bool
+	tool := &fakeTool{name: "echo", run: func(context.Context, map[string]any) (string, error) {
+		ran = true
+		return "", nil
+	}}
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)))
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	if _, err := a.ThinkAct(context.Background()); err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+	if ran {
+		t.Error("the tool ran with arguments that did not parse")
+	}
+	res := a.Messages()[2].ToolResults[0]
+	if !res.IsError || !strings.Contains(res.Content, "not valid JSON") {
+		t.Errorf("result = %+v", res)
+	}
+	// The message names the tool, so a turn with six calls stays readable.
+	if !strings.Contains(res.Content, "echo") {
+		t.Errorf("result = %+v, want the tool named", res)
+	}
+}
+
+func TestMaxStepsBoundsTheTurn(t *testing.T) {
+	// A model that only ever asks for another tool call.
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{Deltas: []llm.Delta{
+		{ToolCall: &llm.ToolCall{ID: "1", Name: "loop", Input: "{}"}},
+		{StopReason: llm.StopToolUse},
+	}}}}
+	tool := &fakeTool{name: "loop", run: func(context.Context, map[string]any) (string, error) {
+		return "again", nil
+	}}
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)), san.WithMaxSteps(3))
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	result, err := a.ThinkAct(context.Background())
+	if err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+	if result.Steps != 3 || result.StopReason != san.StopMaxSteps {
+		t.Errorf("result = %+v", result)
+	}
+}
+
+func TestInferErrorFailsTheTurn(t *testing.T) {
+	want := errors.New("upstream is down")
+	a := newAgent(t, llmtest.Fail(want))
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	result, err := a.ThinkAct(context.Background())
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
+	}
+	if result.StopReason != llm.StopError {
+		t.Errorf("StopReason = %q", result.StopReason)
+	}
+}
+
+func TestCancelledContextStopsTheTurn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := newAgent(t, llmtest.Text("never sent"))
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	result, err := a.ThinkAct(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if result.StopReason != san.StopCancelled {
+		t.Errorf("StopReason = %q", result.StopReason)
+	}
+}
+
+func TestRequestCarriesSystemPromptAndTools(t *testing.T) {
+	drv := llmtest.Text("ok")
+	tool := &fakeTool{name: "echo", run: func(context.Context, map[string]any) (string, error) {
+		return "", nil
+	}}
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)))
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	if _, err := a.ThinkAct(context.Background()); err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+	req := drv.Last().Prompt
+	if req.System != "be helpful" {
+		t.Errorf("System = %q", req.System)
+	}
+	if len(req.Tools) != 1 || req.Tools[0].Name != "echo" {
+		t.Errorf("Tools = %+v", req.Tools)
+	}
+}
+
+// ── Run loop and events ──
+
+func TestRunEmitsLifecycleEvents(t *testing.T) {
+	a := newAgent(t, llmtest.Text("hi there"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go func() {
+		a.Inbox() <- llm.User("hello")
+	}()
+	go func() { _ = a.Run(ctx) }()
+
+	seen := map[san.EventType]bool{}
+	for {
+		select {
+		case evt, ok := <-a.Outbox():
+			if !ok {
+				t.Fatalf("outbox closed before the turn completed; saw %v", seen)
+			}
+			seen[evt.Type] = true
+			if evt.Type == san.OnTurn {
+				result, ok := evt.Result()
+				if !ok || result.Content != "hi there" {
+					t.Errorf("turn event = %+v", evt)
+				}
+				for _, want := range []san.EventType{san.OnStart, san.PreInfer, san.PostInfer} {
+					if !seen[want] {
+						t.Errorf("missing %q; saw %v", want, seen)
+					}
+				}
+				return
+			}
+		case <-ctx.Done():
+			t.Fatalf("timed out; saw %v", seen)
+		}
+	}
+}
+
+func TestEventAccessors(t *testing.T) {
+	chunk := san.Event{Type: san.OnChunk, Data: llm.Event{Type: llm.EventTextDelta, Text: "x"}}
+	if c, ok := chunk.Chunk(); !ok || c.Text != "x" {
+		t.Errorf("Chunk() = %+v, %v", c, ok)
+	}
+	if _, ok := chunk.Result(); ok {
+		t.Error("Result() should not match a chunk event")
+	}
+
+	call := san.Event{Type: san.PreTool, Data: llm.ToolCall{Name: "ls"}}
+	if tc, ok := call.ToolCall(); !ok || tc.Name != "ls" {
+		t.Errorf("ToolCall() = %+v, %v", tc, ok)
+	}
+
+	failed := san.Event{Type: san.OnStop, Data: errors.New("nope")}
+	if err, ok := failed.Error(); !ok || err == nil {
+		t.Errorf("Error() = %v, %v", err, ok)
+	}
+}
+
+// ── ToolSet ──
+
+func TestToolSet(t *testing.T) {
+	ts := san.NewToolSet()
+	if len(ts.Schemas()) != 0 {
+		t.Error("a new set should be empty")
+	}
+
+	first := &fakeTool{name: "a"}
+	ts.Add(first)
+	if ts.Get("a") != san.Tool(first) {
+		t.Error("Add/Get round-trip failed")
+	}
+
+	replacement := &fakeTool{name: "a"}
+	ts.Add(replacement)
+	if ts.Get("a") != san.Tool(replacement) {
+		t.Error("adding the same name should replace")
+	}
+	if len(ts.Schemas()) != 1 {
+		t.Errorf("schemas = %+v", ts.Schemas())
+	}
+
+	ts.Remove("a")
+	if ts.Get("a") != nil {
+		t.Error("Remove left the tool behind")
+	}
+	ts.Remove("missing") // must not panic
+}
+
+// A turn that streamed text and burned tokens before failing must still report
+// both — the spend happened whether or not the turn finished.
+func TestFailedTurnStillAccountsForSpend(t *testing.T) {
+	want := errors.New("connection reset")
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{{
+		Deltas: []llm.Delta{
+			{Text: "I was part way thr"},
+			{Usage: &llm.Usage{Input: 3_000, Output: 40}},
+		},
+		Err: want,
+	}}}
+
+	a := newAgent(t, drv)
+	a.SetMessages([]llm.Message{llm.User("go")})
+
+	result, err := a.ThinkAct(context.Background())
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v", err)
+	}
+	if result.Usage.Input != 3_000 || result.Usage.Output != 40 {
+		t.Errorf("Usage = %+v, want the tokens already billed", result.Usage)
 	}
 	if result.Steps != 1 {
-		t.Errorf("expected 1 step, got %d", result.Steps)
+		t.Errorf("Steps = %d, want the failed step counted", result.Steps)
 	}
-	if result.TokensIn != 10 || result.TokensOut != 5 {
-		t.Errorf("expected tokens (10,5), got (%d,%d)", result.TokensIn, result.TokensOut)
+	if result.Content != "I was part way thr" {
+		t.Errorf("Content = %q, want the text that arrived", result.Content)
 	}
-}
-
-func TestThinkAct_WithToolCalls(t *testing.T) {
-	l := newMockLLM()
-	callCount := 0
-	l.inferFunc = func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-		callCount++
-		if callCount == 1 {
-			// First call: model requests tool use
-			return streamResponse(
-				makeToolDoneChunk("let me check", []llm.ToolCall{
-					{ID: "1", Name: "echo", Input: `{"text":"hello"}`},
-				}),
-			)(ctx, req)
-		}
-		// Second call: model responds with final answer
-		return streamResponse(
-			makeDoneChunk("the tool says: echo: done"),
-		)(ctx, req)
-	}
-
-	ts := NewToolSet()
-	ts.Add(newMockTool("echo", "echoes input"))
-	agent, _ := New(WithLLM(l), WithSystem("s"), WithTools(ts))
-	agent.SetMessages([]llm.Message{llm.UserMessage("use echo", nil)})
-
-	// Drain outbox
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	result, err := agent.ThinkAct(context.Background())
-	if err != nil {
-		t.Fatalf("ThinkAct() error = %v", err)
-	}
-	if result.ToolUses != 1 {
-		t.Errorf("expected 1 tool use, got %d", result.ToolUses)
-	}
-	if result.Steps != 2 {
-		t.Errorf("expected 2 steps, got %d", result.Steps)
-	}
-	if result.StopReason != llm.StopEndTurn {
-		t.Errorf("expected StopEndTurn, got %q", result.StopReason)
-	}
-	if callCount != 2 {
-		t.Errorf("expected 2 LLM calls, got %d", callCount)
+	if result.StopReason != llm.StopError {
+		t.Errorf("StopReason = %q", result.StopReason)
 	}
 }
 
-func TestThinkAct_UnknownTool(t *testing.T) {
-	l := newMockLLM()
-	// Turn 1: agent gets tool_use for unknown tool, executes it (error), loops.
-	// Turn 2: agent calls Infer again, gets final end_turn response.
-	l.inferFunc = multiTurnMock(
-		[]llm.Chunk{makeToolDoneChunk("use tool", []llm.ToolCall{
-			{ID: "1", Name: "nonexistent", Input: "{}"},
-		})},
-		[]llm.Chunk{makeDoneChunk("done")},
-	)
-
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	agent.SetMessages([]llm.Message{llm.UserMessage("do it", nil)})
-
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	result, err := agent.ThinkAct(context.Background())
-	if err != nil {
-		t.Fatalf("ThinkAct() error = %v", err)
+// A tool that declares a schema should not be run with arguments that violate
+// it: a deletion with an empty path is worse than a tool error the model can
+// correct.
+func TestToolArgumentsAreValidatedBeforeExecution(t *testing.T) {
+	type deleteArgs struct {
+		Path string `json:"path"`
 	}
-	if result.ToolUses != 1 {
-		t.Errorf("expected 1 tool use, got %d", result.ToolUses)
-	}
-	// Verify tool error message was appended
-	msgs := agent.Messages()
-	foundToolResult := false
-	for _, m := range msgs {
-		if m.Role == llm.RoleTool && m.ToolResult != nil && m.ToolResult.IsError {
-			foundToolResult = true
-		}
-	}
-	if !foundToolResult {
-		t.Error("expected tool error to be recorded")
-	}
-}
-
-func TestThinkAct_ToolExecutionError(t *testing.T) {
-	toolErr := errors.New("execution failed")
-	ts := NewToolSet()
-	ts.Add(&mockTool{
-		name:        "failing_tool",
-		description: "always fails",
-		schema:      llm.ToolSchema{Name: "failing_tool", Description: "always fails"},
-		executeFunc: func(ctx context.Context, input map[string]any) (string, error) {
-			return "", toolErr
+	var ran bool
+	tool := &schemaTool{
+		Tool: llm.ToolFor[deleteArgs]("delete", "delete a file"),
+		run: func(context.Context, map[string]any) (string, error) {
+			ran = true
+			return "deleted", nil
 		},
-	})
-
-	l := newMockLLM()
-	// Turn 1: model requests failing tool, agent executes (error), loops.
-	// Turn 2: model returns final response.
-	l.inferFunc = multiTurnMock(
-		[]llm.Chunk{makeToolDoneChunk("use tool", []llm.ToolCall{
-			{ID: "1", Name: "failing_tool", Input: "{}"},
-		})},
-		[]llm.Chunk{makeDoneChunk("handled error")},
-	)
-
-	agent, _ := New(WithLLM(l), WithSystem("s"), WithTools(ts))
-	agent.SetMessages([]llm.Message{llm.UserMessage("do it", nil)})
-
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	result, err := agent.ThinkAct(context.Background())
-	if err != nil {
-		t.Fatalf("ThinkAct() error = %v", err)
 	}
-	if result.ToolUses != 1 {
-		t.Errorf("expected 1 tool use, got %d", result.ToolUses)
+
+	drv := &llmtest.Driver{Turns: []llmtest.Turn{
+		{Deltas: []llm.Delta{
+			// The required path is missing.
+			{ToolCall: &llm.ToolCall{ID: "1", Name: "delete", Input: `{}`}},
+			{StopReason: llm.StopToolUse},
+		}},
+		{Deltas: []llm.Delta{{Text: "sorry, retrying"}, {StopReason: llm.StopEndTurn}}},
+	}}
+
+	a := newAgent(t, drv, san.WithTools(toolSet(tool)))
+	a.SetMessages([]llm.Message{llm.User("delete something")})
+	if _, err := a.ThinkAct(context.Background()); err != nil {
+		t.Fatalf("ThinkAct: %v", err)
+	}
+
+	if ran {
+		t.Error("the tool ran with arguments its own schema rejects")
+	}
+	res := a.Messages()[2].ToolResults[0]
+	if !res.IsError || !strings.Contains(res.Content, "path is required") {
+		t.Errorf("result = %+v, want the schema violation reported back", res)
 	}
 }
 
-func TestThinkAct_MaxSteps(t *testing.T) {
-	l := newMockLLM()
-	// Each call requests a tool — causes a loop
-	l.inferFunc = streamResponse(
-		makeToolDoneChunk("step 1", []llm.ToolCall{
-			{ID: "1", Name: "echo", Input: "{}"},
-		}),
-	)
-
-	ts := NewToolSet()
-	ts.Add(newMockTool("echo", "echoes"))
-	agent, _ := New(WithLLM(l), WithSystem("s"), WithTools(ts), WithMaxSteps(2))
-	agent.SetMessages([]llm.Message{llm.UserMessage("go", nil)})
-
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	result, err := agent.ThinkAct(context.Background())
-	if err != nil {
-		t.Fatalf("ThinkAct() error = %v", err)
-	}
-	if result.StopReason != llm.StopMaxSteps {
-		t.Errorf("expected StopMaxSteps, got %q", result.StopReason)
-	}
-	if result.Steps != 2 {
-		t.Errorf("expected 2 steps, got %d", result.Steps)
-	}
+// schemaTool carries a real llm.Tool so its declared schema is what gets
+// checked.
+type schemaTool struct {
+	llm.Tool
+	run func(ctx context.Context, input map[string]any) (string, error)
 }
 
-func TestThinkAct_PreInferError(t *testing.T) {
-	l := newMockLLM()
-	inferErr := errors.New("infer error")
-	l.inferFunc = func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-		return nil, inferErr
-	}
-
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	agent.SetMessages([]llm.Message{llm.UserMessage("hi", nil)})
-
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	_, err := agent.ThinkAct(context.Background())
-	if err == nil {
-		t.Fatal("expected error from ThinkAct(), got nil")
-	}
-}
-
-func TestThinkAct_StreamError(t *testing.T) {
-	l := newMockLLM()
-	l.inferFunc = streamResponse(
-		makeErrorChunk(errors.New("stream error")),
-	)
-
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	agent.SetMessages([]llm.Message{llm.UserMessage("hi", nil)})
-
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	result, err := agent.ThinkAct(context.Background())
-	if err != nil {
-		t.Fatalf("ThinkAct() error = %v", err)
-	}
-	// Stream errors set StopReason to cancelled but don't return an error from ThinkAct
-	if result.StopReason != llm.StopCancelled {
-		t.Errorf("expected StopCancelled, got %q", result.StopReason)
-	}
-}
-
-func TestThinkAct_ContextCancelled(t *testing.T) {
-	l := newMockLLM()
-	l.inferFunc = func(ctx context.Context, req llm.InferRequest) (<-chan llm.Chunk, error) {
-		ch := make(chan llm.Chunk)
-		go func() {
-			defer close(ch)
-			<-ctx.Done()
-		}()
-		return ch, nil
-	}
-
-	agent, _ := New(WithLLM(l), WithSystem("s"))
-	agent.SetMessages([]llm.Message{llm.UserMessage("hi", nil)})
-
-	go func() {
-		for range agent.Outbox() {
-		}
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately — ThinkAct's initial ctx.Done() check catches it
-
-	_, err := agent.ThinkAct(ctx)
-	if err == nil {
-		t.Fatal("expected context cancellation error")
-	}
-}
-
-// ── Event Tests ──
-
-func TestEvent_Accessors(t *testing.T) {
-	chunk := llm.Chunk{Text: "text"}
-	evt := Event{Type: OnChunk, Source: "agent", Data: chunk}
-	gotChunk, ok := evt.Chunk()
-	if !ok || gotChunk.Text != "text" {
-		t.Error("Chunk() accessor failed")
-	}
-
-	result := Result{Content: "result"}
-	evt = Event{Type: OnTurn, Source: "agent", Data: result}
-	gotResult, ok := evt.Result()
-	if !ok || gotResult.Content != "result" {
-		t.Error("Result() accessor failed")
-	}
-
-	tc := llm.ToolCall{ID: "1", Name: "tool"}
-	evt = Event{Type: PreTool, Source: "tool", Data: tc}
-	gotTC, ok := evt.ToolCall()
-	if !ok || gotTC.ID != "1" {
-		t.Error("ToolCall() accessor failed")
-	}
-
-	tr := llm.ToolResult{ToolCallID: "1", Content: "ok"}
-	evt = Event{Type: PostTool, Source: "tool", Data: tr}
-	gotTR, ok := evt.ToolResult()
-	if !ok || gotTR.Content != "ok" {
-		t.Error("ToolResult() accessor failed")
-	}
-
-	msg := llm.Message{Content: "hello"}
-	evt = Event{Type: OnMessage, Source: "agent", Data: msg}
-	gotMsg, ok := evt.Message()
-	if !ok || gotMsg.Content != "hello" {
-		t.Error("Message() accessor failed")
-	}
-
-	evt = Event{Type: OnStop, Source: "agent", Data: errors.New("stop")}
-	_, ok = evt.Error()
-	if !ok {
-		t.Error("Error() accessor failed")
-	}
-}
-
-func TestEvent_Accessors_WrongType(t *testing.T) {
-	evt := Event{Type: OnChunk, Source: "agent", Data: "wrong type"}
-	_, ok := evt.Chunk()
-	if ok {
-		t.Error("Chunk() should return false for wrong type")
-	}
-	_, ok = evt.Result()
-	if ok {
-		t.Error("Result() should return false for wrong type")
-	}
-}
-
-func TestEventTypeConstants(t *testing.T) {
-	if OnStart != "AgentStart" {
-		t.Errorf("OnStart = %q", OnStart)
-	}
-	if OnStop != "AgentStop" {
-		t.Errorf("OnStop = %q", OnStop)
-	}
-	if OnChunk != "Chunk" {
-		t.Errorf("OnChunk = %q", OnChunk)
-	}
-	if OnTurn != "Turn" {
-		t.Errorf("OnTurn = %q", OnTurn)
-	}
-	if PreInfer != "PreInfer" {
-		t.Errorf("PreInfer = %q", PreInfer)
-	}
-	if PostInfer != "PostInfer" {
-		t.Errorf("PostInfer = %q", PostInfer)
-	}
-	if PreTool != "PreTool" {
-		t.Errorf("PreTool = %q", PreTool)
-	}
-	if PostTool != "PostTool" {
-		t.Errorf("PostTool = %q", PostTool)
-	}
-}
-
-// ── ToolSet Tests ──
-
-func TestToolSet_Add_Get(t *testing.T) {
-	ts := NewToolSet()
-	if ts.Get("echo") != nil {
-		t.Error("expected nil for non-existent tool")
-	}
-	to := newMockTool("echo", "echo input")
-	ts.Add(to)
-	if ts.Get("echo") != to {
-		t.Error("Get() returned wrong tool")
-	}
-}
-
-func TestToolSet_Add_Overwrite(t *testing.T) {
-	ts := NewToolSet()
-	ts.Add(newMockTool("echo", "v1"))
-	ts.Add(newMockTool("echo", "v2"))
-	if ts.Get("echo").Description() != "v2" {
-		t.Error("Add() should overwrite")
-	}
-}
-
-func TestToolSet_Remove(t *testing.T) {
-	ts := NewToolSet()
-	ts.Add(newMockTool("echo", "echo"))
-	ts.Remove("echo")
-	if ts.Get("echo") != nil {
-		t.Error("expected nil after Remove()")
-	}
-	ts.Remove("nonexistent") // no-op
-}
-
-func TestToolSet_Schemas(t *testing.T) {
-	ts := NewToolSet()
-	ts.Add(newMockTool("a", "tool a"))
-	ts.Add(newMockTool("b", "tool b"))
-
-	schemas := ts.Schemas()
-	if len(schemas) != 2 {
-		t.Errorf("expected 2 schemas, got %d", len(schemas))
-	}
-	names := make(map[string]bool)
-	for _, s := range schemas {
-		names[s.Name] = true
-	}
-	if !names["a"] || !names["b"] {
-		t.Error("schemas missing expected names")
-	}
-}
-
-func TestToolSet_Schemas_Empty(t *testing.T) {
-	ts := NewToolSet()
-	schemas := ts.Schemas()
-	if len(schemas) != 0 {
-		t.Errorf("expected 0 schemas, got %d", len(schemas))
-	}
-}
-
-// ── fieldError Tests ──
-
-func TestFieldError(t *testing.T) {
-	err := errMissingField("llm")
-	if err.Error() != "required field missing: llm" {
-		t.Errorf("expected 'required field missing: llm', got %q", err.Error())
-	}
-}
-
-func TestFieldError_Is(t *testing.T) {
-	err := errMissingField("llm")
-	var fe fieldError
-	if !errors.As(err, &fe) {
-		t.Error("expected fieldError type")
-	}
-	if fe.field != "llm" {
-		t.Errorf("expected field 'llm', got %q", fe.field)
-	}
-}
-
-// ── Tool Interface Tests ──
-
-func TestMockTool_Interface(t *testing.T) {
-	var _ Tool = (*mockTool)(nil) // compile-time check
-	tool := newMockTool("test", "test description")
-	if tool.Name() != "test" {
-		t.Errorf("Name() = %q", tool.Name())
-	}
-	if tool.Description() != "test description" {
-		t.Errorf("Description() = %q", tool.Description())
-	}
-	content, err := tool.Execute(context.Background(), map[string]any{"key": "value"})
-	if err != nil {
-		t.Errorf("Execute() error = %v", err)
-	}
-	if content != "test: done" {
-		t.Errorf("Execute() = %q", content)
-	}
-	schema := tool.Schema()
-	if schema.Name != "test" {
-		t.Errorf("Schema().Name = %q", schema.Name)
-	}
+func (t *schemaTool) Name() string        { return t.Tool.Name }
+func (t *schemaTool) Description() string { return t.Tool.Description }
+func (t *schemaTool) Schema() llm.Tool    { return t.Tool }
+func (t *schemaTool) Execute(ctx context.Context, input map[string]any) (string, error) {
+	return t.run(ctx, input)
 }

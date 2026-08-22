@@ -246,6 +246,20 @@ schema 从 `SearchArgs` 推导，**里面每一个字都是 prompt 文本**。�
 ✗ search  → arguments for search: limit must be at most 20
 ```
 
+### 约束模型调哪个
+
+**一个值，四种状态**——正好是这里每个协议都能表达的那四种：
+
+```go
+ai.WithToolChoice(ai.ToolChoiceAuto)            // 模型自己决定（默认）
+ai.WithToolChoice(ai.ToolChoiceNone)            // 这一轮不许调工具
+ai.WithToolChoice(ai.ToolChoiceRequired)        // 必须调一个，调哪个模型定
+ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
+ai.WithForceTool("search")                      // 上一行的简写
+```
+
+是**一个值**而不是"一个 mode 加一个 name"，因为后者可以同时说出"不许调工具"和"调这个工具"。那就得有人决定谁赢，而且五个协议必须**决定得一模一样**。一个值没有什么可决定的。
+
 ### 自己写这个循环
 
 `Run` 就是每个应用都会写的那个循环。轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），自己写：

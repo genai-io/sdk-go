@@ -69,21 +69,19 @@ func thinkingOn(level ai.ReasoningLevel) bool {
 // toolChoice maps the neutral constraint onto Chat Completions. A nil result
 // leaves the field off, which is the API's own default.
 func toolChoice(req *ai.Request) *sdk.ChatCompletionToolChoiceOptionUnionParam {
-	if req.ForceTool != "" {
+	switch name, forced := req.ToolChoice.Tool(); {
+	case forced:
 		return &sdk.ChatCompletionToolChoiceOptionUnionParam{
 			OfFunctionToolChoice: &sdk.ChatCompletionNamedToolChoiceParam{
-				Function: sdk.ChatCompletionNamedToolChoiceFunctionParam{Name: req.ForceTool},
+				Function: sdk.ChatCompletionNamedToolChoiceFunctionParam{Name: name},
 			},
 		}
-	}
-	switch req.ToolChoice {
-	case ai.ToolChoiceNone:
+	case req.ToolChoice == ai.ToolChoiceNone:
 		return &sdk.ChatCompletionToolChoiceOptionUnionParam{OfAuto: sdk.Opt("none")}
-	case ai.ToolChoiceRequired:
+	case req.ToolChoice == ai.ToolChoiceRequired:
 		return &sdk.ChatCompletionToolChoiceOptionUnionParam{OfAuto: sdk.Opt("required")}
-	default:
-		return nil
 	}
+	return nil
 }
 
 // applyReasoning writes the endpoint's reasoning switch into the request.

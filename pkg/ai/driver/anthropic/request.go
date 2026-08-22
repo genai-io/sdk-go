@@ -183,22 +183,20 @@ func toolChoice(req *ai.Request, native Options) *sdk.ToolChoiceUnionParam {
 	if !native.DisableParallelToolUse {
 		noParallel = sdk.Bool(false)
 	}
-	if req.ForceTool != "" {
+	switch name, forced := req.ToolChoice.Tool(); {
+	case forced:
 		return &sdk.ToolChoiceUnionParam{OfTool: &sdk.ToolChoiceToolParam{
-			Name:                   req.ForceTool,
+			Name:                   name,
 			DisableParallelToolUse: noParallel,
 		}}
-	}
-	switch req.ToolChoice {
-	case ai.ToolChoiceNone:
+	case req.ToolChoice == ai.ToolChoiceNone:
 		return &sdk.ToolChoiceUnionParam{OfNone: &sdk.ToolChoiceNoneParam{}}
-	case ai.ToolChoiceRequired:
+	case req.ToolChoice == ai.ToolChoiceRequired:
 		return &sdk.ToolChoiceUnionParam{OfAny: &sdk.ToolChoiceAnyParam{
 			DisableParallelToolUse: noParallel,
 		}}
-	default:
-		return nil
 	}
+	return nil
 }
 
 // toolInputValue decodes a tool call's arguments for the wire. Anthropic wants

@@ -297,6 +297,23 @@ ending a conversation over. Each goes back to the model as a result marked
 ✗ search  → arguments for search: limit must be at most 20
 ```
 
+### Constraining the choice
+
+One value, four states — the same four every protocol here expresses:
+
+```go
+ai.WithToolChoice(ai.ToolChoiceAuto)            // the model decides (the default)
+ai.WithToolChoice(ai.ToolChoiceNone)            // no tool this turn
+ai.WithToolChoice(ai.ToolChoiceRequired)        // some tool, the model's choice which
+ai.WithToolChoice(ai.ToolChoiceNamed("search")) // this one
+ai.WithForceTool("search")                      // shorthand for the last
+```
+
+One value rather than a mode beside a name, because a mode beside a name can
+say "no tools" and "this tool" at once. Somebody then has to decide which wins,
+and all five protocols have to decide it the same way. One value has nothing to
+decide.
+
 ### Writing the loop yourself
 
 `Run` is the same loop every application writes. Write it yourself when the

@@ -113,19 +113,17 @@ func (Options) ProtocolOptions() {}
 // toolChoice maps the neutral constraint onto the Responses union. A nil
 // result leaves the field off, which is the API's own default.
 func toolChoice(req *ai.Request) *wire.ResponseNewParamsToolChoiceUnion {
-	if req.ForceTool != "" {
+	switch name, forced := req.ToolChoice.Tool(); {
+	case forced:
 		return &wire.ResponseNewParamsToolChoiceUnion{
-			OfFunctionTool: &wire.ToolChoiceFunctionParam{Name: req.ForceTool},
+			OfFunctionTool: &wire.ToolChoiceFunctionParam{Name: name},
 		}
-	}
-	switch req.ToolChoice {
-	case ai.ToolChoiceNone:
+	case req.ToolChoice == ai.ToolChoiceNone:
 		return &wire.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: sdk.Opt(wire.ToolChoiceOptionsNone)}
-	case ai.ToolChoiceRequired:
+	case req.ToolChoice == ai.ToolChoiceRequired:
 		return &wire.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: sdk.Opt(wire.ToolChoiceOptionsRequired)}
-	default:
-		return nil
 	}
+	return nil
 }
 
 func includables(names []string) []wire.ResponseIncludable {

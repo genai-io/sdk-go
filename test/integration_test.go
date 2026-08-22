@@ -1100,6 +1100,108 @@ func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 	}
 }
 
+// Tool choice is one field on the wire with four states, and it is one value
+// here for the same reason. A mode beside a name could say "no tools" and
+// "this tool" at once, and then every driver would have to agree on which
+// wins — four independent copies of one rule, with nothing checking they stay
+// the same. This pins what each protocol actually sends for each state.
+func TestEveryProtocolSaysTheSameFourThingsAboutToolChoice(t *testing.T) {
+	tool := searchTool()
+
+	// Where each protocol puts the constraint, and what it puts there.
+	protocols := []struct {
+		name  string
+		model ai.Model
+		at    func(body map[string]any) any // nil when the field is absent
+		want  map[string]string             // state name -> the JSON it sends
+	}{
+		{
+			name:  "anthropic-messages",
+			model: ai.Model{ID: "m", API: ai.APIAnthropicMessages, MaxOutput: 64},
+			at:    func(b map[string]any) any { return b["tool_choice"] },
+			want: map[string]string{
+				"auto":     "absent",
+				"none":     `{"type":"none"}`,
+				"required": `{"disable_parallel_tool_use":false,"type":"any"}`,
+				"named":    `{"disable_parallel_tool_use":false,"name":"search","type":"tool"}`,
+			},
+		},
+		{
+			name:  "openai-chat-completions",
+			model: ai.Model{ID: "m", API: ai.APIOpenAIChat},
+			at:    func(b map[string]any) any { return b["tool_choice"] },
+			want: map[string]string{
+				"auto":     "absent",
+				"none":     `"none"`,
+				"required": `"required"`,
+				"named":    `{"function":{"name":"search"},"type":"function"}`,
+			},
+		},
+		{
+			name:  "openai-responses",
+			model: ai.Model{ID: "m", API: ai.APIOpenAIResponses},
+			at:    func(b map[string]any) any { return b["tool_choice"] },
+			want: map[string]string{
+				"auto":     "absent",
+				"none":     `"none"`,
+				"required": `"required"`,
+				"named":    `{"name":"search","type":"function"}`,
+			},
+		},
+		{
+			name:  "google-genai",
+			model: ai.Model{ID: "m", API: ai.APIGoogleGenAI},
+			at:    func(b map[string]any) any { return b["toolConfig"] },
+			want: map[string]string{
+				"auto":     "absent",
+				"none":     `{"functionCallingConfig":{"mode":"NONE"}}`,
+				"required": `{"functionCallingConfig":{"mode":"ANY"}}`,
+				"named":    `{"functionCallingConfig":{"allowedFunctionNames":["search"],"mode":"ANY"}}`,
+			},
+		},
+	}
+
+	states := map[string]ai.ToolChoice{
+		"auto":     ai.ToolChoiceAuto,
+		"none":     ai.ToolChoiceNone,
+		"required": ai.ToolChoiceRequired,
+		"named":    ai.ToolChoiceNamed("search"),
+	}
+
+	for _, p := range protocols {
+		for state, choice := range states {
+			t.Run(p.name+"/"+state, func(t *testing.T) {
+				e := sse(t, p.model.API == ai.APIAnthropicMessages)
+				client := open(t, e.server.URL, p.model)
+				_, _ = client.Complete(context.Background(),
+					[]ai.Message{ai.UserMessage("hello")},
+					ai.WithTools(tool), ai.WithToolChoice(choice))
+
+				got := "absent"
+				if field := p.at(e.body); field != nil {
+					raw, err := json.Marshal(field)
+					if err != nil {
+						t.Fatalf("marshal: %v", err)
+					}
+					got = string(raw)
+				}
+				if got != p.want[state] {
+					t.Errorf("%s sent %s\nwant %s", state, got, p.want[state])
+				}
+			})
+		}
+	}
+
+	// WithForceTool is shorthand for the named state, not a second way to say
+	// it — the two produce the same value, so no driver can tell them apart.
+	var one, two ai.Request
+	ai.WithForceTool("search")(&one)
+	ai.WithToolChoice(ai.ToolChoiceNamed("search"))(&two)
+	if one.ToolChoice != two.ToolChoice {
+		t.Errorf("WithForceTool = %v, want the same value as ToolChoiceNamed", one.ToolChoice)
+	}
+}
+
 // The one thing that has to hold: what the model is told it may send, and
 // what the arguments decode into, are the same declaration. Naming T once is
 // what makes them so — a schema built from one type and a decode into another

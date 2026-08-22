@@ -36,12 +36,6 @@ type Request struct {
 	// ToolChoice constrains tool use for this turn.
 	ToolChoice ToolChoice
 
-	// ForceTool names the one tool the model must call. It implies
-	// ToolChoiceRequired and overrides it — "call something" and "call this"
-	// are the same constraint at different resolutions, and every supported
-	// protocol expresses both.
-	ForceTool string
-
 	// StopSequences ends generation when the model emits one of these.
 	StopSequences []string
 
@@ -115,9 +109,10 @@ func WithToolChoice(c ToolChoice) Option {
 	return func(r *Request) { r.ToolChoice = c }
 }
 
-// WithForceTool requires the model to call the named tool.
+// WithForceTool requires the model to call the named tool. Shorthand for
+// WithToolChoice(ToolChoiceNamed(name)).
 func WithForceTool(name string) Option {
-	return func(r *Request) { r.ForceTool = name }
+	return WithToolChoice(ToolChoiceNamed(name))
 }
 
 // WithStopSequences ends generation at any of these strings. Calling it with
@@ -173,17 +168,61 @@ func newRequest(m Model, messages []Message, layers ...[]Option) *Request {
 	return r
 }
 
-// ToolChoice constrains which tool, if any, the model may call.
-type ToolChoice string
+// ToolChoice constrains tool use for one turn.
+//
+// It has four states, which is what every protocol here expresses: let the
+// model decide, forbid tools, require some tool, or require one named tool.
+//
+// They are one value rather than a mode beside a name, because a mode beside a
+// name can say "no tools" and "this tool" at once. Somebody then has to decide
+// which wins, and every driver has to decide the same way. One value has
+// nothing to decide.
+type ToolChoice struct {
+	// Unexported, so the four states stay the only four. Fields a caller could
+	// set independently are exactly what this type exists to rule out.
+	mode toolChoiceMode
+	name string
+}
+
+type toolChoiceMode uint8
 
 const (
-	// ToolChoiceAuto lets the model decide. The default.
-	ToolChoiceAuto ToolChoice = ""
-	// ToolChoiceNone forbids tool calls for this turn.
-	ToolChoiceNone ToolChoice = "none"
-	// ToolChoiceRequired forces the model to call some tool.
-	ToolChoiceRequired ToolChoice = "required"
+	choiceAuto toolChoiceMode = iota
+	choiceNone
+	choiceRequired
+	choiceNamed
 )
+
+// The three states that need no argument. Compare against them with ==.
+var (
+	// ToolChoiceAuto lets the model decide. The zero value, and the default.
+	ToolChoiceAuto = ToolChoice{}
+	// ToolChoiceNone forbids tool calls for this turn.
+	ToolChoiceNone = ToolChoice{mode: choiceNone}
+	// ToolChoiceRequired makes the model call some tool, its choice which.
+	ToolChoiceRequired = ToolChoice{mode: choiceRequired}
+)
+
+// ToolChoiceNamed makes the model call the one tool named.
+func ToolChoiceNamed(name string) ToolChoice {
+	return ToolChoice{mode: choiceNamed, name: name}
+}
+
+// Tool returns the tool this choice requires, and whether it requires one.
+func (c ToolChoice) Tool() (string, bool) { return c.name, c.mode == choiceNamed }
+
+// String describes the choice the way an error message wants it.
+func (c ToolChoice) String() string {
+	switch c.mode {
+	case choiceNone:
+		return "none"
+	case choiceRequired:
+		return "required"
+	case choiceNamed:
+		return "tool " + c.name
+	}
+	return "auto"
+}
 
 // Effort is a reasoning rung, named the same way whichever vendor serves it.
 //

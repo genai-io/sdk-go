@@ -90,7 +90,7 @@ func (m Model) validateCapabilities(req *Request) error {
 	if len(req.StopSequences) > 0 && m.API == APIOpenAIResponses {
 		return m.unsupported("does not support stop sequences on the Responses API")
 	}
-	if m.Unsupported.ToolChoice && (req.ToolChoice != ToolChoiceAuto || req.ForceTool != "") {
+	if m.Unsupported.ToolChoice && req.ToolChoice != ToolChoiceAuto {
 		return m.unsupported("does not support constraining which tool is called")
 	}
 	if m.Unsupported.System && req.System != "" {
@@ -140,11 +140,6 @@ func validateSettings(req *Request) error {
 	case req.Temperature != nil && *req.Temperature < 0:
 		return invalidRequest("temperature cannot be negative")
 	}
-	switch req.ToolChoice {
-	case ToolChoiceAuto, ToolChoiceNone, ToolChoiceRequired:
-	default:
-		return invalidRequest("unknown tool choice %q", req.ToolChoice)
-	}
 	switch req.CacheRetention {
 	case CacheDefault, CacheNone, CacheShort, CacheLong:
 	default:
@@ -169,8 +164,13 @@ func validateSettings(req *Request) error {
 		}
 		toolNames[tool.Name] = true
 	}
-	if req.ForceTool != "" && !toolNames[req.ForceTool] {
-		return invalidRequest("forced tool %q is not present in the prompt", req.ForceTool)
+	if name, forced := req.ToolChoice.Tool(); forced {
+		if name == "" {
+			return invalidRequest("tool choice names no tool")
+		}
+		if !toolNames[name] {
+			return invalidRequest("forced tool %q is not present in the prompt", name)
+		}
 	}
 	if req.ToolChoice == ToolChoiceRequired && len(req.Tools) == 0 {
 		return invalidRequest("required tool choice needs at least one tool")

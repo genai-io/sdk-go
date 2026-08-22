@@ -82,18 +82,17 @@ func declarations(tools []ai.Tool) []*tool {
 // toolChoiceConfig maps the neutral constraint onto Gemini's function-calling
 // mode. A nil result leaves the field off, which is the API's own default.
 func toolChoiceConfig(req *ai.Request) *toolConfig {
-	// Forcing one tool is ANY mode narrowed to a single allowed name.
-	if req.ForceTool != "" {
+	var mode string
+	switch name, forced := req.ToolChoice.Tool(); {
+	case forced:
+		// Forcing one tool is ANY mode narrowed to a single allowed name.
 		return &toolConfig{FunctionCallingConfig: &functionCallingConfig{
 			Mode:                 modeAny,
-			AllowedFunctionNames: []string{req.ForceTool},
+			AllowedFunctionNames: []string{name},
 		}}
-	}
-	var mode string
-	switch req.ToolChoice {
-	case ai.ToolChoiceNone:
+	case req.ToolChoice == ai.ToolChoiceNone:
 		mode = modeNone
-	case ai.ToolChoiceRequired:
+	case req.ToolChoice == ai.ToolChoiceRequired:
 		mode = modeAny
 	default:
 		return nil

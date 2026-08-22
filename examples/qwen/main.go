@@ -87,7 +87,7 @@ func run(ref, question string) error {
 // It needs no catalog entry and no code here: state the protocol and the host,
 // and the same driver serves it.
 func anyCompatibleEndpoint(baseURL, key, modelID string) (*ai.Client, error) {
-	return ai.New(ai.Config{
+	return ai.NewClient(ai.Config{
 		Model: ai.Model{
 			ID:            modelID,
 			API:           ai.APIOpenAIChat,

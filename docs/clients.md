@@ -4,33 +4,33 @@ There is one chain, and you join it wherever you already are. Nothing branches,
 so there is no choice to get wrong.
 
 ```
-   "openai/gpt-4.1"        ai.Config          ai.Driver         *ai.Client
-          │                    │                  │                  │
-          └─── auth.Config ────┴─── ai.NewDriver ─┴─ ai.NewWithDriver ┘
-                   reads the            builds the          holds the
-                   environment          transport           model + defaults
+   "openai/gpt-4.1"       ai.Config        ai.Driver          *ai.Client
+          │                   │                │                   │
+          └── auth.Config ────┴─ ai.NewDriver ─┴─ ai.NewClientWithDriver ┘
+                  reads the          builds the           holds the
+                  environment        transport            model + defaults
 ```
 
 The two names you will actually type are shortcuts along it, and each is
 literally one line:
 
 ```go
-// auth.Client = auth.Config + ai.New
+// auth.Client = auth.Config + ai.NewClient
 func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	cfg, err := Config(ref)
 	if err != nil {
 		return nil, err
 	}
-	return ai.New(cfg, opts...)
+	return ai.NewClient(cfg, opts...)
 }
 
-// ai.New = ai.NewDriver + ai.NewWithDriver
-func New(cfg Config, opts ...Option) (*Client, error) {
+// ai.NewClient = ai.NewDriver + ai.NewClientWithDriver
+func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return NewWithDriver(d, cfg.Model, opts...), nil
+	return NewClientWithDriver(d, cfg.Model, opts...), nil
 }
 ```
 
@@ -40,10 +40,10 @@ All three produce the same client:
 client, err := auth.Client("openai/gpt-4.1")
 
 cfg, err := auth.Config("openai/gpt-4.1")
-client, err := ai.New(cfg)
+client, err := ai.NewClient(cfg)
 
 driver, err := ai.NewDriver(cfg)
-client := ai.NewWithDriver(driver, cfg.Model)
+client := ai.NewClientWithDriver(driver, cfg.Model)
 ```
 
 So the question is not which constructor to use. It is **how far along the
@@ -53,9 +53,9 @@ chain you need to stop**:
 | --- | --- | --- |
 | `auth.Client(ref)` | A command-line tool. The credential is in the environment. | Reads the environment |
 | `auth.Config(ref)` | Same, but you need to change the endpoint or the `http.Client` | Reads the environment |
-| `ai.New(cfg)` | A server. You supply the credential; nothing ambient is read. | None |
+| `ai.NewClient(cfg)` | A server. You supply the credential; nothing ambient is read. | None |
 | `ai.NewDriver(cfg)` | You need the driver as a value, to wrap it in middleware | None |
-| `ai.NewWithDriver(driver, model)` | You already have a driver — including a stub, in tests | None |
+| `ai.NewClientWithDriver(driver, model)` | You already have a driver — including a stub, in tests | None |
 
 Every path needs the driver for its protocol registered, which a blank import
 does. Use `all` when the model is chosen at run time; use one when you know the
@@ -89,13 +89,13 @@ cfg, err := auth.Config("openai/gpt-4.1")
 cfg.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
-client, err := ai.New(cfg)
+client, err := ai.NewClient(cfg)
 ```
 
 `auth.Config` fills the credential and endpoint and stops, so what it returns
 is an ordinary `ai.Config` you can edit.
 
-## Stopping at `ai.New`
+## Stopping at `ai.NewClient`
 
 `pkg/ai` reads no environment variable and no file. That is what makes it safe
 in a server holding several tenants' keys: nothing it does depends on ambient
@@ -104,7 +104,7 @@ state, so two requests cannot pick up each other's credentials.
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
-client, err := ai.New(ai.Config{
+client, err := ai.NewClient(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
 	BaseURL:    "https://gateway.internal/v1",
@@ -124,7 +124,7 @@ decorating a driver, so it needs the driver as a value:
 
 ```go
 driver, err := ai.NewDriver(cfg)
-client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), cfg.Model)
+client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), cfg.Model)
 ```
 
 `Retry` is the one policy shipped here, and every driver disables its vendor
@@ -133,13 +133,13 @@ middleware sees the request first and the response last. A `Middleware` is a
 `Handler` wrapping a `Handler`, the same shape as `Driver.Stream`, so anything
 you write composes with anything shipped here.
 
-## Stopping at `ai.NewWithDriver`
+## Stopping at `ai.NewClientWithDriver`
 
-`ai.NewWithDriver` does no I/O, no lookup and no credential validation. It is where every
+`ai.NewClientWithDriver` does no I/O, no lookup and no credential validation. It is where every
 path above ends, and it is what tests want:
 
 ```go
-client := ai.NewWithDriver(scripted{deltas: deltas}, ai.Model{
+client := ai.NewClientWithDriver(scripted{deltas: deltas}, ai.Model{
 	ID: "test", API: ai.APIAnthropicMessages, MaxOutput: 1024,
 })
 ```

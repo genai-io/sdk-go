@@ -21,7 +21,7 @@
 //	)
 //
 //	model, err := catalog.Model("anthropic/claude-opus-5")
-//	client, err := ai.New(ai.Config{Model: model, APIKey: key})
+//	client, err := ai.NewClient(ai.Config{Model: model, APIKey: key})
 //	messages := []ai.Message{ai.UserMessage("Explain goroutine leaks.")}
 //	response, err := client.Complete(ctx, messages,
 //		ai.WithSystem("You are concise."),
@@ -32,7 +32,7 @@
 //
 // Every constructor takes a Config and is named for what it returns: New
 // hands back a *Client, NewDriver a Driver — the same shape every driver
-// package and provider.New use. NewWithDriver is the exception, and its name
+// package and provider.New use. NewClientWithDriver is the exception, and its name
 // says why: it starts from a Driver you already hold rather than resolving one
 // from a Config.
 //
@@ -46,7 +46,7 @@
 // There are two package-level ways to get a Client, and the difference is
 // whether the environment is allowed to answer:
 //
-//	ai.New(Config)         you supply the model, the key and the host
+//	ai.NewClient(Config)         you supply the model, the key and the host
 //	auth.Client("vendor/model")  the catalog and the environment supply them
 //
 // Core ai never reads an environment variable or a file, which is what makes
@@ -116,7 +116,7 @@
 // Driver.Stream are the same shape, so a wrapped driver is still a Driver —
 // the shape net/http uses for the same job:
 //
-//	client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
+//	client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
 //
 // Retry is the one policy shipped here, because every driver disables its
 // vendor SDK's own and the rule for writing one is easy to get wrong. The rest

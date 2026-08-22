@@ -60,14 +60,14 @@ whichever rung you enter it at:
 | --- | --- | --- |
 | `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
 | `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
-| `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
 | `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
 | a reference | `auth.Client(ref)` | `*ai.Client` |
 | a vendor ID | `auth.Provider(id)` | `*provider.Provider` |
 
 Every package-level constructor takes a `Config` and is named for what it
 returns — `ai.New` a `*Client`, `ai.NewDriver` a `Driver`, and the same shape
-in every driver package and in `provider.New`. `ai.NewWithDriver(driver, model)`
+in every driver package and in `provider.New`. `ai.NewClientWithDriver(driver, model)`
 is the exception, and its name says why: it starts from a `Driver` you already
 hold.
 
@@ -75,7 +75,7 @@ Two package-level ways in, and the difference is whether the environment is
 allowed to answer:
 
 ```go
-ai.New(Config)              // you supply the model, the key and the host
+ai.NewClient(Config)              // you supply the model, the key and the host
 auth.Client("vendor/model")  // the catalog and the environment supply them
 ```
 
@@ -185,7 +185,7 @@ client.Complete(ctx, messages, ai.WithSystem(s), ai.WithEffort(ai.EffortHigh))
 ```
 
 The conversation is an ordinary `[]ai.Message`. Everything else is an `Option`,
-and the same `Option` is a default at `ai.New` and an override at the call — so
+and the same `Option` is a default at construction and an override at the call — so
 a setting is spelled one way wherever it is set.
 
 **There is no presence wrapper on the option fields.** Applying an option *is*

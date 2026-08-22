@@ -46,17 +46,17 @@ ai.Client           一个模型
 | --- | --- | --- |
 | `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
 | `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
-| `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
 | `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
 | 一个引用字符串 | `auth.Client(ref)` | `*ai.Client` |
 | 一个厂商 ID | `auth.Provider(id)` | `*provider.Provider` |
 
-**每一个包级构造函数都收 `Config`，并以它返回什么命名**——`ai.New` 给 `*Client`，`ai.NewDriver` 给 `Driver`，五个 driver 包和 `provider.New` 也是同一个形状。`ai.NewWithDriver(driver, model)` 是唯一的例外，而它的名字已经说明了原因：它从**你手里已有的 `Driver`** 出发。
+**每一个包级构造函数都收 `Config`，并以它返回什么命名**——`ai.New` 给 `*Client`，`ai.NewDriver` 给 `Driver`，五个 driver 包和 `provider.New` 也是同一个形状。`ai.NewClientWithDriver(driver, model)` 是唯一的例外，而它的名字已经说明了原因：它从**你手里已有的 `Driver`** 出发。
 
 两个包级入口，区别只有一个——**允不允许环境变量说话**：
 
 ```go
-ai.New(Config)         // 模型、密钥、主机都由你提供
+ai.NewClient(Config)         // 模型、密钥、主机都由你提供
 auth.Client("vendor/model")  // catalog 和环境变量提供
 ```
 
@@ -143,7 +143,7 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 client.Complete(ctx, messages, ai.WithSystem(s), ai.WithEffort(ai.EffortHigh))
 ```
 
-对话就是普通的 `[]ai.Message`。其余一切都是 `Option`，而且同一个 `Option` 放在 `ai.New` 里是默认值、放在调用里是覆盖值——所以一个设置无论在哪里设，写法只有一种。
+对话就是普通的 `[]ai.Message`。其余一切都是 `Option`，而且同一个 `Option` 放在构造时是默认值、放在调用里是覆盖值——所以一个设置无论在哪里设，写法只有一种。
 
 **选项字段上没有"是否设置"的包装类型。** 调用这个 option 本身就是那个标记位：`WithTemperature(0)` 就是确定性采样，不写它就是继承。早先的设计用 `Optional[T]` 加 `Some(...)` 来表达这个区别，它存在的唯一理由是服务那个"两个 struct"的调用形状，随着那个形状一起消失了。
 

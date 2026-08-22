@@ -3,7 +3,7 @@
 // It backs every vendor whose endpoint speaks that protocol — Anthropic
 // itself, MiniMax, Xiaomi MiMo and Volcengine Ark — which differ only in base
 // URL, credential and how the key is presented. Import it for its side effect
-// to make ai.New handle ai.APIAnthropicMessages:
+// to make ai.NewClient handle ai.APIAnthropicMessages:
 //
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/anthropic"
 //
@@ -47,7 +47,7 @@ type Driver struct {
 }
 
 // New builds a driver from a Config. It is registered as the factory for
-// ai.APIAnthropicMessages, so ai.New reaches it without an explicit call.
+// ai.APIAnthropicMessages, so ai.NewClient reaches it without an explicit call.
 func New(cfg ai.Config) (ai.Driver, error) {
 	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err

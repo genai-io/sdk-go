@@ -77,7 +77,7 @@ func jsonEndpoint(t *testing.T, status int, body string) *stub {
 
 func open(t *testing.T, url string, m ai.Model) *ai.Client {
 	t.Helper()
-	c, err := ai.New(ai.Config{Model: m, APIKey: "k", BaseURL: url})
+	c, err := ai.NewClient(ai.Config{Model: m, APIKey: "k", BaseURL: url})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -551,7 +551,7 @@ func TestWrappedDriverRunsMiddlewareOutermostFirst(t *testing.T) {
 	}
 
 	wrapped := ai.Wrap(driver, tag("outer"), tag("inner"))
-	if _, err := ai.NewWithDriver(wrapped, model).Complete(context.Background(),
+	if _, err := ai.NewClientWithDriver(wrapped, model).Complete(context.Background(),
 		[]ai.Message{ai.UserMessage("hi")}); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -561,7 +561,7 @@ func TestWrappedDriverRunsMiddlewareOutermostFirst(t *testing.T) {
 
 	// The undecorated driver is untouched, so a client built from it runs none.
 	order = nil
-	if _, err := ai.NewWithDriver(driver, model).Complete(context.Background(),
+	if _, err := ai.NewClientWithDriver(driver, model).Complete(context.Background(),
 		[]ai.Message{ai.UserMessage("hi")}); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestRetryOnlyReplaysWhatItMay(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewDriver: %v", err)
 			}
-			client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Millisecond)), model)
+			client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Millisecond)), model)
 
 			_, err = client.Complete(context.Background(), []ai.Message{ai.UserMessage("hi")})
 			if !tc.wantErr(err) {
@@ -657,7 +657,7 @@ func TestRetryStopsOnACanceledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDriver: %v", err)
 	}
-	client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(5, time.Hour)), model)
+	client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(5, time.Hour)), model)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()

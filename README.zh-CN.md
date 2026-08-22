@@ -69,7 +69,7 @@ func main() {
 
 `auth.Client` 会从厂商文档规定的那个环境变量里读凭证——这里是 `OPENAI_API_KEY`。那个空导入注册的是**一种线协议**；只导入你要用的，或者在模型要到运行时才确定时用 `pkg/ai/driver/all`。
 
-这是**一条链的最短端**：`auth.Client` 就是 `auth.Config` 加 `ai.New`，后者又是 `ai.NewDriver` 加 `ai.NewWithDriver`。需要的话就早点停——绝不能顺手读凭证的服务端停在 `ai.New`，要套 middleware 就停在 `ai.NewDriver`。见[构造客户端](docs/clients.zh-CN.md)。
+这是**一条链的最短端**：`auth.Client` 就是 `auth.Config` 加 `ai.New`，后者又是 `ai.NewDriver` 加 `ai.NewClientWithDriver`。需要的话就早点停——绝不能顺手读凭证的服务端停在 `ai.New`，要套 middleware 就停在 `ai.NewDriver`。见[构造客户端](docs/clients.zh-CN.md)。
 
 ### 换一家服务
 
@@ -183,10 +183,10 @@ person, err := ai.CompleteAs[Person](ctx, client, messages)
 
 ## 请求选项
 
-对话就是一个普通的 `[]ai.Message`。其余一切都是 `Option`，而且**同一个 option 在 `ai.New` 上是默认值、在调用处是覆盖值**：
+对话就是一个普通的 `[]ai.Message`。其余一切都是 `Option`，而且**同一个 option 在构造时是默认值、在调用处是覆盖值**：
 
 ```go
-client := ai.NewWithDriver(driver, model, ai.WithEffort(ai.EffortHigh)) // 默认值
+client, err := auth.Client("openai/gpt-4.1", ai.WithEffort(ai.EffortHigh)) // 默认值
 
 response, err := client.Complete(ctx, messages,
 	ai.WithTemperature(0),
@@ -234,7 +234,7 @@ case ai.IsUnsupported(err):     // 这个模型做不了要求它做的事
 执行策略是装饰 driver 的 `Middleware`，因为只有你的应用知道一轮的预算、什么能缓存、什么绝不能记日志：
 
 ```go
-client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
+client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
 ```
 
 `Retry` 是这里唯一自带的策略，而且**每个 driver 都关掉了它厂商 SDK 自己的重试**，所以不加它就一次重试都没有。缓存、日志、成本统计都归你。
@@ -244,7 +244,7 @@ client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter),
 **`pkg/ai` 永远不读环境变量、不读文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：
 
 ```go
-client, err := ai.New(ai.Config{
+client, err := ai.NewClient(ai.Config{
 	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
 	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
 })

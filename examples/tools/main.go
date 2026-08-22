@@ -15,11 +15,11 @@
 //     The first carries the model's thinking and reasoning state forward; the
 //     second silently drops it and a reasoning model starts over each turn.
 //
-// A tool here is a struct and a function. The struct is everything the model
-// is told — its name, what it does, and every argument it may send — and the
-// function is what happens when it calls. Nothing has to be kept in step by
-// hand, which a switch on call.Name with a matching UnmarshalArgs in each arm
-// quietly requires.
+// A tool here is a name, a sentence, and a function. The function says which
+// struct its arguments arrive in, and the schema the model is sent is derived
+// from that same struct — so nothing has to be kept in step by hand, which a
+// switch on call.Name with a matching UnmarshalArgs in each arm quietly
+// requires.
 //
 // Both tools below pin their cities to an enum, which is why the wrong city
 // comes back as a mistake the model can correct rather than as a lookup that
@@ -51,19 +51,14 @@ import (
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
 
-// One struct per tool, holding everything the model is told about it: the
-// ai.Doc line is the tool itself, the fields are the arguments it may send.
-// Every word of it is prompt text.
-type Population struct {
-	_ ai.Doc `name:"population" description:"Population of a city in millions, for one census year."`
-
+// One struct per tool, holding exactly what the model may send it. Every word
+// of it is prompt text.
+type PopulationArgs struct {
 	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
 	Year int    `json:"year" description:"census year" enum:"2000|2010|2020"`
 }
 
-type Area struct {
-	_ ai.Doc `name:"area" description:"Area of a city in square kilometres."`
-
+type AreaArgs struct {
 	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
 }
 
@@ -102,16 +97,18 @@ func run(ref, question string) error {
 	}
 
 	tools := []ai.Tool{
-		ai.ToolFunc(func(_ context.Context, a Population) (string, error) {
-			millions := census[a.City][a.Year]
-			fmt.Printf("  \033[2m→ population(%s, %d) = %.1fM\033[0m\n", a.City, a.Year, millions)
-			return fmt.Sprintf("%.1f million", millions), nil
-		}),
-		ai.ToolFunc(func(_ context.Context, a Area) (string, error) {
-			km2 := areaKm2[a.City]
-			fmt.Printf("  \033[2m→ area(%s) = %d km²\033[0m\n", a.City, km2)
-			return fmt.Sprintf("%d square kilometres", km2), nil
-		}),
+		ai.ToolFunc("population", "Population of a city in millions, for one census year.",
+			func(_ context.Context, a PopulationArgs) (string, error) {
+				millions := census[a.City][a.Year]
+				fmt.Printf("  \033[2m→ population(%s, %d) = %.1fM\033[0m\n", a.City, a.Year, millions)
+				return fmt.Sprintf("%.1f million", millions), nil
+			}),
+		ai.ToolFunc("area", "Area of a city in square kilometres.",
+			func(_ context.Context, a AreaArgs) (string, error) {
+				km2 := areaKm2[a.City]
+				fmt.Printf("  \033[2m→ area(%s) = %d km²\033[0m\n", a.City, km2)
+				return fmt.Sprintf("%d square kilometres", km2), nil
+			}),
 	}
 
 	// Run is the loop: complete, answer whatever the model asked for, repeat

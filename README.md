@@ -200,20 +200,19 @@ called.
 
 ## Tool use
 
-A tool is a struct and a function. The struct is everything the model is told;
-the function is what happens when it calls.
+A tool is a name, a description, and a function. The struct holds exactly what
+the model may send.
 
 ```go
-type Search struct {
-	_ ai.Doc `name:"search" description:"Search the documentation and return matching passages."`
-
+type SearchArgs struct {
 	Query string `json:"query" description:"what to look for, in plain words"`
 	Limit int    `json:"limit,omitempty" description:"how many passages to return" maximum:"10"`
 }
 
-search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
-	return docs.Search(ctx, a.Query, a.Limit) // dependencies are closed over
-})
+search := ai.ToolFunc("search", "Search the documentation and return matching passages.",
+	func(ctx context.Context, a SearchArgs) (string, error) {
+		return docs.Search(ctx, a.Query, a.Limit) // dependencies are closed over
+	})
 ```
 
 Running a conversation with it is one call:
@@ -223,10 +222,6 @@ response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
 	[]ai.Tool{search, fetch})
 ```
-
-Go attaches tags to fields, so the blank `ai.Doc` field is how a type says
-something about itself. It is zero-sized and invisible: `encoding/json` never
-sees it, the schema never describes it, and no code can read or set it.
 
 ### What the model is actually sent
 
@@ -256,8 +251,8 @@ fixed set of answers should say so — `enum:"a|b|c"` — rather than hope.
 is in `required` and the object is closed regardless, because that is what a
 provider's strict mode demands.
 
-`Search` is named once, and both halves come from it — the schema the model is
-sent and the struct its arguments decode into. They cannot come to describe
+`SearchArgs` is named once, and both halves come from it — the schema the model
+is sent and the struct its arguments decode into. They cannot come to describe
 different things, which is what a schema built from one type and a decode into
 another quietly permits. Arguments are checked against that schema before your
 function is called.

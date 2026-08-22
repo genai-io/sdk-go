@@ -171,19 +171,18 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-一个工具就是**一个 struct 加一个函数**。struct 是**告诉模型的全部东西**，函数是**模型调用时发生的**。
+一个工具就是**一个名字、一句话、一个函数**。struct 里放的正好是**模型可以发来的东西**。
 
 ```go
-type Search struct {
-	_ ai.Doc `name:"search" description:"搜索文档，返回匹配的段落。"`
-
+type SearchArgs struct {
 	Query string `json:"query" description:"要找什么，用大白话"`
 	Limit int    `json:"limit,omitempty" description:"最多返回几段" maximum:"10"`
 }
 
-search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
-	return docs.Search(ctx, a.Query, a.Limit) // 依赖走闭包
-})
+search := ai.ToolFunc("search", "搜索文档，返回匹配的段落。",
+	func(ctx context.Context, a SearchArgs) (string, error) {
+		return docs.Search(ctx, a.Query, a.Limit) // 依赖走闭包
+	})
 ```
 
 用它跑一段对话是一次调用：
@@ -193,8 +192,6 @@ response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
 	[]ai.Tool{search, fetch})
 ```
-
-Go 的 tag 只能挂在字段上，所以**空白的 `ai.Doc` 字段就是一个类型给自己说话的方式**。它零尺寸、完全隐形：`encoding/json` 看不见它，schema 不会描述它，任何代码都读不到也写不了它。
 
 ### 模型实际收到的东西
 
@@ -216,7 +213,7 @@ Go 的 tag 只能挂在字段上，所以**空白的 `ai.Doc` 字段就是一个
 
 `omitempty` 才是"可选"的开关：`limit` 以 `["integer","null"]` 发出去、可以回 null，`query` 不行。不管可选与否，所有字段都进 `required`、对象都是封闭的——因为各家的 strict 模式就是这么要求的。
 
-**`Search` 只写了一次**，两半都从它来：发给模型的 schema、参数解码进去的那个 struct。它们不可能各说各话——而"schema 从一个类型来、解码进另一个类型"正是会悄悄放过这种事的写法。参数在你的函数被调用之前，先按这份 schema 校验过。
+**`SearchArgs` 只写了一次**，两半都从它来：发给模型的 schema、参数解码进去的那个 struct。它们不可能各说各话——而"schema 从一个类型来、解码进另一个类型"正是会悄悄放过这种事的写法。参数在你的函数被调用之前，先按这份 schema 校验过。
 
 `ToolFunc` 返回的就是一个普通 `ai.Tool`，所以措辞值得一个字一个字调的时候，覆盖推导出来的 schema 就是一次赋值：
 

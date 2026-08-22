@@ -31,20 +31,6 @@ type Tool struct {
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
-// Doc is how a tool says what it is called and what it does — the two things a
-// parameter schema does not say, written in the same tags the parameters use.
-//
-//	type Search struct {
-//		_ ai.Doc `name:"search" description:"Search the docs and return matching passages."`
-//
-//		Query string `json:"query" description:"what to look for, in plain words"`
-//	}
-//
-// Go attaches tags to fields, so a field is how a type says something about
-// itself. This one is blank and zero-sized: encoding/json never sees it, the
-// schema never describes it, and no code can read or set it. It is not data.
-type Doc struct{}
-
 // ParameterSchema returns an independent JSON-object representation of the
 // tool's parameters. A nil result means that Parameters was omitted or is not
 // representable as a JSON object.
@@ -112,32 +98,45 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 
 // ─── Running the tools a model asked for ───
 
-// ToolFunc builds a tool from one function.
+// ToolFunc builds a tool from a name, a description and one function.
 //
-//	search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
-//		return docs.Search(ctx, a.Query, a.Limit)
-//	})
+//	type SearchArgs struct {
+//		Query string `json:"query" description:"what to look for, in plain words"`
+//		Limit int    `json:"limit,omitempty" description:"how many passages" maximum:"10"`
+//	}
+//
+//	search := ai.ToolFunc("search", "Search the docs and return matching passages.",
+//		func(ctx context.Context, a SearchArgs) (string, error) {
+//			return docs.Search(ctx, a.Query, a.Limit)
+//		})
 //
 //	client.Run(ctx, messages, []ai.Tool{search, fetch})
 //
-// Everything the model is told comes from T — its name and description from
-// the ai.Doc field, its parameters from the fields themselves. The schema that
-// goes out and the struct the arguments arrive in are therefore the same
-// declaration, and cannot come to describe different things.
+// The name and the description are what the model reads about the tool; T is
+// what it may send. T is named once, so the schema that goes out and the
+// struct the arguments arrive in are the same declaration and cannot come to
+// describe different things.
 //
 // Every word of that declaration is prompt text: describe each parameter, and
 // use enum where a field has a fixed set of answers. Arguments are checked
 // against the schema before the function is called.
 //
 // Dependencies are whatever the function closes over. That is the ordinary Go
-// answer, and it needs nothing from this package.
+// answer, it needs nothing from this package, and it keeps them off T where
+// they could never be described to the model.
 //
 // The result is an ordinary Tool. Assign to its Parameters afterwards to send
 // a hand-written schema in place of the derived one.
-func ToolFunc[T any](run func(ctx context.Context, arguments T) (string, error)) Tool {
+func ToolFunc[T any](name, description string, run func(ctx context.Context, arguments T) (string, error)) Tool {
 	var zero T
 	t := reflect.TypeOf(zero)
-	name, description := toolDoc(t)
+	if t == nil || t.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
+	}
+	if name == "" {
+		panic(fmt.Sprintf("ai: the tool taking %s has no name; "+
+			"that is the string the model calls", t))
+	}
 	return Tool{
 		Name:        name,
 		Description: description,
@@ -150,37 +149,6 @@ func ToolFunc[T any](run func(ctx context.Context, arguments T) (string, error))
 			return run(ctx, args)
 		},
 	}
-}
-
-// toolDoc reads what a tool says about itself.
-//
-// Everything it can find wrong is a mistake in a declaration rather than a
-// condition to handle, so it panics: a tool with no name is one the model
-// cannot call, and the panic happens where the tool is built rather than in
-// the middle of a conversation.
-func toolDoc(t reflect.Type) (name, description string) {
-	if t == nil || t.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
-	}
-	doc := reflect.TypeOf(Doc{})
-	for i := range t.NumField() {
-		field := t.Field(i)
-		if field.Type != doc {
-			continue
-		}
-		if field.Name != "_" {
-			panic(fmt.Sprintf("ai: %s.%s must be blank — write `_ ai.Doc`, or the "+
-				"model is told about it as a parameter", t, field.Name))
-		}
-		name, description = field.Tag.Get("name"), field.Tag.Get("description")
-		if name == "" {
-			panic(fmt.Sprintf("ai: the ai.Doc on %s has no name tag; "+
-				"that is the string the model calls", t))
-		}
-		return name, description
-	}
-	panic(fmt.Sprintf("ai: %s does not say what it is called; give it\n"+
-		"\t_ ai.Doc `name:\"…\" description:\"…\"`", t))
 }
 
 // RunTools answers every call in a turn, in order, and returns the results as

@@ -18,6 +18,7 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -984,47 +985,44 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 	}
 }
 
-// The tool types for these tests. Everything the model is told about a tool is
-// on its type: the ai.Doc line is the tool, the fields are its arguments.
+// The argument types for these tests. A tool's struct holds exactly what the
+// model may send it, and every tag on it is prompt text.
 type (
-	Search struct {
-		_ ai.Doc `name:"search" description:"search the knowledge base"`
-
+	SearchArgs struct {
 		Query    string `json:"query" description:"what to look for"`
 		Priority string `json:"priority" enum:"low|medium|high"`
 		Limit    int    `json:"limit" description:"how many results" minimum:"1" maximum:"50"`
 	}
-	Area struct {
-		_ ai.Doc `name:"area" description:"area of a city"`
-
+	AreaArgs struct {
 		City string `json:"city" enum:"Tokyo|Delhi"`
 	}
-	Census struct {
-		_ ai.Doc `name:"census" description:"population in a year"`
-
+	CensusArgs struct {
 		Year int `json:"year" minimum:"2000" maximum:"2020"`
 	}
 )
 
 func searchTool() ai.Tool {
-	return ai.ToolFunc(func(_ context.Context, a Search) (string, error) {
-		return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
-	})
+	return ai.ToolFunc("search", "search the knowledge base",
+		func(_ context.Context, a SearchArgs) (string, error) {
+			return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
+		})
 }
 
 func areaTool(seen *[]string) ai.Tool {
-	return ai.ToolFunc(func(_ context.Context, a Area) (string, error) {
-		if seen != nil {
-			*seen = append(*seen, a.City)
-		}
-		return "area of " + a.City, nil
-	})
+	return ai.ToolFunc("area", "area of a city",
+		func(_ context.Context, a AreaArgs) (string, error) {
+			if seen != nil {
+				*seen = append(*seen, a.City)
+			}
+			return "area of " + a.City, nil
+		})
 }
 
 func censusTool() ai.Tool {
-	return ai.ToolFunc(func(_ context.Context, a Census) (string, error) {
-		return fmt.Sprintf("census %d", a.Year), nil
-	})
+	return ai.ToolFunc("census", "population in a year",
+		func(_ context.Context, a CensusArgs) (string, error) {
+			return fmt.Sprintf("census %d", a.Year), nil
+		})
 }
 
 // A tool's dependencies are whatever its function closes over: they reach
@@ -1032,9 +1030,10 @@ func censusTool() ai.Tool {
 // get their own arguments rather than one shared value.
 func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
 	prefix := "dep"
-	tools := []ai.Tool{ai.ToolFunc(func(_ context.Context, a Recorder) (string, error) {
-		return prefix + ":" + a.Note, nil
-	})}
+	tools := []ai.Tool{ai.ToolFunc("recorder", "records a note",
+		func(_ context.Context, a RecorderArgs) (string, error) {
+			return prefix + ":" + a.Note, nil
+		})}
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
 		{ID: "1", Name: "recorder", Input: `{"note":"first"}`},
@@ -1057,9 +1056,7 @@ func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
 	}
 }
 
-type Recorder struct {
-	_ ai.Doc `name:"recorder" description:"records a note"`
-
+type RecorderArgs struct {
 	Note string `json:"note" description:"anything"`
 }
 
@@ -1103,69 +1100,48 @@ func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 	}
 }
 
-// ai.Doc is metadata, not data. If it ever reached the schema, the model would
-// be told about a parameter named "_" that it could try to fill in.
-func TestADocIsNotAParameter(t *testing.T) {
+// The one thing that has to hold: what the model is told it may send, and
+// what the arguments decode into, are the same declaration. Naming T once is
+// what makes them so — a schema built from one type and a decode into another
+// compiles perfectly well and fails only once a model is on the other end.
+func TestASchemaAndItsArgumentsAreOneDeclaration(t *testing.T) {
 	tool := searchTool()
 
 	schema := tool.ParameterSchema()
 	properties := schema["properties"].(map[string]any)
-	if _, found := properties["_"]; found {
-		t.Errorf("the ai.Doc became a parameter: %v", properties)
+	fields := reflect.VisibleFields(reflect.TypeOf(SearchArgs{}))
+	if len(properties) != len(fields) {
+		t.Errorf("properties = %v, want one per field of SearchArgs", properties)
 	}
-	if len(properties) != 3 {
-		t.Errorf("properties = %v, want exactly the three argument fields", properties)
-	}
-	for _, name := range schema["required"].([]any) {
-		if name == "_" {
-			t.Errorf("required = %v, want no mention of the ai.Doc", schema["required"])
+	for _, field := range fields {
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if _, described := properties[name]; !described {
+			t.Errorf("%s is a field the model is never told about", name)
 		}
 	}
 
-	// What it does carry is what the model is told about the tool itself.
-	if tool.Name != "search" || tool.Description != "search the knowledge base" {
-		t.Errorf("tool = %+v, want the name and description off the ai.Doc", tool)
-	}
-
-	// And a call that fills in every argument is still a complete one.
+	// So a call the schema accepts is one the arguments can hold, and one it
+	// refuses never reaches the function.
 	if err := tool.ValidateArgs(`{"query":"go","priority":"low","limit":3}`); err != nil {
 		t.Errorf("a correct call was rejected: %v", err)
 	}
 }
 
-// A tool that never says what it is called is one the model cannot call. That
-// is a mistake in a declaration rather than a condition to handle, so it is
-// refused where the tool is built rather than mid-conversation.
-func TestAToolMustSayWhatItIsCalled(t *testing.T) {
-	type Silent struct {
-		Q string `json:"q"`
-	}
-	type Unnamed struct {
-		_ ai.Doc `description:"everything but a name"`
-
-		Q string `json:"q"`
-	}
-	type Visible struct {
-		Doc ai.Doc `name:"visible"`
-
-		Q string `json:"q"`
-	}
-
+// A tool with no name is one the model cannot call, and arguments that are not
+// a struct are not arguments. Both are mistakes in a declaration rather than
+// conditions to handle, so they are refused where the tool is built.
+func TestAToolIsRefusedBeforeItCanBeOffered(t *testing.T) {
 	for name, tc := range map[string]struct {
 		build func()
 		want  string
 	}{
-		"no ai.Doc at all": {
-			func() { ai.ToolFunc(func(context.Context, Silent) (string, error) { return "", nil }) },
-			"does not say what it is called",
+		"no name": {
+			func() { ai.ToolFunc("", "d", func(context.Context, SearchArgs) (string, error) { return "", nil }) },
+			"has no name",
 		},
-		"an ai.Doc with no name": {
-			func() { ai.ToolFunc(func(context.Context, Unnamed) (string, error) { return "", nil }) },
-			"no name tag",
-		},
-		"an ai.Doc left visible": {
-			func() { ai.ToolFunc(func(context.Context, Visible) (string, error) { return "", nil }) },
-			"must be blank",
+		"arguments that are not a struct": {
+			func() { ai.ToolFunc("s", "d", func(context.Context, string) (string, error) { return "", nil }) },
+			"must be a struct",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1183,14 +1159,16 @@ func TestAToolMustSayWhatItIsCalled(t *testing.T) {
 	}
 }
 
-// A tool is called whatever its ai.Doc says, which need have nothing to do
-// with the Go type carrying it — nothing is derived, so nothing is guessed.
-func TestAToolIsCalledWhateverItsDocSays(t *testing.T) {
-	tool := ai.ToolFunc(func(_ context.Context, a FetchDocument) (string, error) {
-		return "doc " + a.ID, nil
-	})
+// A tool is called whatever you call it, which need have nothing to do with
+// the Go type its arguments arrive in — nothing is derived, so nothing is
+// guessed.
+func TestAToolIsCalledWhateverYouCallIt(t *testing.T) {
+	tool := ai.ToolFunc("fetch_document", "fetch one document by ID",
+		func(_ context.Context, a FetchDocumentArgs) (string, error) {
+			return "doc " + a.ID, nil
+		})
 	if tool.Name != "fetch_document" {
-		t.Errorf("Name = %q, want what ai.Doc said", tool.Name)
+		t.Errorf("Name = %q, want the name it was given", tool.Name)
 	}
 
 	results := ai.RunTools(context.Background(), []ai.Tool{tool},
@@ -1200,8 +1178,6 @@ func TestAToolIsCalledWhateverItsDocSays(t *testing.T) {
 	}
 }
 
-type FetchDocument struct {
-	_ ai.Doc `name:"fetch_document" description:"fetch one document by ID"`
-
+type FetchDocumentArgs struct {
 	ID string `json:"id" description:"the document to fetch"`
 }

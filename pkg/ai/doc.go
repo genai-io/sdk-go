@@ -68,26 +68,21 @@
 //
 // # Tools
 //
-// A tool is a struct and a function. The struct is everything the model is
-// told — its name and description on an ai.Doc field, its arguments on the
-// fields themselves — and the function is what happens when the model calls,
-// with its dependencies closed over. ToolFunc joins them, and Run holds the
-// conversation to the end:
+// A tool is a name, a description and a function. The function says which
+// struct the model's arguments arrive in, and the schema the model is sent is
+// derived from that same struct, so the two cannot come to describe different
+// things. Dependencies are closed over. Run holds the conversation to the end:
 //
-//	type Search struct {
-//		_ ai.Doc `name:"search" description:"Search the docs."`
-//
+//	type SearchArgs struct {
 //		Query string `json:"query" description:"what to look for"`
 //	}
 //
-//	search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
-//		return docs.Search(ctx, a.Query)
-//	})
+//	search := ai.ToolFunc("search", "Search the docs.",
+//		func(ctx context.Context, a SearchArgs) (string, error) {
+//			return docs.Search(ctx, a.Query)
+//		})
 //
 //	response, history, err := client.Run(ctx, messages, []ai.Tool{search})
-//
-// The schema that goes out and the struct the arguments arrive in are the same
-// declaration, so they cannot come to describe different things.
 //
 // Write the loop with Complete and RunTools instead when the turns are your
 // business — to stream, to stop on a condition, to bill each one.

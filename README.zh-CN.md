@@ -138,6 +138,36 @@ response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)}, []ai.Tool{search, fetch})
 ```
 
+<details>
+<summary><code>ToolFunc</code> 是简写。它折叠掉的就是下面这段。</summary>
+
+```go
+search := ai.Tool{
+	Name:        "search",
+	Description: "搜索文档，返回匹配的段落。",
+	Parameters:  jsonschema.For[SearchArgs](),
+	Run: func(ctx context.Context, arguments string) (string, error) {
+		var a SearchArgs
+		if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&a); err != nil {
+				return "", fmt.Errorf("arguments for search: %w", err)
+			}
+		}
+		return docs.Search(ctx, a.Query, a.Limit)
+	},
+}
+```
+
+**`ai.Tool` 就是一个工具的全部**：上线的那三个字段，加一个应答调用的函数。`ToolFunc` 做的事只有两件——从 `SearchArgs` 推出 schema、把参数解码进它。仅此而已：两种写法产出的定义**逐字节相同**，行为也相同，连错误都一样。
+
+所以那些"逃生口"根本不是特性。手写 schema 是一次赋值 `search.Parameters = handWritten`；到运行时才知道形状的工具就是上面这个写法、`Parameters` 从别处来。两者都没用到常规路径之外的任何东西。
+
+那个"空参数"分支不是摆设：**无参数的工具，这里每个协议都会发一个空对象**，而 `json.Decoder` 对它返回的是 `EOF`，不是零值。
+
+</details>
+
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，`history` 是整段对话，所以追问直接从它接着走。
 
 **`SearchArgs` 只写了一次**，所以发给模型的 schema 和参数解码进去的那个 struct 不可能各说各话：

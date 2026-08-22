@@ -163,6 +163,44 @@ response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)}, []ai.Tool{search, fetch})
 ```
 
+<details>
+<summary><code>ToolFunc</code> is shorthand. This is what it folds down to.</summary>
+
+```go
+search := ai.Tool{
+	Name:        "search",
+	Description: "Search the documentation and return matching passages.",
+	Parameters:  jsonschema.For[SearchArgs](),
+	Run: func(ctx context.Context, arguments string) (string, error) {
+		var a SearchArgs
+		if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&a); err != nil {
+				return "", fmt.Errorf("arguments for search: %w", err)
+			}
+		}
+		return docs.Search(ctx, a.Query, a.Limit)
+	},
+}
+```
+
+`ai.Tool` is the whole of what a tool is: the three fields that go on the wire,
+and one function that answers a call. `ToolFunc` derives the schema from
+`SearchArgs` and decodes into it, and that is all it does — the two forms
+produce byte-identical definitions and behave identically, errors included.
+
+So the escape hatches are not features. A hand-written schema is an assignment,
+`search.Parameters = handWritten`. A tool whose shape is not known until run
+time is this form with `Parameters` from somewhere else. Neither needs anything
+the common case does not already use.
+
+The empty-argument branch is not decoration: every protocol here sends an empty
+object for a call to a tool that takes none, and `json.Decoder` returns `EOF`
+rather than a zero value for it.
+
+</details>
+
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and `history` is the whole conversation, so a
 follow-up continues from it.

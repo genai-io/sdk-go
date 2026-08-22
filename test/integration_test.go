@@ -11,6 +11,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
+	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -1199,6 +1201,72 @@ func TestEveryProtocolSaysTheSameFourThingsAboutToolChoice(t *testing.T) {
 	ai.WithToolChoice(ai.ToolChoiceNamed("search"))(&two)
 	if one.ToolChoice != two.ToolChoice {
 		t.Errorf("WithForceTool = %v, want the same value as ToolChoiceNamed", one.ToolChoice)
+	}
+}
+
+// ToolFunc is documented as shorthand, and both READMEs print the ai.Tool
+// literal it folds down to. That claim is only worth printing if it is true,
+// so it is checked here: the two forms must marshal identically and behave
+// identically, including on the arguments a model actually sends wrong.
+func TestToolFuncFoldsToAnOrdinaryTool(t *testing.T) {
+	run := func(_ context.Context, a SearchArgs) (string, error) {
+		return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
+	}
+
+	shorthand := ai.ToolFunc("search", "search the knowledge base", run)
+
+	written := ai.Tool{
+		Name:        "search",
+		Description: "search the knowledge base",
+		Parameters:  jsonschema.For[SearchArgs](),
+		Run: func(ctx context.Context, arguments string) (string, error) {
+			var a SearchArgs
+			if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
+				decoder := json.NewDecoder(bytes.NewReader(raw))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&a); err != nil {
+					return "", fmt.Errorf("arguments for search: %w", err)
+				}
+			}
+			return run(ctx, a)
+		},
+	}
+
+	// What the model is told is the same JSON, byte for byte.
+	fromShorthand, err := json.Marshal(shorthand)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	fromWritten, err := json.Marshal(written)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(fromShorthand, fromWritten) {
+		t.Errorf("definitions differ\n shorthand %s\n written   %s", fromShorthand, fromWritten)
+	}
+
+	// And so is what happens when it calls. The empty cases are not padding:
+	// every protocol here sends an empty object for a tool that takes no
+	// arguments, and a json.Decoder answers that with EOF rather than a zero
+	// value — which is the line a hand-written expansion forgets.
+	for _, arguments := range []string{
+		`{"query":"go","priority":"low","limit":3}`,
+		`{"query":"go","priority":"low","limit":3,"sort":"asc"}`, // unknown field
+		`{"query":`, // truncated
+		`{}`,
+		``,
+		`   `,
+	} {
+		t.Run(fmt.Sprintf("%q", arguments), func(t *testing.T) {
+			gotOut, gotErr := shorthand.Run(context.Background(), arguments)
+			wantOut, wantErr := written.Run(context.Background(), arguments)
+			if gotOut != wantOut {
+				t.Errorf("output = %q, want %q", gotOut, wantOut)
+			}
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+				t.Errorf("err = %v, want %v", gotErr, wantErr)
+			}
+		})
 	}
 }
 

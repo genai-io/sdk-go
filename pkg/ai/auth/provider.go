@@ -6,11 +6,11 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/provider"
 )
 
-// Provider builds a live endpoint for a catalog vendor, with its credential
-// and endpoint resolved from the environment.
+// Provider builds a live provider for a catalog vendor, with its credential
+// and base URL resolved from the environment.
 //
 // It fails when the vendor needs a key and none of its variables are set,
-// rather than handing back an endpoint that will 401 on first use.
+// rather than handing back a provider that will 401 on first use.
 func Provider(vendorID string) (*provider.Provider, error) {
 	v, ok := catalog.Find(vendorID)
 	if !ok {
@@ -38,7 +38,7 @@ func Provider(vendorID string) (*provider.Provider, error) {
 	}), nil
 }
 
-// Providers builds a live endpoint for every vendor with a usable credential, in
+// Providers builds a live provider for every vendor with a usable credential, in
 // catalog display order.
 //
 // Vendors with no credential are skipped rather than reported: this is the

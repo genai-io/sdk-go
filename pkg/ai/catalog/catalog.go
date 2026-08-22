@@ -37,7 +37,6 @@
 //	infer.go     filling in what the table does not state for a model
 //	vendor.go    what an entry means, and what a model inherits from it
 //	catalog.go   looking a vendor or a model reference up
-//	listing.go   reconciling a live endpoint listing against the table
 //	errors.go    what an unresolvable reference reports
 package catalog
 

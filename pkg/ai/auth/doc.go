@@ -3,7 +3,7 @@
 //
 //	client, err := auth.Client("anthropic/claude-opus-4-6")
 //
-// It is deliberately a separate import from package llm, which never reads the
+// It is deliberately a separate import from package ai, which never reads the
 // environment or the filesystem. A server handling several tenants must not
 // inherit a process-wide key by accident; a command-line tool wants exactly
 // that, and opts in here.
@@ -25,12 +25,14 @@
 //
 //	auth.go        resolving a reference into an ai.Config or a client
 //	env.go         the environment variables a key-based vendor uses
-//	endpoint.go    the same, for a whole vendor's model listing
+//	provider.go    the same, for a whole vendor's model listing
 //	login.go       interactive sign-in, and the vendors that need one
 //	copilot.go     GitHub Copilot's grant
 //	codex.go       the ChatGPT/Codex grant
 //	console.go     the default terminal prompt for a sign-in
 //	credential.go  what a sign-in produces, and where it is kept
+//	filestore.go   the default Store: one 0600 file under the config dir
+//	memorystore.go the Store a server uses instead, holding nothing on disk
 //	transport.go   presenting a stored credential on every request
 //	errors.go      what a caller gets when a credential is missing
 package auth

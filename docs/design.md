@@ -34,19 +34,33 @@ builder branches on `Compat` fields and `ReasoningLevel` data instead.
 
 ## The layers
 
+The chain a caller walks down:
+
 ```
 catalog.Vendor      data — a row you can read without a network
       ↓ .Provider(cfg)
 provider.Provider   that row configured and credentialed, with a live model list
       ↓ .Open(id)
 ai.Client           one model
-      ↓ .Stream(ctx, messages, opts...)
-ai.Driver           one wire protocol
 ```
 
-Each layer adds one kind of knowledge and delegates down. `catalog` needs no
-network; `provider` reaches one; `Client` runs one call; `Driver` speaks one
-protocol.
+Each rung adds one kind of knowledge and delegates down. `catalog` needs no
+network; `provider` reaches one; `Client` runs one call.
+
+**Protocol is a second axis, not the next rung.** A Provider *has* a protocol;
+it is not one. The cardinality is what separates them:
+
+```
+1 protocol  →  many providers      18 vendors speak OpenAI Chat Completions
+1 provider  →  many models
+1 model     →  1 client
+```
+
+`Model.API` says which protocol, and that — never the vendor name — is what
+selects the driver. So **provider** names a configured host you can reach, and
+**protocol** names the request shape it speaks. `ProtocolOptions` scopes to the
+second, which is why `anthropic.Options` reaches MiniMax and Volcengine too:
+they speak that protocol without being that vendor.
 
 Two package-level ways in, and the difference is whether the environment is
 allowed to answer:

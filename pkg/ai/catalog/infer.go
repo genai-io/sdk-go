@@ -41,6 +41,18 @@ func inferOpenAI(m ai.Model) ai.Model {
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 1_047_576), orDefault(m.MaxOutput, 32_768)
 	case strings.HasPrefix(id, "gpt-4o"):
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 128_000), orDefault(m.MaxOutput, 16_384)
+
+	// The generations before GPT-5. They are not listed as rows — nobody
+	// starts a project on one — but /v1/models still serves them, and a
+	// caller who names one deserves a window rather than silence.
+	case strings.HasPrefix(id, "o1"), strings.HasPrefix(id, "o3"), strings.HasPrefix(id, "o4"):
+		m.ContextWindow, m.MaxOutput, reasons = orDefault(m.ContextWindow, 200_000), orDefault(m.MaxOutput, 100_000), true
+	case strings.HasPrefix(id, "gpt-4-turbo"):
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 128_000), orDefault(m.MaxOutput, 4_096)
+	case strings.HasPrefix(id, "gpt-4"):
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 8_192), orDefault(m.MaxOutput, 8_192)
+	case strings.HasPrefix(id, "gpt-3.5-turbo"):
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 16_385), orDefault(m.MaxOutput, 4_096)
 	}
 	if m.Reasoning != nil {
 		return m
@@ -91,6 +103,46 @@ func inferMoonshot(m ai.Model) ai.Model {
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 32_768), orDefault(m.MaxOutput, 8_192)
 	case strings.Contains(id, "8k"):
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 8_192), orDefault(m.MaxOutput, 3_000)
+	}
+	return m
+}
+
+// inferMiniMax sizes a MiniMax model from its generation. MiniMax publishes
+// prices per model but no windows at all, and its Anthropic-compatible
+// endpoint lists none either, so the generation in the ID is the only thing
+// there is to read: the whole M2 line shares one window, and M3 another.
+//
+// A generation this does not name reports unknown rather than borrowing a
+// neighbour's figure — the M2 and M3 windows differ by a factor of five, so a
+// wrong guess here is not a small one.
+func inferMiniMax(m ai.Model) ai.Model {
+	id := strings.ToLower(m.ID)
+	switch {
+	case strings.Contains(id, "minimax-m3"):
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 1_000_000), orDefault(m.MaxOutput, 8_192)
+	case strings.Contains(id, "minimax-m2"):
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 204_800), orDefault(m.MaxOutput, 8_192)
+	}
+	return m
+}
+
+// inferMiMo sizes a MiMo model from its generation.
+//
+// It matches on the generation rather than the whole ID because MiMo serves
+// the same model under two names — "mimo-v2.5-pro" and the vendor-qualified
+// "xiaomi/mimo-v2.5-pro" its own listing returns — and both have to size the
+// same. Within the v2 line the pro and flash tiers differ, so the tier is read
+// too.
+func inferMiMo(m ai.Model) ai.Model {
+	id := strings.ToLower(m.ID)
+	if !strings.Contains(id, "mimo-v2") {
+		return m
+	}
+	switch {
+	case strings.Contains(id, "flash"), strings.Contains(id, "omni"):
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 262_144), orDefault(m.MaxOutput, 65_536)
+	default:
+		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 1_048_576), orDefault(m.MaxOutput, 131_072)
 	}
 	return m
 }

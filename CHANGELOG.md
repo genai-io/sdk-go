@@ -7,6 +7,20 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API may change between minor releases.
 Each such change is listed under **Changed** with what to write instead.
 
+## [0.1.2] - 2026-08-22
+
+### Fixed
+
+- **MiniMax, MiMo and OpenAI now size the models their catalogs do not list.**
+  All three serve generations the table does not carry a row for — MiniMax's M2
+  line, MiMo's v2 line, OpenAI's o-series and the GPT-4 generations — and none
+  of the three publishes a window through its API. Those models resolved with
+  no window at all, which is what "cannot size this conversation" means to a
+  caller: every context measurement built on it goes quiet. Each vendor now
+  reads the generation out of the model ID, as Moonshot and BigModel already
+  did. A generation none of them names still reports zero rather than borrowing
+  a neighbour's figure.
+
 ## [0.1.1] - 2026-08-22
 
 ### Fixed
@@ -49,5 +63,6 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.1.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.2
 [0.1.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.1
 [0.1.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.0

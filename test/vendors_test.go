@@ -376,6 +376,53 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 	}
 }
 
+// A window a vendor never publishes is still knowable from the generation in
+// the model ID, which is the only place several of them put it. Reporting zero
+// instead is not a small failure for a caller: it is what "cannot size this
+// conversation" means, and everything built on the window goes quiet.
+func TestAGenerationInTheIDIsEnoughToSizeAModel(t *testing.T) {
+	tests := map[string]struct {
+		ref    string
+		window int
+		output int
+	}{
+		// Neither line is a row; both are what the endpoints still serve.
+		"minimax m2":           {"minmax/MiniMax-M2.1", 204_800, 8_192},
+		"minimax m2 highspeed": {"minmax/MiniMax-M2.5-highspeed", 204_800, 8_192},
+		"mimo v2 pro":          {"mimo/mimo-v2-pro", 1_048_576, 131_072},
+		"mimo v2 flash":        {"mimo/mimo-v2-flash", 262_144, 65_536},
+		// The same MiMo model under the name its own listing returns.
+		"mimo vendor-qualified": {"mimo/xiaomi/mimo-v2.5-pro", 1_048_576, 131_072},
+		"an openai generation":  {"openai/o3-mini", 200_000, 100_000},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			model, err := catalog.Model(tc.ref)
+			if err != nil {
+				t.Fatalf("catalog.Model: %v", err)
+			}
+			if model.ContextWindow != tc.window {
+				t.Errorf("ContextWindow = %d, want %d", model.ContextWindow, tc.window)
+			}
+			if model.MaxOutput != tc.output {
+				t.Errorf("MaxOutput = %d, want %d", model.MaxOutput, tc.output)
+			}
+		})
+	}
+
+	// And a generation nobody has checked reports nothing rather than
+	// borrowing the figure of whichever line it sorts next to.
+	unknown, err := catalog.Model("minmax/MiniMax-M9")
+	if err != nil {
+		t.Fatalf("catalog.Model: %v", err)
+	}
+	if unknown.ContextWindow != 0 {
+		t.Errorf("an unrecognised generation was sized at %d; a guessed window "+
+			"is acted on silently and is wrong in both directions", unknown.ContextWindow)
+	}
+}
+
 // A model that reasons has to be able to have that turn replayed, or the
 // conversation ends the first time it thinks: the turn can be read, appended to
 // history, and then never sent back. Which endpoints take their own reasoning

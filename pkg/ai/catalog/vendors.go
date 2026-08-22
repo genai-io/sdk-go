@@ -303,6 +303,7 @@ var vendors = []Vendor{
 			{ID: "MiniMax-M2.7-highspeed", Name: "MiniMax M2.7 Highspeed", ContextWindow: 204_800, MaxOutput: 8_192,
 				Pricing: cny(4.2, 16.8, 2.625, 0.42)},
 		},
+		Infer: inferMiniMax,
 	},
 	{
 		ID:          "moonshot",
@@ -413,6 +414,7 @@ var vendors = []Vendor{
 			{ID: "mimo-v2.5", Name: "MiMo V2.5", ContextWindow: 1_048_576,
 				Pricing: usd(0.14, 0.28, 0, 0.0028)},
 		},
+		Infer: inferMiMo,
 	},
 	{
 		ID:          "volcengine",

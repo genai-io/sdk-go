@@ -49,7 +49,7 @@ type Driver struct {
 // New builds a driver from a Config. It is registered as the factory for
 // ai.APIAnthropicMessages, so ai.Open reaches it without an explicit call.
 func New(cfg ai.Config) (ai.Driver, error) {
-	if err := ai.RejectConfigNative(cfg, Name); err != nil {
+	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
 	return NewWithClient(sdk.NewClient(ClientOptions(cfg)...), cfg)
@@ -114,7 +114,7 @@ func (d *Driver) Name() string { return Name }
 // Stream runs one Messages call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		native, err := ai.NativeAs[Native](req)
+		native, err := ai.ProtocolOptionsAs[Options](req)
 		if err != nil {
 			yield(ai.Delta{}, err)
 			return
@@ -254,7 +254,7 @@ func mapStopReason(reason string) ai.StopReason {
 // CountTokens asks the endpoint how large a prompt is, without generating
 // from it. Anthropic publishes this, so a caller never has to estimate.
 func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) {
-	native, err := ai.NativeAs[Native](req)
+	native, err := ai.ProtocolOptionsAs[Options](req)
 	if err != nil {
 		return 0, err
 	}

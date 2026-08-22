@@ -32,9 +32,9 @@ func Provider(vendorID string) (*provider.Provider, error) {
 		return nil, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
 	}
 	return v.Provider(provider.Config{
-		APIKey:  key,
-		BaseURL: BaseURL(v),
-		Native:  Deployment(v),
+		APIKey:         key,
+		BaseURL:        BaseURL(v),
+		ProtocolConfig: Deployment(v),
 	}), nil
 }
 

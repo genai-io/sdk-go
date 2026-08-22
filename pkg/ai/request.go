@@ -58,15 +58,15 @@ type Request struct {
 	// drivers apply them.
 	SamplingParams map[string]any
 
-	// Native carries settings only one protocol has, as that driver's Native
-	// value — anthropic.Native, responses.Native. It is the escape hatch for
+	// ProtocolOptions carries settings only one protocol has, as that driver's
+	// own value — anthropic.Options, responses.Options. It is the escape hatch for
 	// what the fields above deliberately do not model, so needing one thing a
 	// protocol offers does not mean writing a whole driver.
 	//
-	// A driver reads it with NativeAs. An absent value yields that driver's
+	// A driver reads it with ProtocolOptionsAs. An absent value yields that driver's
 	// zero value; the wrong concrete type fails the request instead of
 	// silently dropping a setting when the caller swaps protocols.
-	Native NativeOptions
+	ProtocolOptions ProtocolOptions
 }
 
 // Option sets one field of a Request.
@@ -151,9 +151,9 @@ func WithSamplingParams(params map[string]any) Option {
 	}
 }
 
-// WithNative supplies one driver's protocol-specific settings.
-func WithNative(native NativeOptions) Option {
-	return func(r *Request) { r.Native = native }
+// WithProtocolOptions supplies one driver's protocol-specific settings.
+func WithProtocolOptions(native ProtocolOptions) Option {
+	return func(r *Request) { r.ProtocolOptions = native }
 }
 
 // newRequest builds the request for one call: the model's own defaults first,
@@ -267,48 +267,48 @@ const (
 	CacheLong CacheRetention = "long"
 )
 
-// NativeOptions is one driver's protocol-specific request settings.
+// ProtocolOptions is one driver's protocol-specific request settings.
 //
 // Go has no union type, so this cannot enumerate the drivers that implement
-// it; what it can do is stop Request.Native from being a bare any. The value
-// is whatever that driver defines — anthropic.Native, responses.Native, or a
+// it; what it can do is stop Request.ProtocolOptions from being a bare any. The value
+// is whatever that driver defines — anthropic.Options, responses.Options, or a
 // type a driver outside this module declares — and the marker method is what
 // says it is meant to be one.
 //
-// A value of the wrong driver's type is still caught, by NativeAs, at the
+// A value of the wrong driver's type is still caught, by ProtocolOptionsAs, at the
 // moment the driver reads it.
-type NativeOptions interface {
-	// NativeOptions marks this type as one driver's request settings. A no-op:
+type ProtocolOptions interface {
+	// ProtocolOptions marks this type as one driver's request settings. A no-op:
 	//
-	//	func (Native) NativeOptions() {}
-	NativeOptions()
+	//	func (Options) ProtocolOptions() {}
+	ProtocolOptions()
 }
 
-// NativeAs reads a driver's protocol-specific settings out of a request. A
+// ProtocolOptionsAs reads a driver's protocol-specific settings out of a request. A
 // non-nil value of the wrong concrete type is an invalid request.
 //
-//	native, err := ai.NativeAs[anthropic.Native](req)
+//	native, err := ai.ProtocolOptionsAs[anthropic.Options](req)
 //	if native.ThinkingDisplay != "" { … }
-func NativeAs[T NativeOptions](req *Request) (T, error) {
+func ProtocolOptionsAs[T ProtocolOptions](req *Request) (T, error) {
 	var zero T
-	if req.Native == nil {
+	if req.ProtocolOptions == nil {
 		return zero, nil
 	}
-	native, ok := req.Native.(T)
+	native, ok := req.ProtocolOptions.(T)
 	if ok {
 		return native, nil
 	}
 	return zero, &Error{
 		Kind: KindInvalidRequest,
-		Message: "ai: native options have type " + reflect.TypeOf(req.Native).String() +
+		Message: "ai: native options have type " + reflect.TypeOf(req.ProtocolOptions).String() +
 			"; driver expects " + reflect.TypeFor[T]().String(),
 	}
 }
 
-// RejectNative returns an invalid-request error when a protocol with no native
+// RejectProtocolOptions returns an invalid-request error when a protocol with no native
 // option type receives one. Drivers call it before building their wire request.
-func RejectNative(req *Request, driver string) error {
-	if req.Native == nil {
+func RejectProtocolOptions(req *Request, driver string) error {
+	if req.ProtocolOptions == nil {
 		return nil
 	}
 	return &Error{

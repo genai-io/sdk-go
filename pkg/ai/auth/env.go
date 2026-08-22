@@ -35,8 +35,8 @@ func BaseURL(v catalog.Vendor) string {
 
 // Deployment reads a vendor's deployment-scoped settings — the ones that name
 // where a model runs rather than who is calling — into the value its driver
-// expects as Config.Native. It returns nil for a vendor that has none.
-func Deployment(v catalog.Vendor) ai.NativeConfig {
+// expects as Config.ProtocolConfig. It returns nil for a vendor that has none.
+func Deployment(v catalog.Vendor) ai.ProtocolConfig {
 	if len(v.DeploymentEnv) == 0 {
 		return nil
 	}
@@ -66,7 +66,7 @@ func checkDeployment(v catalog.Vendor, cfg ai.Config) error {
 	if v.API != ai.APIAnthropicVertex {
 		return nil
 	}
-	deployment, err := ai.ConfigNativeAs[ai.VertexConfig](cfg)
+	deployment, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
 	if err != nil {
 		return err
 	}

@@ -43,10 +43,10 @@ const DefaultRegion = "global"
 func init() { ai.RegisterAPI(ai.APIAnthropicVertex, New) }
 
 // New builds a driver from a Config. The GCP project and region come from
-// Config.Native as an ai.VertexConfig; package ai/auth fills one in from the
+// Config.ProtocolConfig as an ai.VertexConfig; package ai/auth fills one in from the
 // environment.
 func New(cfg ai.Config) (ai.Driver, error) {
-	deployment, err := ai.ConfigNativeAs[ai.VertexConfig](cfg)
+	deployment, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 		return nil, &ai.Error{
 			Driver:  Name,
 			Kind:    ai.KindAuth,
-			Message: "no Google Cloud project: set Config.Native to an ai.VertexConfig, or use auth.Endpoint to read it from the environment",
+			Message: "no Google Cloud project: set Config.ProtocolConfig to an ai.VertexConfig, or use auth.Endpoint to read it from the environment",
 		}
 	}
 	region := deployment.Region

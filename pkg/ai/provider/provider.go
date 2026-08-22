@@ -46,9 +46,9 @@ type Config struct {
 	HTTPClient *http.Client
 	Headers    map[string]string
 
-	// Native is passed through to every Config this provider builds — see
-	// Config.Native.
-	Native ai.NativeConfig
+	// ProtocolConfig is passed through to every Config this provider builds —
+	// see ai.Config.ProtocolConfig.
+	ProtocolConfig ai.ProtocolConfig
 
 	// Models is the static baseline: what is known without asking the
 	// endpoint. It may be empty for a provider that only has a live listing.
@@ -184,12 +184,12 @@ func defaultFetch(ctx context.Context, p *Provider) ([]ai.Model, error) {
 // ConfigFor builds the ai.Config for opening one of this provider's models.
 func (p *Provider) ConfigFor(m ai.Model) ai.Config {
 	return ai.Config{
-		Model:      m.Clone(),
-		APIKey:     p.cfg.APIKey,
-		BaseURL:    p.cfg.BaseURL,
-		HTTPClient: p.cfg.HTTPClient,
-		Headers:    maps.Clone(p.cfg.Headers),
-		Native:     p.cfg.Native,
+		Model:          m.Clone(),
+		APIKey:         p.cfg.APIKey,
+		BaseURL:        p.cfg.BaseURL,
+		HTTPClient:     p.cfg.HTTPClient,
+		Headers:        maps.Clone(p.cfg.Headers),
+		ProtocolConfig: p.cfg.ProtocolConfig,
 	}
 }
 

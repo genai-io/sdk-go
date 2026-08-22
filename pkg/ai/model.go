@@ -36,7 +36,7 @@ const (
 )
 
 // VertexConfig is the deployment a Vertex-served model lives in. It is passed
-// as Config.Native to the anthropic/vertex driver.
+// as Config.ProtocolConfig to the anthropic/vertex driver.
 //
 // It lives here rather than beside that driver so a caller can fill it in —
 // from the environment, from a settings file — without importing the driver
@@ -49,8 +49,8 @@ type VertexConfig struct {
 	Region string
 }
 
-// NativeConfig marks VertexConfig as a driver's construction settings.
-func (VertexConfig) NativeConfig() {}
+// ProtocolConfig marks VertexConfig as a driver's construction settings.
+func (VertexConfig) ProtocolConfig() {}
 
 // Modality is a kind of content a model accepts as input.
 //

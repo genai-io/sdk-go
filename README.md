@@ -386,21 +386,21 @@ interfaces, discovered by type assertion; a driver that omits one is never an
 error.
 
 Register from `init` so a blank import is enough to make the protocol
-reachable. A setting only your protocol has goes in a typed `Native` value
+reachable. A setting only your protocol has goes in a typed `ProtocolOptions` value
 rather than a new field on `Request`:
 
 ```go
 response, err := client.Complete(ctx, messages,
-	ai.WithNative(anthropic.Native{ThinkingDisplay: "omitted"}))
+	ai.WithProtocolOptions(anthropic.Options{ThinkingDisplay: "omitted"}))
 ```
 
-Your type implements `ai.NativeOptions` — a one-line marker method — so the
+Your type implements `ai.ProtocolOptions` — a one-line marker method — so the
 field is not a bare `any` and a value that was never meant to go there is a
 compile error. A value of the *wrong driver's* type, or one sent to a protocol
 that defines none, is an invalid request caught when that driver reads it. It
 is never ignored silently.
 
-Construction settings work the same way through `ai.NativeConfig`.
+Construction settings work the same way through `ai.ProtocolConfig`.
 
 ## Testing
 

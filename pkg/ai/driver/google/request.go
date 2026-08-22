@@ -13,7 +13,7 @@ import (
 
 // request assembles the body of a generate call.
 func (d *Driver) request(req *ai.Request) (*generateRequest, error) {
-	if err := ai.RejectNative(req, Name); err != nil {
+	if err := ai.RejectProtocolOptions(req, Name); err != nil {
 		return nil, err
 	}
 	contents, err := d.convertContents(req)

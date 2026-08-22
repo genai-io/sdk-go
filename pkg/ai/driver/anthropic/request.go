@@ -42,7 +42,7 @@ func (t *toolIDs) resolve(id string) string {
 	return mapped
 }
 
-func (d *Driver) buildParams(req *ai.Request, native Native) (*sdk.MessageNewParams, error) {
+func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewParams, error) {
 	var ids toolIDs
 
 	// The rung carries both halves of the mapping: Value is what
@@ -137,9 +137,9 @@ func (d *Driver) buildParams(req *ai.Request, native Native) (*sdk.MessageNewPar
 	return params, nil
 }
 
-// Native carries the Anthropic-only settings the normalized Options do not
-// model. Pass it with ai.WithNative; the zero value changes nothing.
-type Native struct {
+// Options carries the Anthropic-only settings the normalized Options do not
+// model. Pass it with ai.WithProtocolOptions; the zero value changes nothing.
+type Options struct {
 	// ThinkingDisplay controls how thinking comes back: "summarized" returns
 	// readable reasoning, "omitted" returns an empty thinking field with the
 	// signature still attached for multi-turn continuity. Omitted is faster to
@@ -155,8 +155,8 @@ type Native struct {
 	DisableParallelToolUse bool
 }
 
-// NativeOptions marks this as one driver's request settings.
-func (Native) NativeOptions() {}
+// ProtocolOptions marks this as one driver's request settings.
+func (Options) ProtocolOptions() {}
 
 // cacheControl maps the requested retention onto a cache_control marker. A nil
 // result means no breakpoint, which is what CacheNone asks for and what an
@@ -178,7 +178,7 @@ func (d *Driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphe
 
 // toolChoice maps the neutral constraint onto Anthropic's union. A nil result
 // leaves the field off, which is the API's own default.
-func toolChoice(req *ai.Request, native Native) *sdk.ToolChoiceUnionParam {
+func toolChoice(req *ai.Request, native Options) *sdk.ToolChoiceUnionParam {
 	noParallel := sdk.Bool(true)
 	if !native.DisableParallelToolUse {
 		noParallel = sdk.Bool(false)

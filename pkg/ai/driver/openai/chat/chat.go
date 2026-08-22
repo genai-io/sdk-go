@@ -50,7 +50,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if cfg.Model.ID == "" {
 		return nil, fmt.Errorf("%s: model ID is required", Name)
 	}
-	if err := ai.RejectConfigNative(cfg, Name); err != nil {
+	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
 
@@ -86,7 +86,7 @@ func (d *Driver) Name() string { return Name }
 // Stream runs one Chat Completions call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		if err := ai.RejectNative(req, Name); err != nil {
+		if err := ai.RejectProtocolOptions(req, Name); err != nil {
 			yield(ai.Delta{}, err)
 			return
 		}

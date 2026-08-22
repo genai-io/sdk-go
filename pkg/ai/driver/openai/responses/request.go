@@ -11,7 +11,7 @@ import (
 // what this protocol wants on the wire.
 
 func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
-	native, err := ai.NativeAs[Native](req)
+	native, err := ai.ProtocolOptionsAs[Options](req)
 	if err != nil {
 		return wire.ResponseNewParams{}, err
 	}
@@ -95,9 +95,9 @@ func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 	return params, nil
 }
 
-// Native carries the Responses-only settings the normalized Options do not
-// model. Pass it with ai.WithNative; the zero value changes nothing.
-type Native struct {
+// Options carries the Responses-only settings the normalized Options do not
+// model. Pass it with ai.WithProtocolOptions; the zero value changes nothing.
+type Options struct {
 	// Include asks for extra response fields, e.g.
 	// "reasoning.encrypted_content". The stateless backend sets that one
 	// itself; this is for anything else.
@@ -107,8 +107,8 @@ type Native struct {
 	PromptCacheKey string
 }
 
-// NativeOptions marks this as one driver's request settings.
-func (Native) NativeOptions() {}
+// ProtocolOptions marks this as one driver's request settings.
+func (Options) ProtocolOptions() {}
 
 // toolChoice maps the neutral constraint onto the Responses union. A nil
 // result leaves the field off, which is the API's own default.

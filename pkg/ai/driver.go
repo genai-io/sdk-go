@@ -117,14 +117,14 @@ type Config struct {
 	// Headers are added to every request — a gateway token, a tenant tag.
 	Headers map[string]string
 
-	// Native carries construction settings only one protocol needs, as that
-	// driver's value — VertexConfig for a model served through Vertex AI. It
-	// is the Config-level counterpart to Request.Native: the latter varies per
+	// ProtocolConfig carries construction settings only one protocol needs, as
+	// that driver's value — VertexConfig for a model served through Vertex AI. It
+	// is the Config-level counterpart to Request.ProtocolOptions: the latter varies per
 	// request, this one is fixed for the endpoint.
 	//
-	// Read it with ConfigNativeAs. A wrong concrete type is rejected rather than
+	// Read it with ProtocolConfigAs. A wrong concrete type is rejected rather than
 	// silently losing construction settings.
-	Native NativeConfig
+	ProtocolConfig ProtocolConfig
 }
 
 // MergedHeaders returns the headers to send: the model's, then the Config's
@@ -250,41 +250,41 @@ func (e *UnregisteredAPIError) Error() string {
 	return fmt.Sprintf("ai: no driver registered for API %q (registered: %v)", e.API, names)
 }
 
-// NativeConfig is one driver's protocol-specific construction settings — the
-// Config-level counterpart to NativeOptions.
+// ProtocolConfig is one driver's protocol-specific construction settings — the
+// Config-level counterpart to ProtocolOptions.
 //
 // ai.VertexConfig is the only one this module defines, and it lives in package
 // ai rather than beside its driver so a caller can fill it in without pulling
 // in Google Cloud auth.
-type NativeConfig interface {
-	// NativeConfig marks this type as one driver's construction settings. A
-	// no-op, as NativeOptions.NativeOptions is.
-	NativeConfig()
+type ProtocolConfig interface {
+	// ProtocolConfig marks this type as one driver's construction settings. A
+	// no-op, as ProtocolOptions.ProtocolOptions is.
+	ProtocolConfig()
 }
 
-// ConfigNativeAs reads a driver's protocol-specific construction settings out
+// ProtocolConfigAs reads a driver's protocol-specific construction settings out
 // of a Config.
 //
-//	vertex, err := ai.ConfigNativeAs[ai.VertexConfig](cfg)
-func ConfigNativeAs[T NativeConfig](config Config) (T, error) {
+//	vertex, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
+func ProtocolConfigAs[T ProtocolConfig](config Config) (T, error) {
 	var zero T
-	if config.Native == nil {
+	if config.ProtocolConfig == nil {
 		return zero, nil
 	}
-	native, ok := config.Native.(T)
+	native, ok := config.ProtocolConfig.(T)
 	if ok {
 		return native, nil
 	}
 	return zero, &Error{
 		Kind:    KindInvalidRequest,
-		Message: fmt.Sprintf("ai: native config has type %T; driver expects %s", config.Native, reflect.TypeFor[T]()),
+		Message: fmt.Sprintf("ai: native config has type %T; driver expects %s", config.ProtocolConfig, reflect.TypeFor[T]()),
 	}
 }
 
-// RejectConfigNative returns an invalid-request error for a protocol with no
+// RejectProtocolConfig returns an invalid-request error for a protocol with no
 // native construction options.
-func RejectConfigNative(config Config, driver string) error {
-	if config.Native == nil {
+func RejectProtocolConfig(config Config, driver string) error {
+	if config.ProtocolConfig == nil {
 		return nil
 	}
 	return &Error{

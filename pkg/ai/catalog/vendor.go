@@ -57,7 +57,7 @@ type Vendor struct {
 
 	// DeploymentEnv names the environment variables that carry a
 	// deployment-scoped setting rather than a credential — a Vertex project
-	// and region, for instance. auth reads them into Config.Native.
+	// and region, for instance. auth reads them into Config.ProtocolConfig.
 	DeploymentEnv map[string]string
 
 	// Input lists the content kinds this vendor's models accept, for models

@@ -70,7 +70,7 @@ func Config(ref string) (ai.Config, error) {
 	if key == "" && len(v.KeyEnv) > 0 {
 		return ai.Config{}, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
 	}
-	cfg := ai.Config{Model: model, APIKey: key, BaseURL: BaseURL(v), Native: Deployment(v)}
+	cfg := ai.Config{Model: model, APIKey: key, BaseURL: BaseURL(v), ProtocolConfig: Deployment(v)}
 	if err := checkBaseURL(v, cfg); err != nil {
 		return ai.Config{}, err
 	}

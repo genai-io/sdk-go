@@ -68,7 +68,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if cfg.Model.ID == "" {
 		return nil, fmt.Errorf("%s: model ID is required", Name)
 	}
-	if err := ai.RejectConfigNative(cfg, Name); err != nil {
+	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
 

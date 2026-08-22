@@ -447,6 +447,10 @@ one per wire format and none per vendor. And a file is named for the subject it
 owns and owns all of it — if two files hold part of one idea, one of them is
 wrong.
 
+[`docs/architecture.md`](docs/architecture.md) is the part no single file owns:
+how the pieces fit, which direction the dependencies run, and what a request
+passes through between your call and the bytes on the wire.
+
 ## Versioning
 
 The API is in early development and may change. Pin a commit until a tagged

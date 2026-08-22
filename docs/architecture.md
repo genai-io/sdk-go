@@ -1,8 +1,10 @@
-# Design of `pkg/ai`
+# Architecture of `pkg/ai`
 
-This is why the package is shaped the way it is. The README says how to use it;
-`go doc` carries the reasoning for each decision next to the code it governs.
-This document is the part that no single file owns: the shape of the whole.
+Three documents, three jobs. The README says **how to use** the library.
+`go doc` carries the reasoning for each decision **next to the code** it
+governs. This one is the part no single file owns: **how the pieces fit** —
+which package knows what, which direction the dependencies run, and what a
+request passes through between your call and the bytes on the wire.
 
 ## The thesis
 
@@ -37,30 +39,17 @@ builder branches on `Compat` fields and `ReasoningLevel` data instead.
 The chain a caller walks down:
 
 ```
-catalog.Vendor      data — a row you can read without a network
-      ↓ .Provider(cfg)
+catalog.Vendor      data - a row you can read without a network
+      | .Provider(cfg)
+      v
 provider.Provider   that row configured and credentialed, with a live model list
-      ↓ .Open(id)
+      | .Open(id)
+      v
 ai.Client           one model
 ```
 
 Each rung adds one kind of knowledge and delegates down. `catalog` needs no
 network; `provider` reaches one; `Client` runs one call.
-
-**Protocol is a second axis, not the next rung.** A Provider *has* a protocol;
-it is not one. The cardinality is what separates them:
-
-```
-1 protocol  →  many providers      18 vendors speak OpenAI Chat Completions
-1 provider  →  many models
-1 model     →  1 client
-```
-
-`Model.API` says which protocol, and that — never the vendor name — is what
-selects the driver. So **provider** names a configured host you can reach, and
-**protocol** names the request shape it speaks. `ProtocolOptions` scopes to the
-second, which is why `anthropic.Options` reaches MiniMax and Volcengine too:
-they speak that protocol without being that vendor.
 
 Two package-level ways in, and the difference is whether the environment is
 allowed to answer:
@@ -74,6 +63,69 @@ auth.Client("vendor/model")  // the catalog and the environment supply them
 in a server holding several tenants' keys. `pkg/ai/auth` is the opt-in that
 does read them, which is what a command-line tool wants. The split is an import
 boundary, not a convention.
+
+**Protocol is a second axis, not the next rung.** A Provider *has* a protocol;
+it is not one. Put the two axes on one picture and the driver's place is
+obvious — it hangs off the model, not off the chain:
+
+```
+  auth.Client("deepseek/deepseek-v4-pro")
+        |
+        v
+  catalog.Vendor ---> provider.Provider ---> ai.Client ---> ai.Driver ---> HTTPS
+   a row of data       host + credential      one model     one protocol
+   no network          + live model list          |             ^
+                                                  |             |
+                                                  +-------------+
+                                              Model.API selects it
+```
+
+`Model.API` — never the vendor name — is what picks the driver. That is the
+whole reason a vendor can be data: everything else about DeepSeek is a base
+URL, an environment variable and a reasoning dialect.
+
+The cardinality is what keeps the two words apart:
+
+```
+1 protocol  ->  many providers     18 vendors speak OpenAI Chat Completions
+1 provider  ->  many models
+1 model     ->  1 client
+```
+
+So **provider** names a configured host you can reach, and **protocol** names
+the request shape it speaks. `ProtocolOptions` scopes to the second, which is
+why `anthropic.Options` reaches MiniMax and Volcengine too: they speak that
+protocol without being that vendor.
+
+## 27 vendors, 5 protocols, 5 driver packages
+
+This is the thesis as a picture. The left column is data; only the right
+column is Go code.
+
+```
+  catalog rows                    Model.API                  driver package
+  ----------------------------    -----------------------    --------------------------
+  deepseek    moonshot    zai  |
+  alibaba     bigmodel    xai  |
+  ollama      groq      nvidia |
+  cerebras    together  agnesai+--> openai-chat-completions --> driver/openai/chat
+  fireworks   copilot  sensenova         18 vendors
+  openrouter  huggingface      |
+  bedrock-openai               |
+
+  anthropic   minmax           |
+  mimo        volcengine       +--> anthropic-messages      --> driver/anthropic
+                                        4 vendors
+
+  openai      azure-openai     |
+  openai-codex                 +--> openai-responses        --> driver/openai/responses
+                                        3 vendors
+
+  anthropic-vertex              --> anthropic-vertex        --> driver/anthropic/vertex
+  google                        --> google-genai            --> driver/google
+```
+
+Adding a nineteenth OpenAI-compatible vendor moves the left column only.
 
 ## The core primitive: ordered blocks
 
@@ -200,6 +252,42 @@ It does not guess. A model whose context window is unknown reports zero
 headroom rather than a substituted number, because acting on a guessed limit
 fails silently in both directions.
 
+## What one call passes through
+
+Between `client.Complete(ctx, messages, opts...)` and bytes on the wire:
+
+```
+  messages + options
+        |
+        |  +---------------------- Client.prepare ------------------------+
+        +--| newRequest         model defaults -> client -> call, in order |
+        |  | validateStructure  the tagged-union invariants a Block holds  |
+        |  | RepairHistory      pair tool calls, replace invalid UTF-8     |
+        |  | validate           settings, then what this model cannot do   |
+        |  +--------------------------------------------------------------+
+        v
+    *ai.Request  ------------->  Driver.Stream
+                                      |   translate to the wire format,
+                                      |   send, and yield while reading
+                                      v
+                               iter.Seq2[Delta, error]      raw fragments
+                                      |
+                                      |   blockTracker assembles
+                                      v
+                               iter.Seq2[Event, error]      ordered blocks
+                                      |
+                                      v
+                                 *ai.Response               Complete drains this
+```
+
+Everything in the box happens once, for every protocol. That is the line a
+driver sits behind: it translates and streams, and does nothing else. It is
+also why `Client.Complete` is not a second code path — it drains `Stream`, so
+a request reaches an endpoint exactly one way.
+
+The same `*ai.Request` is what `CountTokens` measures, so a prompt cannot be
+sized differently from how it is sent.
+
 ## Failing before the network
 
 Three layers of validation run before a request leaves, in this order:
@@ -224,9 +312,29 @@ carrying what arrived first, so a partial answer and its cost survive.
 
 Some rules here are conventions and some are checked. It is worth knowing which:
 
-- `catalog` depends on no driver package. Verifiable: its whole tree is
-  `pkg/ai` plus `pkg/ai/provider`. This is what lets a program that talks to one
-  vendor avoid linking every vendor's SDK.
+- **The dependency graph runs one way, and `pkg/ai` is the root.** It imports
+  nothing else in this repository:
+
+  ```
+  indentation is "imports the line above"
+
+  pkg/ai                  the core. No repo imports, no vendor SDK,
+                          no environment variable, no file.
+    |
+    +-- pkg/ai/driver/*   one package per protocol. Each pulls in that
+    |                     protocol's vendor SDK, and nothing else does.
+    |
+    +-- pkg/ai/provider   one configured host and its live model list
+          |
+          +-- pkg/ai/catalog    the vendor table
+                |
+                +-- pkg/ai/auth    env, files, OAuth
+  ```
+
+  `catalog` depends on **no** driver package — its whole tree is `pkg/ai` plus
+  `pkg/ai/provider`. That is what lets a program talking to one vendor avoid
+  linking every vendor's SDK, and it is why the `Compat` types live in `pkg/ai`
+  rather than beside the drivers that read them.
 - `driver/openai/internal/errs` is unreachable from `driver/anthropic`, by
   `internal/`.
 - `ProtocolOptions` / `ProtocolConfig` reject a value that was never meant to be

@@ -195,7 +195,8 @@ var byteSchema = map[reflect.Type]*jsonschema.Schema{
 func deriveSchema[T any]() map[string]any {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: byteSchema})
 	if err != nil {
-		panic(fmt.Sprintf("ai: cannot describe %s as a JSON Schema: %v", reflect.TypeFor[T](), err))
+		panic(fmt.Sprintf("ai: cannot describe %s as a JSON Schema: %v%s",
+			reflect.TypeFor[T](), err, tagHint(err)))
 	}
 	raw, err := json.Marshal(schema)
 	if err != nil {
@@ -299,4 +300,19 @@ func propertyPath(location string) string {
 		}
 	}
 	return strings.Join(parts, ".")
+}
+
+// tagHint turns the one mistake everybody makes into an instruction.
+//
+// Other Go JSON Schema libraries read the same tag key as key=value pairs, so
+// the reflex is to write jsonschema:"description=…". This one takes the whole
+// tag as the description and refuses the prefix; the refusal names the rule
+// but not the fix, so the fix is appended here.
+func tagHint(err error) string {
+	if !strings.Contains(err.Error(), "must not begin with") {
+		return ""
+	}
+	return `; the whole tag is the description — write ` +
+		"`jsonschema:\"what to look for\"`, not " +
+		"`jsonschema:\"description=what to look for\"`"
 }

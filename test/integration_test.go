@@ -675,3 +675,26 @@ func TestRetryStopsOnACanceledContext(t *testing.T) {
 		t.Errorf("the endpoint saw %d requests, want the one before the cancel", seen)
 	}
 }
+
+// The tag key is the one another library's users reflexively fill in with
+// key=value pairs. Upstream refuses that, and the refusal has to say what to
+// write instead — a panic naming a rule but not a fix is a bad panic.
+func TestABadSchemaTagSaysHowToFixIt(t *testing.T) {
+	type Wrong struct {
+		Query string `json:"query" jsonschema:"description=what to look for"`
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a description= tag must not be accepted; upstream rejects it")
+		}
+		msg := fmt.Sprint(r)
+		for _, want := range []string{"Wrong", "the whole tag is the description"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("panic = %q\nwant it to mention %q", msg, want)
+			}
+		}
+	}()
+	_ = ai.SchemaOf[Wrong]("")
+}

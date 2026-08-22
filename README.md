@@ -74,7 +74,9 @@ client, err := auth.Client("ollama/llama4")
 Swap the blank import for that model's protocol, or use
 `pkg/ai/driver/all` when the model is chosen at runtime.
 
-Runnable examples for each vendor are in [`examples/`](examples).
+Runnable examples are in [`examples/`](examples) — one per vendor, plus
+[`tools/`](examples/tools) and [`structured/`](examples/structured) for the two
+capabilities below.
 
 ## Streaming
 

@@ -1,12 +1,25 @@
 # Examples
 
-Each folder shows something the others do not. The request code barely changes
-between them — that is the point — so what each one is actually for is the
-vendor-specific thing it demonstrates.
+Two kinds of folder. Most show one vendor, and what is worth seeing is the
+vendor-specific thing each demonstrates — the request code barely changes
+between them, which is the point. The rest show a capability that works the
+same everywhere.
+
+## Capabilities
+
+| | What it shows |
+| --- | --- |
+| [`quickstart/`](quickstart) | The smallest thing that works: one prompt, streamed, against any model the catalog can name |
+| [`tools/`](tools) | A tool-calling loop, and the four rules that make one work: the schema comes from the Go type, arguments are checked before anything runs, every call is answered in the turn that follows, and the model's own state is carried forward |
+| [`structured/`](structured) | Asking for an answer shaped like a Go type and getting one back decoded, in a single call — with the struct tags that tell the model what each field means and what it may contain |
+
+Run `go run ./examples/structured -schema` to see what a Go type actually
+becomes on the wire.
+
+## Vendors
 
 | | Vendor | Protocol | What it shows |
 | --- | --- | --- | --- |
-| [`quickstart/`](quickstart) | any | any | The smallest thing that works: one prompt, streamed, against any model the catalog can name — and the only folder here that is not about one vendor |
 | [`anthropic/`](anthropic) | Anthropic | Messages | Thinking blocks you can read, and aiming the prompt cache — with what it cost |
 | [`openai/`](openai) | OpenAI | Responses | Carrying a reasoning model's own state across turns, so it resumes instead of starting over |
 | [`qwen/`](qwen) | Alibaba (Qwen) | Chat Completions | A vendor that is pure data — and how to reach an OpenAI-compatible endpoint the catalog has never heard of |

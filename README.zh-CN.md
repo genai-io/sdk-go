@@ -65,7 +65,7 @@ client, err := auth.Client("ollama/llama4")
 
 把 blank import 换成那个模型的协议；如果模型是运行时才决定的，用 `pkg/ai/driver/all`。
 
-各家厂商的可运行示例在 [`examples/`](examples)。
+可运行示例在 [`examples/`](examples)：每家厂商一个，另有 [`tools/`](examples/tools) 和 [`structured/`](examples/structured) 两个能力示例。
 
 ## 流式
 

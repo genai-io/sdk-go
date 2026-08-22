@@ -9,6 +9,8 @@ provider serves the request. The library ships a catalog of 27 vendors and 55
 models — endpoints, limits, pricing and per-endpoint quirks as data — and reads
 no credentials unless you opt in.
 
+> 中文文档：[README.zh-CN.md](README.zh-CN.md)
+
 ## Requirements
 
 Go 1.24 or later.
@@ -334,7 +336,7 @@ runs the browser sign-in for the vendors that authenticate a person rather than
 a service (GitHub Copilot, ChatGPT/Codex). The only file this library writes is
 that credential store, `0600` under the user's config directory.
 
-## Endpoints and model listings
+## Providers and model listings
 
 Three layers, named for what tells them apart:
 
@@ -345,10 +347,10 @@ Three layers, named for what tells them apart:
 | `ai.Client` | One model on it. |
 
 ```go
-ep, err := auth.Provider("ollama")
-models := ep.Models()      // synchronous, never blocks, never fails
-err = ep.Refresh(ctx)      // the only call that reaches the network
-client, err := ep.Client("llama4")
+p, err := auth.Provider("ollama")
+models := p.Models()       // synchronous, never blocks, never fails
+err = p.Refresh(ctx)       // the only call that reaches the network
+client, err := p.Client("llama4")
 ```
 
 Reading the list and fetching it are separate verbs so a model picker renders

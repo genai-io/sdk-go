@@ -312,7 +312,7 @@ This library does not retry. Retry, caching, logging and cost metering are
 may be cached and what must not be logged:
 
 ```go
-client := ai.New(driver, model).Use(retry, costMeter)
+client := ai.New(ai.Wrap(driver, retry, costMeter), model)
 ```
 
 One rule is not yours to discover: a retry may only replay a call that failed

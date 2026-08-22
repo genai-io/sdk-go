@@ -92,12 +92,11 @@
 // # Middleware
 //
 // Middleware wraps execution policy — retry, logging, caching, metering. It
-// decorates the driver rather than the client, because a Handler and
-// Driver.Stream are the same shape; Use is the flat way to attach it and Wrap
-// is the same thing returning a Driver:
+// decorates the driver rather than the client, because Handler and
+// Driver.Stream are the same shape, so a wrapped driver is still a Driver —
+// the shape net/http uses for the same job:
 //
-//	client := ai.New(driver, model).Use(retry, costMeter)
-//	decorated := ai.Wrap(driver, retry, costMeter)
+//	client := ai.New(ai.Wrap(driver, retry, costMeter), model)
 //
 // The policy itself belongs to the caller, who alone knows the budget for a
 // turn and what must not be logged. One rule is not theirs to discover: a

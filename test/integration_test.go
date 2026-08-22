@@ -520,9 +520,9 @@ func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
 	}
 }
 
-// Middleware reaches the driver whichever way it was attached, and runs
-// outermost first.
-func TestUseIsTheFlatSpellingOfWrap(t *testing.T) {
+// Middleware runs outermost first, and a wrapped driver is still a Driver —
+// which is what lets one be built once and handed to several clients.
+func TestWrappedDriverRunsMiddlewareOutermostFirst(t *testing.T) {
 	e := sse(t, false, [2]string{"", `{"id":"1","model":"m","choices":[{"index":0,` +
 		`"delta":{"content":"ok"},"finish_reason":"stop"}]}`})
 	model := ai.Model{ID: "m", API: ai.APIOpenAIChat, BaseURL: e.server.URL}
@@ -542,47 +542,22 @@ func TestUseIsTheFlatSpellingOfWrap(t *testing.T) {
 		t.Fatalf("NewDriver: %v", err)
 	}
 
-	for _, tc := range []struct {
-		name  string
-		build func() *ai.Client
-	}{
-		{"Wrap", func() *ai.Client { return ai.New(ai.Wrap(driver, tag("outer"), tag("inner")), model) }},
-		{"Use", func() *ai.Client { return ai.New(driver, model).Use(tag("outer"), tag("inner")) }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			order = nil
-			if _, err := tc.build().Complete(context.Background(),
-				[]ai.Message{ai.UserMessage("hi")}); err != nil {
-				t.Fatalf("Complete: %v", err)
-			}
-			if len(order) != 2 || order[0] != "outer" || order[1] != "inner" {
-				t.Errorf("middleware ran %v, want outermost first", order)
-			}
-		})
+	wrapped := ai.Wrap(driver, tag("outer"), tag("inner"))
+	if _, err := ai.New(wrapped, model).Complete(context.Background(),
+		[]ai.Message{ai.UserMessage("hi")}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(order) != 2 || order[0] != "outer" || order[1] != "inner" {
+		t.Fatalf("middleware ran %v, want outermost first", order)
 	}
 
-	// Use returns a copy. A client already shared with other goroutines must
-	// not start running someone else's middleware.
-	t.Run("Use does not touch the client it came from", func(t *testing.T) {
-		plain := ai.New(driver, model)
-		metered := plain.Use(tag("metered"))
-
-		order = nil
-		if _, err := plain.Complete(context.Background(),
-			[]ai.Message{ai.UserMessage("hi")}); err != nil {
-			t.Fatalf("Complete: %v", err)
-		}
-		if len(order) != 0 {
-			t.Errorf("the original client ran %v; Use edited it in place", order)
-		}
-
-		order = nil
-		if _, err := metered.Complete(context.Background(),
-			[]ai.Message{ai.UserMessage("hi")}); err != nil {
-			t.Fatalf("Complete: %v", err)
-		}
-		if len(order) != 1 {
-			t.Errorf("the derived client ran %v, want the middleware", order)
-		}
-	})
+	// The undecorated driver is untouched, so a client built from it runs none.
+	order = nil
+	if _, err := ai.New(driver, model).Complete(context.Background(),
+		[]ai.Message{ai.UserMessage("hi")}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(order) != 0 {
+		t.Errorf("the plain driver ran %v; Wrap edited it in place", order)
+	}
 }

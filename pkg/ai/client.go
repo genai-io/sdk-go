@@ -29,25 +29,6 @@ func New(d Driver, m Model, defaults ...Option) *Client {
 	return &Client{driver: d, model: cloneModel(m), defaults: slices.Clone(defaults)}
 }
 
-// Use returns a copy of this client whose driver is wrapped in middleware,
-// outermost first:
-//
-//	client := ai.New(driver, model).Use(retry, costMeter)
-//
-// It is the flat spelling of ai.New(ai.Wrap(driver, retry, costMeter), model).
-// Reach for Wrap directly when the decorated Driver itself is what you want —
-// to build several clients from, or to hand somewhere a Driver is expected.
-//
-// A copy rather than a mutation, so the concurrency contract above holds
-// without an exception: a client already handed to other goroutines is not
-// changed by this, and metering one code path does not silently meter every
-// other one sharing the client.
-func (c *Client) Use(mw ...Middleware) *Client {
-	out := *c
-	out.driver = Wrap(c.driver, mw...)
-	return &out
-}
-
 // Model describes the model this client talks to. The value is a detached
 // snapshot, so editing it changes nothing here — a client is bound to one
 // model for its lifetime, and this hands back a description of that binding,
@@ -266,14 +247,17 @@ type Middleware func(Handler) Handler
 
 // Wrap returns a Driver that runs mw around d, outermost first.
 //
+//	client := ai.New(ai.Wrap(driver, retry, costMeter), model)
+//
 // Middleware decorates the driver rather than the client because that is what
-// it actually is: a Handler wrapping a Handler. Composing it here keeps it
-// visible at the point of construction —
+// it actually is: Handler and Driver.Stream are the same shape, so a wrapped
+// driver is still a Driver. This is the shape net/http uses for the same job —
+// a RoundTripper wrapping a RoundTripper — and it buys what a client setting
+// would not: the decorated driver composes, so one can be built once and
+// handed to several clients, or passed anywhere an undecorated one goes.
 //
-//	client := ai.New(ai.Wrap(driver, retry, logging), model)
-//
-// — instead of hiding it in a client setting, and it means a decorated driver
-// can be handed anywhere an undecorated one can.
+// It also keeps the composition visible where the client is built, rather than
+// as a flag whose effect a reader has to go looking for.
 func Wrap(d Driver, mw ...Middleware) Driver {
 	h := Handler(d.Stream)
 	for i := len(mw) - 1; i >= 0; i-- {

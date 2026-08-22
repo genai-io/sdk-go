@@ -263,7 +263,7 @@ case ai.IsUnsupported(err):
 **这个库不重试。** 重试、缓存、日志、成本计量都是 `Middleware`，因为只有你的应用知道一轮的预算、什么可以缓存、什么绝不能记进日志：
 
 ```go
-client := ai.New(driver, model).Use(retry, costMeter)
+client := ai.New(ai.Wrap(driver, retry, costMeter), model)
 ```
 
 有一条规则不该让你自己去踩出来：**重试只能重放一个在产出任何 delta 之前就失败的调用。** 一旦有输出到了你手里，答案就已经开始了，重发要么把已经显示的文字重复一遍，要么把它丢掉。

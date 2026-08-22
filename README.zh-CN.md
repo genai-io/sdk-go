@@ -260,13 +260,15 @@ case ai.IsUnsupported(err):
 
 ## 重试与其他执行策略
 
-**这个库不重试。** 重试、缓存、日志、成本计量都是 `Middleware`，因为只有你的应用知道一轮的预算、什么可以缓存、什么绝不能记进日志：
+执行策略是装饰 driver 的 `Middleware`，因为只有你的应用知道一轮的预算、什么可以缓存、什么绝不能记进日志：
 
 ```go
-client := ai.New(ai.Wrap(driver, retry, costMeter), model)
+client := ai.New(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
 ```
 
-有一条规则不该让你自己去踩出来：**重试只能重放一个在产出任何 delta 之前就失败的调用。** 一旦有输出到了你手里，答案就已经开始了，重发要么把已经显示的文字重复一遍，要么把它丢掉。
+`Retry` 是这个库**唯一自带**的策略。每个 driver 都关掉了厂商 SDK 自带的重试，所以不用它你**一次重试都没有**；而自己写这个东西，错法很隐蔽——表现是输出重复或凭空消失，而不是报错。它只在三个条件同时成立时重放：失败被归类为可重试、**还没有任何输出到达你手里**、context 仍然有效。厂商自己给的 `Retry-After` 优先于退避时间。
+
+缓存、日志、成本计量仍然归你：一个 `Middleware` 就是包着 `Handler` 的 `Handler`，跟 `Driver.Stream` 形状相同。
 
 ## 凭证
 

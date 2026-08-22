@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
@@ -559,5 +560,112 @@ func TestWrappedDriverRunsMiddlewareOutermostFirst(t *testing.T) {
 	}
 	if len(order) != 0 {
 		t.Errorf("the plain driver ran %v; Wrap edited it in place", order)
+	}
+}
+
+// Retry is the one policy the library ships, so its three conditions are the
+// ones worth pinning: retryable only, before any output only, and a provider's
+// own Retry-After beating the backoff.
+func TestRetryOnlyReplaysWhatItMay(t *testing.T) {
+	const ok = `{"id":"1","model":"m","choices":[{"index":0,` +
+		`"delta":{"content":"ok"},"finish_reason":"stop"}]}`
+
+	tests := map[string]struct {
+		status  int
+		body    string
+		mid     bool // fail after streaming something
+		want    int  // requests the endpoint should see
+		wantErr func(error) bool
+	}{
+		"a 503 is replayed until it succeeds": {
+			status: http.StatusServiceUnavailable, body: `{"error":{"message":"overloaded"}}`,
+			want: 3, wantErr: func(err error) bool { return err == nil },
+		},
+		"a bad key is not replayed": {
+			status: http.StatusUnauthorized, body: `{"error":{"message":"invalid api key"}}`,
+			want: 1, wantErr: ai.IsAuth,
+		},
+		"a failure after output is not replayed": {
+			mid: true, want: 1, wantErr: func(err error) bool { return err != nil },
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var seen int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen++
+				switch {
+				case tc.mid:
+					// One good delta, then the stream dies mid-event.
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "data: %s\n\n", `{"id":"1","choices":[{"index":0,`+
+						`"delta":{"content":"partial"}}]}`)
+					w.(http.Flusher).Flush()
+					// A complete event whose payload is not JSON: the stream
+					// fails only after the caller already has "partial".
+					fmt.Fprint(w, "data: {oops\n\n")
+				case seen < 3:
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				default:
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "data: %s\n\n", ok)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			model := ai.Model{ID: "m", API: ai.APIOpenAIChat, BaseURL: server.URL}
+			driver, err := ai.NewDriver(ai.Config{Model: model, APIKey: "k"})
+			if err != nil {
+				t.Fatalf("NewDriver: %v", err)
+			}
+			client := ai.New(ai.Wrap(driver, ai.Retry(3, time.Millisecond)), model)
+
+			_, err = client.Complete(context.Background(), []ai.Message{ai.UserMessage("hi")})
+			if !tc.wantErr(err) {
+				t.Errorf("err = %v, which is not what this case expects", err)
+			}
+			if seen != tc.want {
+				t.Errorf("the endpoint saw %d requests, want %d", seen, tc.want)
+			}
+		})
+	}
+}
+
+// A canceled context ends the call instead of sleeping out the backoff.
+func TestRetryStopsOnACanceledContext(t *testing.T) {
+	var seen int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		seen++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"overloaded"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	model := ai.Model{ID: "m", API: ai.APIOpenAIChat, BaseURL: server.URL}
+	driver, err := ai.NewDriver(ai.Config{Model: model, APIKey: "k"})
+	if err != nil {
+		t.Fatalf("NewDriver: %v", err)
+	}
+	client := ai.New(ai.Wrap(driver, ai.Retry(5, time.Hour)), model)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.Complete(ctx, []ai.Message{ai.UserMessage("hi")})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Complete slept through the backoff instead of honouring the cancel")
+	}
+	if seen != 1 {
+		t.Errorf("the endpoint saw %d requests, want the one before the cancel", seen)
 	}
 }

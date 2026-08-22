@@ -307,17 +307,23 @@ for JSON in words, is a decision about your product, not about the wire.
 
 ## Retries and other execution policy
 
-This library does not retry. Retry, caching, logging and cost metering are
-`Middleware`, because only your application knows the budget for a turn, what
-may be cached and what must not be logged:
+Execution policy is `Middleware` decorating a driver, because only your
+application knows the budget for a turn, what may be cached and what must not
+be logged:
 
 ```go
-client := ai.New(ai.Wrap(driver, retry, costMeter), model)
+client := ai.New(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
 ```
 
-One rule is not yours to discover: a retry may only replay a call that failed
-*before producing any delta*. Once output has reached you the answer has begun,
-and resending either duplicates the text already shown or discards it.
+`Retry` is the one policy this library ships. Every driver disables its vendor
+SDK's own retry, so without it you get none — and the rule for writing one is
+easy to get wrong in a way that shows up as duplicated or vanished output
+rather than as an error. It replays only when the failure is classified
+retryable, only when nothing has reached you yet, and only while the context is
+live; a provider's own `Retry-After` beats the backoff.
+
+Caching, logging and cost metering stay yours: a `Middleware` is a `Handler`
+wrapping a `Handler`, which is the same shape as `Driver.Stream`.
 
 ## Credentials
 

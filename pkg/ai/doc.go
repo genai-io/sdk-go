@@ -68,9 +68,9 @@
 //
 // # Tools
 //
-// A tool is one Go type: its fields are the arguments, its tags say what each
-// one means, its Description says what it is for, and its name is the type's
-// own. The value handed to ToolOf is its dependencies, which live in unexported
+// A tool is a Go type saying two things and keeping them apart: Schema is what
+// the model is told, verbatim, and Run is what happens when it calls. The
+// values handed to Tools are each tool's dependencies, which live in unexported
 // fields and are never described to the model. Run holds the conversation to
 // the end:
 //

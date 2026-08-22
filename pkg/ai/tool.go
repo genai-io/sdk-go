@@ -31,19 +31,23 @@ type Tool struct {
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
-// ToolRunner is a tool written as a Go type, which is all a tool needs to be.
+// ToolRunner is a tool written as a Go type, and it says two things.
 //
-// The type already carries the arguments as its fields and what each one means
-// as its tags. Two methods finish it — what the tool is for, and what it does —
-// and its name comes from the type's own, so nothing about a tool is written
-// down twice or kept in step by hand.
+// Schema is what the model is told, verbatim — its own Tool value, with Run
+// left out because that half is not the model's business. Run is what happens
+// when the model calls, with the receiver holding the arguments it sent.
+//
+// The two halves stay apart on purpose. What the model sees is a value you can
+// read and print; what you do about it is code. Nothing in between translates
+// one into the other, so there is nothing in between to be surprised by.
 type ToolRunner interface {
-	// Description tells the model when this tool applies rather than the one
-	// next to it. It is prompt text.
-	Description() string
+	// Schema is the definition the model receives. Parameters is a JSON Schema
+	// object; jsonschema.For derives one from this type if you would rather
+	// not write it out.
+	Schema() Tool
 
 	// Run answers one call. The receiver is this tool's own value with the
-	// model's arguments filled in.
+	// model's arguments decoded into it.
 	Run(ctx context.Context) (string, error)
 }
 
@@ -114,28 +118,32 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 
 // ─── Running the tools a model asked for ───
 
-// ToolOf builds a tool from a value of the type that is one.
-//
-// Everything about the tool is in that one declaration — the arguments, what
-// they mean, what it is for, and the code that answers — and its name is the
-// type's own:
+// ToolOf builds a runnable tool from a value of a type that is one.
 //
 //	type Search struct {
-//		Query string `json:"query" description:"what to look for"`
-//		Limit int    `json:"limit,omitempty" description:"how many" maximum:"20"`
+//		Query string `json:"query"`
+//		Limit int    `json:"limit,omitempty"`
 //
 //		index *Index // unexported: yours, not the model's
 //	}
 //
-//	func (Search) Description() string { return "Search the knowledge base." }
+//	func (Search) Schema() ai.Tool {
+//		return ai.Tool{
+//			Name:        "search",
+//			Description: "Search the knowledge base.",
+//			Parameters:  jsonschema.For[Search](),
+//		}
+//	}
 //
 //	func (s Search) Run(ctx context.Context) (string, error) {
 //		return s.index.Query(ctx, s.Query, s.Limit)
 //	}
 //
-//	tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
+//	tools := ai.Tools(Search{index: idx}, Fetch{store: db})
 //
-// Search is offered to the model as "search"; see toolName for the rule.
+// Parameters is an ordinary JSON Schema object. Derive it from the type with
+// jsonschema.For, or write it out — the model gets whatever is there, and
+// arguments are checked against it either way.
 //
 // The value you pass is the tool's dependencies. Each call runs against a copy
 // of it with the model's arguments decoded over the top, so what the model
@@ -156,10 +164,10 @@ func toolOf(prototype ToolRunner) Tool {
 		panic(fmt.Sprintf("ai: a tool must be a struct, not %v: a copy per call is what "+
 			"keeps two calls in one turn from sharing arguments", t))
 	}
-	tool := Tool{
-		Name:        toolName(t),
-		Description: prototype.Description(),
-		Parameters:  jsonschema.ForType(t),
+	tool := prototype.Schema()
+	if tool.Name == "" {
+		panic(fmt.Sprintf("ai: %s returns a Schema with no Name; "+
+			"that is the string the model calls", t))
 	}
 	tool.Run = func(ctx context.Context, arguments string) (string, error) {
 		// A fresh copy of the prototype: the dependencies come from it, the
@@ -300,22 +308,4 @@ func (c *Client) Run(ctx context.Context, messages []Message, tools []Tool, opts
 	return nil, history, &Error{Kind: KindInvalidRequest, Message: fmt.Sprintf(
 		"ai: the model was still calling tools after %d turns; "+
 			"write the loop yourself if a conversation should run longer", maxToolTurns)}
-}
-
-// toolName is the type's own name, lower-cased with words separated by
-// underscores: Search becomes "search", FetchDocument becomes "fetch_document".
-//
-// Deriving it means one less thing to keep in step, and the model's vocabulary
-// then matches the code's. Set Tool.Name on the result for a tool that has to
-// answer to something else.
-func toolName(t reflect.Type) string {
-	name := t.Name()
-	var out strings.Builder
-	for i, r := range name {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			out.WriteByte('_')
-		}
-		out.WriteRune(r)
-	}
-	return strings.ToLower(out.String())
 }

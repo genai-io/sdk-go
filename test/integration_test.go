@@ -25,6 +25,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
+	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -1003,13 +1004,19 @@ type (
 	}
 )
 
-func (Search) Description() string { return "search the knowledge base" }
+func (Search) Schema() ai.Tool {
+	return ai.Tool{Name: "search", Description: "search the knowledge base", Parameters: jsonschema.For[Search]()}
+}
 
 func (a Search) Run(context.Context) (string, error) {
 	return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
 }
-func (Area) Description() string   { return "area of a city" }
-func (Census) Description() string { return "population in a year" }
+func (Area) Schema() ai.Tool {
+	return ai.Tool{Name: "area", Description: "area of a city", Parameters: jsonschema.For[Area]()}
+}
+func (Census) Schema() ai.Tool {
+	return ai.Tool{Name: "census", Description: "population in a year", Parameters: jsonschema.For[Census]()}
+}
 
 func (a Area) Run(context.Context) (string, error) {
 	if a.seen != nil {
@@ -1052,7 +1059,9 @@ type Recorder struct {
 	prefix string
 }
 
-func (Recorder) Description() string { return "records a note" }
+func (Recorder) Schema() ai.Tool {
+	return ai.Tool{Name: "recorder", Description: "records a note", Parameters: jsonschema.For[Recorder]()}
+}
 
 func (r Recorder) Run(context.Context) (string, error) {
 	if r.prefix == "" {
@@ -1101,28 +1110,18 @@ func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 	}
 }
 
-// The name comes from the type, so the model's vocabulary and the code's are
-// the same thing rather than two strings kept in step.
-func TestAToolIsNamedAfterItsType(t *testing.T) {
-	for _, tc := range []struct {
-		tool ai.Tool
-		want string
-	}{
-		{ai.ToolOf(Search{}), "search"},
-		{ai.ToolOf(FetchDocument{}), "fetch_document"},
-	} {
-		if tc.tool.Name != tc.want {
-			t.Errorf("Name = %q, want %q", tc.tool.Name, tc.want)
-		}
+// Schema is what the model is told, verbatim. A tool whose name has nothing to
+// do with its Go type is just a tool that said so.
+func TestAToolIsCalledWhateverItsSchemaSays(t *testing.T) {
+	tool := ai.ToolOf(FetchDocument{})
+	if tool.Name != "fetch_document" {
+		t.Errorf("Name = %q, want what Schema said", tool.Name)
 	}
 
-	// And a tool that has to answer to something else just says so.
-	renamed := ai.ToolOf(FetchDocument{})
-	renamed.Name = "fetch"
-	results := ai.RunTools(context.Background(), []ai.Tool{renamed},
-		[]ai.ToolCall{{ID: "1", Name: "fetch", Input: `{"id":"x"}`}})
-	if results[0].IsError {
-		t.Errorf("the renamed tool did not answer: %s", results[0].Content)
+	results := ai.RunTools(context.Background(), []ai.Tool{tool},
+		[]ai.ToolCall{{ID: "1", Name: "fetch_document", Input: `{"id":"x"}`}})
+	if results[0].IsError || results[0].Content != "doc x" {
+		t.Errorf("result = %+v", results[0])
 	}
 }
 
@@ -1130,6 +1129,8 @@ type FetchDocument struct {
 	ID string `json:"id" description:"the document to fetch"`
 }
 
-func (FetchDocument) Description() string { return "fetch one document by ID" }
+func (FetchDocument) Schema() ai.Tool {
+	return ai.Tool{Name: "fetch_document", Description: "fetch one document by ID", Parameters: jsonschema.For[FetchDocument]()}
+}
 
 func (f FetchDocument) Run(context.Context) (string, error) { return "doc " + f.ID, nil }

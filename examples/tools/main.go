@@ -44,24 +44,46 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
+	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
 
-// A type per tool, carrying everything the model is told about it: the
-// arguments as fields, what each one means as tags, what the tool is for as its
-// Description, and its name from the type's own — Population is offered as
-// "population". The tags matter: a field name alone does not say that "city"
-// means one of a fixed few, and enum does.
+// A type per tool, saying two things and keeping them apart: Schema is what
+// the model is told, Run is what happens. The two below write their schema the
+// two available ways — one by hand, one derived from the type — to show that
+// the choice is yours and visible either way.
 type Population struct {
-	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
-	Year int    `json:"year" description:"census year" enum:"2000|2010|2020"`
+	City string `json:"city"`
+	Year int    `json:"year"`
 
 	census map[string]map[int]float64 // unexported: ours, never the model's
 }
 
-func (Population) Description() string {
-	return "Population of a city in millions, for one census year."
+// Schema is what the model is told, and here it is written out — every word of
+// it is prompt text, and this is where you tune it.
+func (Population) Schema() ai.Tool {
+	return ai.Tool{
+		Name:        "population",
+		Description: "Population of a city in millions, for one census year.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{
+					"type":        "string",
+					"description": "the city to look up",
+					"enum":        []any{"Tokyo", "Delhi", "Shanghai", "São Paulo"},
+				},
+				"year": map[string]any{
+					"type":        "integer",
+					"description": "census year",
+					"enum":        []any{2000, 2010, 2020},
+				},
+			},
+			"required":             []any{"city", "year"},
+			"additionalProperties": false,
+		},
+	}
 }
 
 func (p Population) Run(context.Context) (string, error) {
@@ -76,7 +98,15 @@ type Area struct {
 	km2 map[string]int
 }
 
-func (Area) Description() string { return "Area of a city in square kilometres." }
+// Or derive it from the type, when the fields already say it. Same result, and
+// the tags cannot drift from the struct they are on.
+func (Area) Schema() ai.Tool {
+	return ai.Tool{
+		Name:        "area",
+		Description: "Area of a city in square kilometres.",
+		Parameters:  jsonschema.For[Area](),
+	}
+}
 
 func (a Area) Run(context.Context) (string, error) {
 	km2 := a.km2[a.City]

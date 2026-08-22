@@ -171,24 +171,30 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-一个工具就是**一个 Go 类型**。它的字段是参数，标签说明每个参数的含义，`Description` 说明它是干什么的，**名字来自类型本身**——`Search` 以 `search` 提供给模型：
+一个工具就是一个 Go 类型，它说两件事、并且**把这两件事分开**：`Schema` 是**告诉模型的，原样**；`Run` 是**模型调用时发生的**。
 
 ```go
 type Search struct {
-	Query string `json:"query" description:"要找什么"`
-	Limit int    `json:"limit,omitempty" description:"要几条结果" maximum:"20"`
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
 
 	index *Index // 未导出：你的东西，模型永远看不到
 }
 
-func (Search) Description() string { return "搜索知识库。" }
+func (Search) Schema() ai.Tool {
+	return ai.Tool{
+		Name:        "search",
+		Description: "搜索知识库。",
+		Parameters:  jsonschema.For[Search](),
+	}
+}
 
 func (s Search) Run(ctx context.Context) (string, error) {
 	return s.index.Query(ctx, s.Query, s.Limit)
 }
 ```
 
-这就是全部定义。用它跑一段对话是一次调用：
+用它跑一段对话是一次调用：
 
 ```go
 response, history, err := client.Run(ctx,
@@ -196,11 +202,11 @@ response, history, err := client.Run(ctx,
 	ai.Tools(Search{index: idx}, Fetch{store: db}))
 ```
 
-交给 `ai.Tools` 的那些值就是**各个工具的依赖**。每次调用都跑在它的一个副本上，模型的参数解码覆盖在上面——**模型发来的东西填导出字段，未导出的保持你设定的样子**。这跟 `encoding/json` 本来就画的那条线是同一条，也跟 schema 画的那条线是同一条：**未导出字段从来不会被描述给模型**。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
+`Parameters` 就是一个普通的 JSON Schema 对象。`jsonschema.For` 从类型推导一份——这样它不会跟它所描述的那些字段漂移；措辞值得手工调的时候就直接写出来。两条路一样：**模型拿到的就是那里写着的东西**，而参数在 `Run` 看到它们之前先按它校验过。
 
-关于这个工具的任何东西**都没有写第二遍，也不在别处**：模型要调用的那个名字，挨着它将要填写的字段，也挨着读取这些字段的代码。
+交给 `ai.Tools` 的那些值是**各个工具的依赖**。每次调用跑在其中一个的副本上，模型的参数解码覆盖在上面——**模型发来的填导出字段，未导出的保持你设定的样子**。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
 
-`Tool` 就是个普通结构体——`Parameters` 是告诉模型的，`Run` 是回答它的——所以一个到运行时才知道形状的工具，**完全不需要 Go 类型**：
+这里没有任何东西"是 Tool 但又不是 Tool"：`Schema` 返回的就是发给模型的那个 `ai.Tool`，所以一个到运行时才知道形状的工具，就是**直接写出那个值并给它设上 `Run`**：
 
 ```go
 ai.Tool{
@@ -210,8 +216,6 @@ ai.Tool{
 	Run: func(ctx context.Context, arguments string) (string, error) { … },
 }
 ```
-
-`ai.Tools` 就是从你的 Go 类型把这两样填好，`ai.ToolOf` 是一次一个。两条路都一样：参数在 `Run` 看到它们之前，先按 `Parameters` 校验过。
 
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，而**它在每个应用里都一模一样**：
 

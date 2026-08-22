@@ -200,26 +200,31 @@ called.
 
 ## Tool use
 
-A tool is one Go type. Its fields are the arguments, its tags say what each one
-means, its `Description` says what it is for, and its name is the type's own —
-`Search` is offered to the model as `search`:
+A tool is a Go type that says two things and keeps them apart. `Schema` is what
+the model is told, verbatim. `Run` is what happens when it calls.
 
 ```go
 type Search struct {
-	Query string `json:"query" description:"what to look for"`
-	Limit int    `json:"limit,omitempty" description:"how many results" maximum:"20"`
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
 
 	index *Index // unexported: yours, never the model's
 }
 
-func (Search) Description() string { return "Search the knowledge base." }
+func (Search) Schema() ai.Tool {
+	return ai.Tool{
+		Name:        "search",
+		Description: "Search the knowledge base.",
+		Parameters:  jsonschema.For[Search](),
+	}
+}
 
 func (s Search) Run(ctx context.Context) (string, error) {
 	return s.index.Query(ctx, s.Query, s.Limit)
 }
 ```
 
-That is the whole definition. Running a conversation with it is one call:
+Running a conversation with it is one call:
 
 ```go
 response, history, err := client.Run(ctx,
@@ -227,20 +232,21 @@ response, history, err := client.Run(ctx,
 	ai.Tools(Search{index: idx}, Fetch{store: db}))
 ```
 
+`Parameters` is an ordinary JSON Schema object. `jsonschema.For` derives one
+from the type, which keeps it from drifting away from the fields it describes;
+write it out instead when the wording is worth tuning by hand. Either way the
+model gets exactly what is there, and the arguments are checked against it
+before `Run` sees them.
+
 The values you hand `ai.Tools` are each tool's dependencies. Each call runs
-against a copy of one with the model's arguments decoded over the top, so what the model
-sends fills the exported fields and everything unexported stays as you set it —
-the same split `encoding/json` already draws, and the same one the schema draws,
-since an unexported field is never described to the model. A copy per call, so
-two calls in one turn cannot see each other's arguments.
+against a copy of one, with the model's arguments decoded over the top — so
+what the model sends fills the exported fields, and everything unexported stays
+as you set it. A copy per call, so two calls in one turn cannot see each
+other's arguments.
 
-Nothing about the tool is written twice, and nothing about it is anywhere else:
-the name the model calls sits next to the fields it will fill in, and next to
-the code that reads them.
-
-`Tool` is a plain struct — `Parameters` is what the model is told, `Run` is what
-answers it — so a tool whose shape is not known until run time needs no Go type
-at all:
+Nothing here is a Tool without being one: `Schema` returns the same `ai.Tool`
+the model is sent, so a tool whose shape is not known until run time is that
+value written directly, with `Run` set on it:
 
 ```go
 ai.Tool{
@@ -250,10 +256,6 @@ ai.Tool{
 	Run: func(ctx context.Context, arguments string) (string, error) { … },
 }
 ```
-
-`ai.Tools` fills those two in from your Go types, and `ai.ToolOf` does one at a
-time. Either way the arguments are checked against `Parameters` before `Run`
-sees them.
 
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and it is the same loop in every application:

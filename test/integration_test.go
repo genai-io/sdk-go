@@ -25,7 +25,6 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -180,7 +179,7 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 // A tool offered, called, answered, and replayed — the shape of every turn a
 // tool-using application sends after its first.
 func TestToolsRoundTrip(t *testing.T) {
-	tool := ai.ToolOf(Search{})
+	tool := searchTool()
 
 	e := sse(t, true,
 		[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{"input_tokens":10}}}`},
@@ -842,7 +841,7 @@ func sortedKeys(m map[string]any) []string {
 // The checker exists for one job: turn a model's mistake into a sentence the
 // model can act on. These are the mistakes models actually make.
 func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
-	tool := ai.ToolOf(Search{})
+	tool := searchTool()
 
 	for name, tc := range map[string]struct{ input, want string }{
 		"a missing field": {
@@ -883,8 +882,8 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 // function that receives it, and RunTools dispatches on the name — so the two
 // cannot disagree.
 func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
-	tools := append(ai.Tools(Area{}, Census{}),
-		ai.Tool{Name: "unhandled", Description: "offered without a handler"})
+	tools := []ai.Tool{areaTool(nil), censusTool(),
+		{Name: "unhandled", Description: "offered without a handler"}}
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
 		{ID: "1", Name: "census", Input: `{"year":2010}`},
@@ -952,7 +951,7 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 
 	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
 	response, history, err := client.Run(context.Background(),
-		[]ai.Message{ai.UserMessage("how big is Delhi?")}, ai.Tools(Area{seen: ranBy}))
+		[]ai.Message{ai.UserMessage("how big is Delhi?")}, []ai.Tool{areaTool(ranBy)})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -986,61 +985,63 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 }
 
 // The tool types for these tests. Everything the model is told about a tool is
-// on its type — the fields, their descriptions, what it is for — and its name
-// comes from the type's own, so Search is offered as "search".
+// on its type: the ai.Doc line is the tool, the fields are its arguments.
 type (
 	Search struct {
+		_ ai.Doc `name:"search" description:"search the knowledge base"`
+
 		Query    string `json:"query" description:"what to look for"`
 		Priority string `json:"priority" enum:"low|medium|high"`
 		Limit    int    `json:"limit" description:"how many results" minimum:"1" maximum:"50"`
 	}
 	Area struct {
-		City string `json:"city" enum:"Tokyo|Delhi"`
+		_ ai.Doc `name:"area" description:"area of a city"`
 
-		seen *[]string // unexported: never described to the model
+		City string `json:"city" enum:"Tokyo|Delhi"`
 	}
 	Census struct {
+		_ ai.Doc `name:"census" description:"population in a year"`
+
 		Year int `json:"year" minimum:"2000" maximum:"2020"`
 	}
 )
 
-func (Search) Schema() ai.Tool {
-	return ai.Tool{Name: "search", Description: "search the knowledge base", Parameters: jsonschema.For[Search]()}
+func searchTool() ai.Tool {
+	return ai.ToolFunc(func(_ context.Context, a Search) (string, error) {
+		return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
+	})
 }
 
-func (a Search) Run(context.Context) (string, error) {
-	return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
-}
-func (Area) Schema() ai.Tool {
-	return ai.Tool{Name: "area", Description: "area of a city", Parameters: jsonschema.For[Area]()}
-}
-func (Census) Schema() ai.Tool {
-	return ai.Tool{Name: "census", Description: "population in a year", Parameters: jsonschema.For[Census]()}
-}
-
-func (a Area) Run(context.Context) (string, error) {
-	if a.seen != nil {
-		*a.seen = append(*a.seen, a.City)
-	}
-	return "area of " + a.City, nil
+func areaTool(seen *[]string) ai.Tool {
+	return ai.ToolFunc(func(_ context.Context, a Area) (string, error) {
+		if seen != nil {
+			*seen = append(*seen, a.City)
+		}
+		return "area of " + a.City, nil
+	})
 }
 
-func (c Census) Run(context.Context) (string, error) {
-	return fmt.Sprintf("census %d", c.Year), nil
+func censusTool() ai.Tool {
+	return ai.ToolFunc(func(_ context.Context, a Census) (string, error) {
+		return fmt.Sprintf("census %d", a.Year), nil
+	})
 }
 
-// The value handed to ToolOf is the tool's dependencies, and each call runs
-// against a copy of it: what the model sends fills the exported fields, what
-// you set stays, and two calls in one turn cannot see each other's arguments.
-func TestToolOfCopiesItsPrototypePerCall(t *testing.T) {
-	tools := []ai.Tool{ai.ToolOf(Recorder{log: &[]string{}, prefix: "dep"})}
+// A tool's dependencies are whatever its function closes over: they reach
+// every call, they are never described to the model, and two calls in one turn
+// get their own arguments rather than one shared value.
+func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
+	prefix := "dep"
+	tools := []ai.Tool{ai.ToolFunc(func(_ context.Context, a Recorder) (string, error) {
+		return prefix + ":" + a.Note, nil
+	})}
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
 		{ID: "1", Name: "recorder", Input: `{"note":"first"}`},
 		{ID: "2", Name: "recorder", Input: `{"note":"second"}`},
 	})
 
-	// The unexported dependency reached both calls...
+	// The closed-over dependency reached both calls...
 	for i, want := range []string{"dep:first", "dep:second"} {
 		if results[i].Content != want {
 			t.Errorf("result %d = %q, want %q", i, results[i].Content, want)
@@ -1050,24 +1051,16 @@ func TestToolOfCopiesItsPrototypePerCall(t *testing.T) {
 	if results[0].Content == results[1].Content {
 		t.Error("the two calls shared a value")
 	}
+	// The dependency is not on the type, so it cannot leak into the schema.
+	if out, _ := json.Marshal(tools[0]); strings.Contains(string(out), "dep") {
+		t.Errorf("the dependency reached the model: %s", out)
+	}
 }
 
 type Recorder struct {
+	_ ai.Doc `name:"recorder" description:"records a note"`
+
 	Note string `json:"note" description:"anything"`
-
-	log    *[]string
-	prefix string
-}
-
-func (Recorder) Schema() ai.Tool {
-	return ai.Tool{Name: "recorder", Description: "records a note", Parameters: jsonschema.For[Recorder]()}
-}
-
-func (r Recorder) Run(context.Context) (string, error) {
-	if r.prefix == "" {
-		return "", fmt.Errorf("the prototype's dependency did not survive the copy")
-	}
-	return r.prefix + ":" + r.Note, nil
 }
 
 // Run is a field, so a tool whose shape is not known until run time needs no
@@ -1110,12 +1103,94 @@ func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 	}
 }
 
-// Schema is what the model is told, verbatim. A tool whose name has nothing to
-// do with its Go type is just a tool that said so.
-func TestAToolIsCalledWhateverItsSchemaSays(t *testing.T) {
-	tool := ai.ToolOf(FetchDocument{})
+// ai.Doc is metadata, not data. If it ever reached the schema, the model would
+// be told about a parameter named "_" that it could try to fill in.
+func TestADocIsNotAParameter(t *testing.T) {
+	tool := searchTool()
+
+	schema := tool.ParameterSchema()
+	properties := schema["properties"].(map[string]any)
+	if _, found := properties["_"]; found {
+		t.Errorf("the ai.Doc became a parameter: %v", properties)
+	}
+	if len(properties) != 3 {
+		t.Errorf("properties = %v, want exactly the three argument fields", properties)
+	}
+	for _, name := range schema["required"].([]any) {
+		if name == "_" {
+			t.Errorf("required = %v, want no mention of the ai.Doc", schema["required"])
+		}
+	}
+
+	// What it does carry is what the model is told about the tool itself.
+	if tool.Name != "search" || tool.Description != "search the knowledge base" {
+		t.Errorf("tool = %+v, want the name and description off the ai.Doc", tool)
+	}
+
+	// And a call that fills in every argument is still a complete one.
+	if err := tool.ValidateArgs(`{"query":"go","priority":"low","limit":3}`); err != nil {
+		t.Errorf("a correct call was rejected: %v", err)
+	}
+}
+
+// A tool that never says what it is called is one the model cannot call. That
+// is a mistake in a declaration rather than a condition to handle, so it is
+// refused where the tool is built rather than mid-conversation.
+func TestAToolMustSayWhatItIsCalled(t *testing.T) {
+	type Silent struct {
+		Q string `json:"q"`
+	}
+	type Unnamed struct {
+		_ ai.Doc `description:"everything but a name"`
+
+		Q string `json:"q"`
+	}
+	type Visible struct {
+		Doc ai.Doc `name:"visible"`
+
+		Q string `json:"q"`
+	}
+
+	for name, tc := range map[string]struct {
+		build func()
+		want  string
+	}{
+		"no ai.Doc at all": {
+			func() { ai.ToolFunc(func(context.Context, Silent) (string, error) { return "", nil }) },
+			"does not say what it is called",
+		},
+		"an ai.Doc with no name": {
+			func() { ai.ToolFunc(func(context.Context, Unnamed) (string, error) { return "", nil }) },
+			"no name tag",
+		},
+		"an ai.Doc left visible": {
+			func() { ai.ToolFunc(func(context.Context, Visible) (string, error) { return "", nil }) },
+			"must be blank",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("the tool was built anyway")
+				}
+				if msg := fmt.Sprint(r); !strings.Contains(msg, tc.want) {
+					t.Errorf("panic = %q\nwant it to mention %q", msg, tc.want)
+				}
+			}()
+			tc.build()
+		})
+	}
+}
+
+// A tool is called whatever its ai.Doc says, which need have nothing to do
+// with the Go type carrying it — nothing is derived, so nothing is guessed.
+func TestAToolIsCalledWhateverItsDocSays(t *testing.T) {
+	tool := ai.ToolFunc(func(_ context.Context, a FetchDocument) (string, error) {
+		return "doc " + a.ID, nil
+	})
 	if tool.Name != "fetch_document" {
-		t.Errorf("Name = %q, want what Schema said", tool.Name)
+		t.Errorf("Name = %q, want what ai.Doc said", tool.Name)
 	}
 
 	results := ai.RunTools(context.Background(), []ai.Tool{tool},
@@ -1126,11 +1201,7 @@ func TestAToolIsCalledWhateverItsSchemaSays(t *testing.T) {
 }
 
 type FetchDocument struct {
+	_ ai.Doc `name:"fetch_document" description:"fetch one document by ID"`
+
 	ID string `json:"id" description:"the document to fetch"`
 }
-
-func (FetchDocument) Schema() ai.Tool {
-	return ai.Tool{Name: "fetch_document", Description: "fetch one document by ID", Parameters: jsonschema.For[FetchDocument]()}
-}
-
-func (f FetchDocument) Run(context.Context) (string, error) { return "doc " + f.ID, nil }

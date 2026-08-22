@@ -68,14 +68,26 @@
 //
 // # Tools
 //
-// A tool is a Go type saying two things and keeping them apart: Schema is what
-// the model is told, verbatim, and Run is what happens when it calls. The
-// values handed to Tools are each tool's dependencies, which live in unexported
-// fields and are never described to the model. Run holds the conversation to
-// the end:
+// A tool is a struct and a function. The struct is everything the model is
+// told — its name and description on an ai.Doc field, its arguments on the
+// fields themselves — and the function is what happens when the model calls,
+// with its dependencies closed over. ToolFunc joins them, and Run holds the
+// conversation to the end:
 //
-//	response, history, err := client.Run(ctx, messages,
-//		ai.Tools(Search{}, Fetch{}))
+//	type Search struct {
+//		_ ai.Doc `name:"search" description:"Search the docs."`
+//
+//		Query string `json:"query" description:"what to look for"`
+//	}
+//
+//	search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
+//		return docs.Search(ctx, a.Query)
+//	})
+//
+//	response, history, err := client.Run(ctx, messages, []ai.Tool{search})
+//
+// The schema that goes out and the struct the arguments arrive in are the same
+// declaration, so they cannot come to describe different things.
 //
 // Write the loop with Complete and RunTools instead when the turns are your
 // business — to stream, to stop on a condition, to bill each one.

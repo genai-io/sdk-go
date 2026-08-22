@@ -22,7 +22,7 @@ type Tool struct {
 	Parameters any `json:"parameters,omitempty"`
 
 	// Run answers this tool's calls, taking the model's arguments as the JSON
-	// it sent. ToolOf fills it in from a Go type, which is what most callers
+	// it sent. ToolFunc fills it in from a Go type, which is what most callers
 	// want; set it directly for a tool whose shape is not known until run time
 	// — one loaded from configuration, or proxied from somewhere else.
 	//
@@ -31,25 +31,19 @@ type Tool struct {
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
-// ToolRunner is a tool written as a Go type, and it says two things.
+// Doc is how a tool says what it is called and what it does — the two things a
+// parameter schema does not say, written in the same tags the parameters use.
 //
-// Schema is what the model is told, verbatim — its own Tool value, with Run
-// left out because that half is not the model's business. Run is what happens
-// when the model calls, with the receiver holding the arguments it sent.
+//	type Search struct {
+//		_ ai.Doc `name:"search" description:"Search the docs and return matching passages."`
 //
-// The two halves stay apart on purpose. What the model sees is a value you can
-// read and print; what you do about it is code. Nothing in between translates
-// one into the other, so there is nothing in between to be surprised by.
-type ToolRunner interface {
-	// Schema is the definition the model receives. Parameters is a JSON Schema
-	// object; jsonschema.For derives one from this type if you would rather
-	// not write it out.
-	Schema() Tool
-
-	// Run answers one call. The receiver is this tool's own value with the
-	// model's arguments decoded into it.
-	Run(ctx context.Context) (string, error)
-}
+//		Query string `json:"query" description:"what to look for, in plain words"`
+//	}
+//
+// Go attaches tags to fields, so a field is how a type says something about
+// itself. This one is blank and zero-sized: encoding/json never sees it, the
+// schema never describes it, and no code can read or set it. It is not data.
+type Doc struct{}
 
 // ParameterSchema returns an independent JSON-object representation of the
 // tool's parameters. A nil result means that Parameters was omitted or is not
@@ -118,83 +112,75 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 
 // ─── Running the tools a model asked for ───
 
-// ToolOf builds a runnable tool from a value of a type that is one.
+// ToolFunc builds a tool from one function.
 //
-//	type Search struct {
-//		Query string `json:"query" description:"what to look for, in plain words"`
-//		Limit int    `json:"limit,omitempty" description:"how many passages" maximum:"10"`
+//	search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
+//		return docs.Search(ctx, a.Query, a.Limit)
+//	})
 //
-//		db *sql.DB // unexported: yours, not the model's
-//	}
+//	client.Run(ctx, messages, []ai.Tool{search, fetch})
 //
-//	func (Search) Schema() ai.Tool {
-//		return ai.Tool{
-//			Name:        "search",
-//			Description: "Search the documentation and return matching passages.",
-//			Parameters:  jsonschema.For[Search](),
-//		}
-//	}
+// Everything the model is told comes from T — its name and description from
+// the ai.Doc field, its parameters from the fields themselves. The schema that
+// goes out and the struct the arguments arrive in are therefore the same
+// declaration, and cannot come to describe different things.
 //
-//	func (s Search) Run(ctx context.Context) (string, error) {
-//		return query(ctx, s.db, s.Query, s.Limit)
-//	}
+// Every word of that declaration is prompt text: describe each parameter, and
+// use enum where a field has a fixed set of answers. Arguments are checked
+// against the schema before the function is called.
 //
-//	tools := ai.Tools(Search{db: pool}, Fetch{})
+// Dependencies are whatever the function closes over. That is the ordinary Go
+// answer, and it needs nothing from this package.
 //
-// Parameters is an ordinary JSON Schema object, and every word in it is prompt
-// text — describe each parameter, and say so with enum when a field has a
-// fixed set of answers. Derive it from the type with jsonschema.For, which
-// keeps it from drifting away from the fields it describes, or write it out
-// when the wording is worth tuning. The model gets whatever is there, and
-// arguments are checked against it either way.
-//
-// The value you pass is the tool's dependencies, and a tool that needs none is
-// passed empty. Each call runs against a copy of it with the model's arguments
-// decoded over the top, so what the model sends fills the exported fields and
-// everything unexported stays as you set it — the same split encoding/json
-// already draws, and the same one the schema draws, since an unexported field
-// is never described to the model.
-//
-// A copy per call, so two calls in one turn cannot see each other's arguments.
-// T must be a struct rather than a pointer to one, for that reason: a pointer
-// would be shared.
-func ToolOf[T ToolRunner](prototype T) Tool { return toolOf(prototype) }
-
-// toolOf is ToolOf without the type parameter, so a set of tools written as
-// different Go types can be converted as one.
-func toolOf(prototype ToolRunner) Tool {
-	t := reflect.TypeOf(prototype)
-	if t == nil || t.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("ai: a tool must be a struct, not %v: a copy per call is what "+
-			"keeps two calls in one turn from sharing arguments", t))
+// The result is an ordinary Tool. Assign to its Parameters afterwards to send
+// a hand-written schema in place of the derived one.
+func ToolFunc[T any](run func(ctx context.Context, arguments T) (string, error)) Tool {
+	var zero T
+	t := reflect.TypeOf(zero)
+	name, description := toolDoc(t)
+	return Tool{
+		Name:        name,
+		Description: description,
+		Parameters:  jsonschema.ForType(t),
+		Run: func(ctx context.Context, arguments string) (string, error) {
+			var args T
+			if err := decodeArgs(arguments, &args); err != nil {
+				return "", fmt.Errorf("arguments for %s: %w", name, err)
+			}
+			return run(ctx, args)
+		},
 	}
-	tool := prototype.Schema()
-	if tool.Name == "" {
-		panic(fmt.Sprintf("ai: %s returns a Schema with no Name; "+
-			"that is the string the model calls", t))
-	}
-	tool.Run = func(ctx context.Context, arguments string) (string, error) {
-		// A fresh copy of the prototype: the dependencies come from it, the
-		// model fills in the rest, and two calls cannot see each other.
-		args := reflect.New(t)
-		args.Elem().Set(reflect.ValueOf(prototype))
-		if err := decodeArgs(arguments, args.Interface()); err != nil {
-			return "", fmt.Errorf("arguments for %s: %w", tool.Name, err)
-		}
-		return args.Elem().Interface().(ToolRunner).Run(ctx)
-	}
-	return tool
 }
 
-// Tools converts the tools you wrote into the definitions a model is sent.
+// toolDoc reads what a tool says about itself.
 //
-//	client.Run(ctx, messages, ai.Tools(Search{}, Fetch{}))
-func Tools(runners ...ToolRunner) []Tool {
-	out := make([]Tool, len(runners))
-	for i, runner := range runners {
-		out[i] = toolOf(runner)
+// Everything it can find wrong is a mistake in a declaration rather than a
+// condition to handle, so it panics: a tool with no name is one the model
+// cannot call, and the panic happens where the tool is built rather than in
+// the middle of a conversation.
+func toolDoc(t reflect.Type) (name, description string) {
+	if t == nil || t.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
 	}
-	return out
+	doc := reflect.TypeOf(Doc{})
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if field.Type != doc {
+			continue
+		}
+		if field.Name != "_" {
+			panic(fmt.Sprintf("ai: %s.%s must be blank — write `_ ai.Doc`, or the "+
+				"model is told about it as a parameter", t, field.Name))
+		}
+		name, description = field.Tag.Get("name"), field.Tag.Get("description")
+		if name == "" {
+			panic(fmt.Sprintf("ai: the ai.Doc on %s has no name tag; "+
+				"that is the string the model calls", t))
+		}
+		return name, description
+	}
+	panic(fmt.Sprintf("ai: %s does not say what it is called; give it\n"+
+		"\t_ ai.Doc `name:\"…\" description:\"…\"`", t))
 }
 
 // RunTools answers every call in a turn, in order, and returns the results as
@@ -274,7 +260,7 @@ const maxToolTurns = 32
 // calls, append the results, repeat — so it is written here once:
 //
 //	response, history, err := client.Run(ctx, messages,
-//		ai.Tools(Search{}, Fetch{}))
+//		[]ai.Tool{search, fetch})
 //
 //	fmt.Println(response.Text())
 //

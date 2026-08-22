@@ -200,28 +200,20 @@ called.
 
 ## Tool use
 
-A tool is a Go type that says two things and keeps them apart. `Schema` is what
-the model is told, verbatim. `Run` is what happens when it calls.
+A tool is a struct and a function. The struct is everything the model is told;
+the function is what happens when it calls.
 
 ```go
 type Search struct {
+	_ ai.Doc `name:"search" description:"Search the documentation and return matching passages."`
+
 	Query string `json:"query" description:"what to look for, in plain words"`
 	Limit int    `json:"limit,omitempty" description:"how many passages to return" maximum:"10"`
 }
 
-// What the model is told.
-func (Search) Schema() ai.Tool {
-	return ai.Tool{
-		Name:        "search",
-		Description: "Search the documentation and return matching passages.",
-		Parameters:  jsonschema.For[Search](),
-	}
-}
-
-// What happens when it calls.
-func (s Search) Run(ctx context.Context) (string, error) {
-	return docs.Search(ctx, s.Query, s.Limit)
-}
+search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
+	return docs.Search(ctx, a.Query, a.Limit) // dependencies are closed over
+})
 ```
 
 Running a conversation with it is one call:
@@ -229,8 +221,12 @@ Running a conversation with it is one call:
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{}, Fetch{}))
+	[]ai.Tool{search, fetch})
 ```
+
+Go attaches tags to fields, so the blank `ai.Doc` field is how a type says
+something about itself. It is zero-sized and invisible: `encoding/json` never
+sees it, the schema never describes it, and no code can read or set it.
 
 ### What the model is actually sent
 
@@ -253,23 +249,30 @@ there is no grammar to learn:
 
 Describe every parameter. A field with no `description` still works, but the
 model is left inferring the argument from the name alone, and the one with a
-fixed set of answers should say so — `enum:"a|b|c"` — rather than hope. Write
-the schema out by hand instead when the wording is worth tuning word by word;
-the model gets exactly what is there either way, and the arguments are checked
-against it before `Run` sees them.
+fixed set of answers should say so — `enum:"a|b|c"` — rather than hope.
 
 `omitempty` is what makes a field optional: `limit` is sent as
 `["integer","null"]` and may come back null, while `query` cannot. Everything
 is in `required` and the object is closed regardless, because that is what a
 provider's strict mode demands.
 
-A tool that needs something of yours — a database handle, an HTTP client —
-puts it in an unexported field and hands it over: `ai.Tools(Search{db: pool})`.
-Each call runs against a copy of that value with the model's arguments decoded
-over the top, so what the model sends fills the exported fields and everything
-unexported stays as you set it. Unexported means unexported all the way: never
-described to the model, never fillable by it. A copy per call, so two calls in
-one turn cannot see each other's arguments.
+`Search` is named once, and both halves come from it — the schema the model is
+sent and the struct its arguments decode into. They cannot come to describe
+different things, which is what a schema built from one type and a decode into
+another quietly permits. Arguments are checked against that schema before your
+function is called.
+
+`ToolFunc` returns an ordinary `ai.Tool`, so overriding the derived schema is
+an assignment when the wording is worth tuning word by word:
+
+```go
+search.Parameters = handWritten
+```
+
+A tool's dependencies are whatever the function closes over — a database
+handle, an HTTP client — which is the ordinary Go answer and needs nothing from
+this package. They are not on the struct, so they can never be described to the
+model or filled in by it.
 
 Nothing here is a Tool without being one: `Schema` returns the same `ai.Tool`
 the model is sent, so a tool whose shape is not known until run time is that
@@ -290,7 +293,7 @@ continues. `Run` is that loop, and it is the same loop in every application:
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{}, Fetch{}))
+	[]ai.Tool{search, fetch})
 
 fmt.Println(response.Text())
 ```

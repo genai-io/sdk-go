@@ -171,27 +171,19 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-一个工具就是一个 Go 类型，它说两件事、并且**把这两件事分开**：`Schema` 是**告诉模型的，原样**；`Run` 是**模型调用时发生的**。
+一个工具就是**一个 struct 加一个函数**。struct 是**告诉模型的全部东西**，函数是**模型调用时发生的**。
 
 ```go
 type Search struct {
+	_ ai.Doc `name:"search" description:"搜索文档，返回匹配的段落。"`
+
 	Query string `json:"query" description:"要找什么，用大白话"`
 	Limit int    `json:"limit,omitempty" description:"最多返回几段" maximum:"10"`
 }
 
-// 告诉模型的。
-func (Search) Schema() ai.Tool {
-	return ai.Tool{
-		Name:        "search",
-		Description: "搜索文档，返回匹配的段落。",
-		Parameters:  jsonschema.For[Search](),
-	}
-}
-
-// 模型调用时发生的。
-func (s Search) Run(ctx context.Context) (string, error) {
-	return docs.Search(ctx, s.Query, s.Limit)
-}
+search := ai.ToolFunc(func(ctx context.Context, a Search) (string, error) {
+	return docs.Search(ctx, a.Query, a.Limit) // 依赖走闭包
+})
 ```
 
 用它跑一段对话是一次调用：
@@ -199,8 +191,10 @@ func (s Search) Run(ctx context.Context) (string, error) {
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{}, Fetch{}))
+	[]ai.Tool{search, fetch})
 ```
+
+Go 的 tag 只能挂在字段上，所以**空白的 `ai.Doc` 字段就是一个类型给自己说话的方式**。它零尺寸、完全隐形：`encoding/json` 看不见它，schema 不会描述它，任何代码都读不到也写不了它。
 
 ### 模型实际收到的东西
 
@@ -218,11 +212,19 @@ response, history, err := client.Run(ctx,
 }
 ```
 
-**每个参数都写上描述。**不写也能跑，但模型就只能从字段名去猜这个参数是什么；答案只有固定几种的字段更该直接说出来——`enum:"a|b|c"`——而不是指望它。措辞值得一个字一个字调的时候，就直接把 schema 写出来。两条路一样：**模型拿到的就是那里写着的东西**，而参数在 `Run` 看到它们之前先按它校验过。
+**每个参数都写上描述。**不写也能跑，但模型就只能从字段名去猜这个参数是什么；答案只有固定几种的字段更该直接说出来——`enum:"a|b|c"`——而不是指望它。
 
 `omitempty` 才是"可选"的开关：`limit` 以 `["integer","null"]` 发出去、可以回 null，`query` 不行。不管可选与否，所有字段都进 `required`、对象都是封闭的——因为各家的 strict 模式就是这么要求的。
 
-工具需要你自己的东西（数据库连接、HTTP client）时，放进**未导出字段**再交出去：`ai.Tools(Search{db: pool})`。每次调用跑在这个值的一个副本上，模型的参数解码覆盖在上面——**模型发来的填导出字段，未导出的保持你设定的样子**。未导出就是彻底未导出：不会被描述给模型，也不可能被它填。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
+**`Search` 只写了一次**，两半都从它来：发给模型的 schema、参数解码进去的那个 struct。它们不可能各说各话——而"schema 从一个类型来、解码进另一个类型"正是会悄悄放过这种事的写法。参数在你的函数被调用之前，先按这份 schema 校验过。
+
+`ToolFunc` 返回的就是一个普通 `ai.Tool`，所以措辞值得一个字一个字调的时候，覆盖推导出来的 schema 就是一次赋值：
+
+```go
+search.Parameters = handWritten
+```
+
+工具的依赖就是**函数闭包里的东西**——数据库连接、HTTP client——这是 Go 的常规做法，不需要本包提供任何东西。它们不在 struct 上，所以永远不可能被描述给模型、也不可能被它填。
 
 这里没有任何东西"是 Tool 但又不是 Tool"：`Schema` 返回的就是发给模型的那个 `ai.Tool`，所以一个到运行时才知道形状的工具，就是**直接写出那个值并给它设上 `Run`**：
 
@@ -240,7 +242,7 @@ ai.Tool{
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{}, Fetch{}))
+	[]ai.Tool{search, fetch})
 
 fmt.Println(response.Text())
 ```

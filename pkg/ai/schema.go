@@ -3,13 +3,10 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"maps"
 	"reflect"
-	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/genai-io/sdk-go/pkg/ai/schema"
 )
 
 // Asking a model for a shape, and the JSON Schema machinery behind it.
@@ -19,13 +16,9 @@ import (
 // reads, and the shape itself. The shape is a JSON Schema document — an
 // ordinary map — built and checked by the second half of this file.
 //
-// That half is the only place in the SDK that touches
-// github.com/google/jsonschema-go. Both jobs are deep enough to be worth
-// borrowing rather than writing: deriving is not the mechanical type walk it
-// looks like, because a type with its own MarshalJSON has to be described by
-// what it marshals to, and validating is a specification with a long tail.
-// Nothing the library returns escapes this file — callers see map[string]any
-// and plain errors — so replacing it means rewriting the bottom of one file.
+// Building one from a Go type, and checking a value against one, live in
+// ai/schema. That package targets what the providers accept rather than JSON
+// Schema in general, which is a different and stricter target.
 //
 // Reading the answer back is in response.go.
 
@@ -61,26 +54,23 @@ type Schema struct {
 // named after T; description is prompt text the model reads, and may be empty
 // when the type name already says what the shape is for.
 //
-// Per-field descriptions come from a jsonschema struct tag, and the model
-// reads those too — field names alone are often ambiguous to it in ways they
-// are not to you. The whole tag is the text; a "description=" prefix is
-// rejected rather than sent, because it is another library's spelling.
+// Per-field constraints come from an ai struct tag, and the model reads them.
+// Field names alone are often ambiguous to it in ways they are not to you, and
+// a field with a fixed set of answers should say so rather than hope:
 //
-// The key is jsonschema and not the more literal description because Go drops
-// an unrecognised tag key without a word: a wrong value under the key people
-// reach for fails loudly, where the right value under a key we invented would
-// cost the field its description in silence. Both mistakes now panic naming
-// the fix.
-//
-//	type Person struct {
-//		Name string `json:"name" jsonschema:"full legal name, family name last"`
-//		Age  int    `json:"age" jsonschema:"age in whole years"`
+//	type Order struct {
+//		Name     string `json:"name" description:"full name, family name last"`
+//		Priority string `json:"priority" enum:"low|medium|high"`
+//		Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
 //	}
+//
+// A tag key is the JSON Schema keyword it sets; see ai/schema for the full
+// list and what it refuses.
 func SchemaOf[T any](description string) *Schema {
 	return &Schema{
 		Name:        reflect.TypeFor[T]().Name(),
 		Description: description,
-		Definition:  deriveSchema[T](),
+		Definition:  schema.For[T](),
 		Strict:      true,
 	}
 }
@@ -171,191 +161,4 @@ func cloneShallow(value any) any {
 		return maps.Clone(m)
 	}
 	return value
-}
-
-// ─── JSON Schema documents: deriving one, and checking a value against one ───
-
-// byteSchema corrects the one translation upstream gets wrong for this SDK's
-// purposes. encoding/json writes a []byte as a base64 string; upstream
-// describes it as an array of 0-255 integers, which its own validator then
-// rejects when handed real JSON.
-var byteSchema = map[reflect.Type]*jsonschema.Schema{
-	reflect.TypeFor[[]byte](): {Type: "string", ContentEncoding: "base64"},
-}
-
-// deriveSchema builds a JSON Schema from a Go type.
-//
-// Field names, optionality and nesting follow encoding/json: a json tag names
-// the property, omitempty makes it optional, an embedded struct is flattened,
-// and a type with its own MarshalJSON is described by what it marshals to. A
-// jsonschema struct tag becomes the property's description, which is what the
-// model reads.
-//
-// A type that cannot be described — a channel, a function, a map with
-// non-string keys, a malformed struct tag — panics, the way a bad pattern
-// panics in regexp.MustCompile. It is a mistake in the caller's own type, it is
-// found the moment the tool is constructed rather than mid-conversation, and
-// the alternative is worse: a nil schema silently means "no parameters", so the
-// model would be offered a tool it cannot call and its arguments would never be
-// checked.
-func deriveSchema[T any]() map[string]any {
-	if field := describedByTheWrongTag(reflect.TypeFor[T](), map[reflect.Type]bool{}); field != "" {
-		panic(fmt.Sprintf(`ai: %s has a description tag on %s, which nothing reads. `+
-			"Field descriptions go in the jsonschema tag: `jsonschema:\"what to look for\"`",
-			reflect.TypeFor[T](), field))
-	}
-	schema, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: byteSchema})
-	if err != nil {
-		panic(fmt.Sprintf("ai: cannot describe %s as a JSON Schema: %v%s",
-			reflect.TypeFor[T](), err, tagHint(err)))
-	}
-	raw, err := json.Marshal(schema)
-	if err != nil {
-		panic(fmt.Sprintf("ai: cannot encode the schema for %s: %v", reflect.TypeFor[T](), err))
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		panic(fmt.Sprintf("ai: cannot read back the schema for %s: %v", reflect.TypeFor[T](), err))
-	}
-	return out
-}
-
-// validateAgainst checks a decoded JSON value against a schema.
-//
-// The schema may have been derived here, hand-written as a map, or reloaded
-// from a session file, so it arrives as a map and is parsed rather than
-// assumed. An empty schema constrains nothing, which is what a tool that
-// declares no parameters wants.
-func validateAgainst(schema map[string]any, value any) error {
-	if len(schema) == 0 {
-		return nil
-	}
-	raw, err := json.Marshal(schema)
-	if err != nil {
-		return fmt.Errorf("schema is not encodable: %w", err)
-	}
-	var parsed jsonschema.Schema
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return fmt.Errorf("not a usable JSON Schema: %w", err)
-	}
-	resolved, err := parsed.Resolve(nil)
-	if err != nil {
-		return fmt.Errorf("schema cannot be applied: %w", err)
-	}
-	if err := resolved.Validate(value); err != nil {
-		return schemaFailure(err)
-	}
-	return nil
-}
-
-// schemaFailure rewrites a validation failure into the sentence a model is handed
-// back as a tool result.
-//
-// Upstream reports a schema location — "validating root: validating
-// /properties/mode: type: …" — which is right for a person debugging a schema
-// and wrong for a model that has to work out which argument to fix. The
-// property path is what it needs, and nothing else.
-func schemaFailure(err error) error {
-	msg := strings.TrimPrefix(err.Error(), "validating root: ")
-	msg = strings.TrimPrefix(msg, "validating ")
-
-	// A property path prefixes the reason; render it the way the caller wrote
-	// the argument rather than as a schema location.
-	if location, rest, ok := strings.Cut(msg, ": "); ok && strings.HasPrefix(location, "/") {
-		if name := propertyPath(location); name != "" {
-			return fmt.Errorf("%s %s", name, strings.TrimPrefix(rest, "type: "))
-		}
-	}
-	// The two mistakes a model makes most often are reported against the whole
-	// object rather than one property, and read as schema vocabulary. Say them
-	// as the instruction they are.
-	if names, ok := bracketed(msg, "required: missing properties: "); ok {
-		return fmt.Errorf("missing required %s: %s", plural("property", names), strings.Join(names, ", "))
-	}
-	if names, ok := bracketed(msg, "unexpected additional properties "); ok {
-		return fmt.Errorf("unknown %s: %s", plural("property", names), strings.Join(names, ", "))
-	}
-	return errors.New(msg)
-}
-
-// bracketed reads the JSON list of property names that upstream appends to its
-// object-level failures.
-func bracketed(msg, prefix string) ([]string, bool) {
-	rest, found := strings.CutPrefix(msg, prefix)
-	if !found {
-		return nil, false
-	}
-	var names []string
-	if json.Unmarshal([]byte(rest), &names) != nil || len(names) == 0 {
-		return nil, false
-	}
-	return names, true
-}
-
-func plural(word string, of []string) string {
-	if len(of) == 1 {
-		return word
-	}
-	return word[:len(word)-1] + "ies"
-}
-
-// propertyPath turns a JSON Schema location into a dotted property name,
-// dropping the keywords that structure the schema rather than the value.
-func propertyPath(location string) string {
-	var parts []string
-	for segment := range strings.SplitSeq(strings.TrimPrefix(location, "/"), "/") {
-		switch segment {
-		case "properties", "items", "additionalProperties", "":
-		default:
-			parts = append(parts, segment)
-		}
-	}
-	return strings.Join(parts, ".")
-}
-
-// tagHint turns the one mistake everybody makes into an instruction.
-//
-// Other Go JSON Schema libraries read the same tag key as key=value pairs, so
-// the reflex is to write jsonschema:"description=…". This one takes the whole
-// tag as the description and refuses the prefix; the refusal names the rule
-// but not the fix, so the fix is appended here.
-func tagHint(err error) string {
-	if !strings.Contains(err.Error(), "must not begin with") {
-		return ""
-	}
-	return `; the whole tag is the description — write ` +
-		"`jsonschema:\"what to look for\"`, not " +
-		"`jsonschema:\"description=what to look for\"`"
-}
-
-// describedByTheWrongTag finds a field annotated with a `description` tag,
-// naming it, or returns "" when there is none.
-//
-// The tag key here is jsonschema, which is what the Go ecosystem's other
-// schema libraries also use — so that is the key people reach for, and a wrong
-// value under it fails loudly. The reverse does not: Go ignores an unrecognised
-// tag key silently, so `description:"…"` costs the field its description with
-// nothing said. This is the check that says it.
-//
-// It only looks for the key. Attaching a description would need the Go
-// field-to-JSON-property mapping, which is precisely what this package
-// delegates upstream rather than reimplementing.
-func describedByTheWrongTag(t reflect.Type, seen map[reflect.Type]bool) string {
-	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct || seen[t] {
-		return ""
-	}
-	seen[t] = true
-	for i := range t.NumField() {
-		field := t.Field(i)
-		if _, ok := field.Tag.Lookup("description"); ok {
-			return t.Name() + "." + field.Name
-		}
-		if nested := describedByTheWrongTag(field.Type, seen); nested != "" {
-			return nested
-		}
-	}
-	return ""
 }

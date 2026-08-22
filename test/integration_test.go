@@ -18,6 +18,7 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -179,7 +180,7 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 // tool-using application sends after its first.
 func TestToolsRoundTrip(t *testing.T) {
 	type SearchArgs struct {
-		Query string `json:"query" jsonschema:"what to look for"`
+		Query string `json:"query" description:"what to look for"`
 	}
 	tool := ai.ToolFor[SearchArgs]("search", "search the web")
 
@@ -495,8 +496,8 @@ func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
 	// The jsonschema tag is the field's description. It is prompt text: the
 	// model reads it, so it has to reach the wire.
 	type Person struct {
-		Name string `json:"name" jsonschema:"full legal name, family name last"`
-		Age  int    `json:"age" jsonschema:"age in whole years"`
+		Name string `json:"name" description:"full legal name, family name last"`
+		Age  int    `json:"age" description:"age in whole years" minimum:"0"`
 	}
 
 	// Chat Completions streams, so the answer arrives as SSE like any other.
@@ -676,52 +677,207 @@ func TestRetryStopsOnACanceledContext(t *testing.T) {
 	}
 }
 
-// The tag key is the one another library's users reflexively fill in with
-// key=value pairs. Upstream refuses that, and the refusal has to say what to
-// write instead — a panic naming a rule but not a fix is a bad panic.
-func TestABadSchemaTagSaysHowToFixIt(t *testing.T) {
-	type Wrong struct {
-		Query string `json:"query" jsonschema:"description=what to look for"`
+// Go ignores an unrecognised struct tag without a word. For this package's
+// keys that means a field silently loses the one thing it was annotated with —
+// the description the model was supposed to read, or the enum that was
+// supposed to constrain it. Every way of getting the key wrong is refused by
+// name instead.
+func TestAMistypedSchemaTagIsNotSilent(t *testing.T) {
+	type OtherLibrary struct {
+		Q string `json:"q" jsonschema:"description=what to look for"`
+	}
+	type Pluralised struct {
+		Q string `json:"q" enums:"low|high"`
+	}
+	type Misspelled struct {
+		Q string `json:"q" descrption:"what to look for"`
 	}
 
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("a description= tag must not be accepted; upstream rejects it")
-		}
-		msg := fmt.Sprint(r)
-		for _, want := range []string{"Wrong", "the whole tag is the description"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("panic = %q\nwant it to mention %q", msg, want)
-			}
-		}
-	}()
-	_ = ai.SchemaOf[Wrong]("")
+	for name, tc := range map[string]struct {
+		derive func()
+		want   string
+	}{
+		"another library's key": {func() { _ = ai.SchemaOf[OtherLibrary]("") }, "jsonschema"},
+		"a pluralised keyword":  {func() { _ = ai.SchemaOf[Pluralised]("") }, "did you mean enum"},
+		"a misspelled keyword":  {func() { _ = ai.SchemaOf[Misspelled]("") }, "did you mean description"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("the tag must not be silently dropped")
+				}
+				if msg := fmt.Sprint(r); !strings.Contains(msg, tc.want) {
+					t.Errorf("panic = %q\nwant it to mention %q", msg, tc.want)
+				}
+			}()
+			tc.derive()
+		})
+	}
+
+	// An unrelated tool's tag is left alone: it is not one edit from anything
+	// here, so it is somebody else's and none of our business.
+	type Unrelated struct {
+		Q string `json:"q" db:"query" validate:"required" description:"what to look for"`
+	}
+	got := ai.SchemaOf[Unrelated]("").DefinitionMap()
+	props := got["properties"].(map[string]any)["q"].(map[string]any)
+	if props["description"] != "what to look for" {
+		t.Errorf("q = %v, want the description alongside the unrelated tags", props)
+	}
 }
 
-// Go ignores an unrecognised struct tag silently, so the reasonable-looking
-// `description` key would cost a field its description with nothing said. That
-// is the worse failure of the two — the model simply never gets told.
-func TestTheWrongTagKeyIsNotSilent(t *testing.T) {
-	type Nested struct {
-		Note string `json:"note" description:"why this matters"`
+// The schema has to be one the providers accept, not merely one that is valid.
+// These are the rules a general-purpose generator gets wrong, and each is a
+// documented requirement of OpenAI's strict structured output.
+func TestDerivedSchemasAreWhatProvidersAccept(t *testing.T) {
+	type Deep struct {
+		N int `json:"n"`
 	}
-	type Outer struct {
-		Name  string `json:"name" jsonschema:"full legal name"`
-		Inner Nested `json:"inner"`
+	type inner struct {
+		Tag string `json:"tag"`
+	}
+	type Case struct {
+		inner              // promoted, the way encoding/json promotes it
+		At       time.Time `json:"at"`
+		List     []Deep    `json:"list"`
+		Maybe    *int      `json:"maybe,omitempty"`
+		Priority string    `json:"priority" enum:"low|medium|high"`
+		Count    int       `json:"count" description:"how many" minimum:"1" maximum:"99"`
+		Skip     string    `json:"-"`
 	}
 
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("a description tag must not be silently dropped")
+	schema := ai.SchemaOf[Case]("").DefinitionMap()
+	properties, _ := schema["properties"].(map[string]any)
+
+	names := map[string]bool{}
+	for name := range properties {
+		names[name] = true
+	}
+	want := []string{"tag", "at", "list", "maybe", "priority", "count"}
+	for _, name := range want {
+		if !names[name] {
+			t.Errorf("property %q is missing; got %v", name, sortedKeys(properties))
 		}
-		msg := fmt.Sprint(r)
-		for _, want := range []string{"Nested.Note", "jsonschema tag"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("panic = %q\nwant it to mention %q", msg, want)
+	}
+	if names["Skip"] || names["-"] {
+		t.Error(`a json:"-" field reached the schema`)
+	}
+
+	// Every field is required, the optional one included: strict mode demands
+	// it, and optionality is the null in the type union instead.
+	required := map[string]bool{}
+	for _, name := range schema["required"].([]any) {
+		required[name.(string)] = true
+	}
+	for _, name := range want {
+		if !required[name] {
+			t.Errorf("%q is not in required; strict structured output requires every field", name)
+		}
+	}
+	maybe := properties["maybe"].(map[string]any)
+	if fmt.Sprint(maybe["type"]) != "[integer null]" {
+		t.Errorf(`maybe.type = %v, want ["integer","null"] — that is how strict mode says optional`, maybe["type"])
+	}
+
+	// No boolean schemas, anywhere: strict mode rejects them outright.
+	var boolSchemas func(any, string)
+	boolSchemas = func(node any, path string) {
+		switch n := node.(type) {
+		case bool:
+			t.Errorf("%s is a boolean schema, which strict structured output rejects", path)
+		case map[string]any:
+			for k, v := range n {
+				if k == "additionalProperties" {
+					if _, isBool := v.(bool); isBool {
+						continue // false here is required, not a schema
+					}
+				}
+				boolSchemas(v, path+"."+k)
+			}
+		case []any:
+			for i, v := range n {
+				boolSchemas(v, fmt.Sprintf("%s[%d]", path, i))
 			}
 		}
-	}()
-	_ = ai.SchemaOf[Outer]("")
+	}
+	boolSchemas(schema, "root")
+
+	// A type that marshals to something other than its fields is described by
+	// what it marshals to, or the schema rejects its own Go type's JSON.
+	at := properties["at"].(map[string]any)
+	if at["type"] != "string" || at["format"] != "date-time" {
+		t.Errorf("at = %v, want a date-time string", at)
+	}
+
+	// Constraints from the tag.
+	priority := properties["priority"].(map[string]any)
+	if fmt.Sprint(priority["enum"]) != "[low medium high]" {
+		t.Errorf("priority.enum = %v", priority["enum"])
+	}
+	count := properties["count"].(map[string]any)
+	if count["minimum"] != 1.0 || count["maximum"] != 99.0 || count["description"] != "how many" {
+		t.Errorf("count = %v, want the tag's description and bounds", count)
+	}
+
+	// Objects are closed, at every level.
+	if schema["additionalProperties"] != false {
+		t.Error("the root object is not closed; strict structured output requires it")
+	}
+	items := properties["list"].(map[string]any)["items"].(map[string]any)
+	if items["additionalProperties"] != false {
+		t.Error("a nested object is not closed")
+	}
+}
+
+func sortedKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The checker exists for one job: turn a model's mistake into a sentence the
+// model can act on. These are the mistakes models actually make.
+func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
+	type Args struct {
+		Query    string `json:"query" description:"what to look for"`
+		Priority string `json:"priority" enum:"low|medium|high"`
+		Limit    int    `json:"limit" minimum:"1" maximum:"50"`
+	}
+	tool := ai.ToolFor[Args]("search", "search the knowledge base")
+
+	for name, tc := range map[string]struct{ input, want string }{
+		"a missing field": {
+			`{"priority":"low","limit":3}`, "missing property: query",
+		},
+		"a value outside the enum": {
+			`{"query":"go","priority":"urgent","limit":3}`, "priority must be one of low, medium or high",
+		},
+		"a string where a number belongs": {
+			`{"query":"go","priority":"low","limit":"three"}`, "limit must be integer, not string",
+		},
+		"a number out of range": {
+			`{"query":"go","priority":"low","limit":900}`, "limit must be at most 50",
+		},
+		"an invented property": {
+			`{"query":"go","priority":"low","limit":3,"sort":"asc"}`, "unknown property: sort",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tool.ValidateArgs(tc.input)
+			if err == nil {
+				t.Fatalf("%s was accepted", tc.input)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %q\nwant it to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	if err := tool.ValidateArgs(`{"query":"go","priority":"low","limit":3}`); err != nil {
+		t.Errorf("a correct call was rejected: %v", err)
+	}
 }

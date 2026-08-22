@@ -175,7 +175,7 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ```go
 type SearchArgs struct {
-	Query string `json:"query" jsonschema:"要找什么"`
+	Query string `json:"query" description:"要找什么"`
 	Limit int    `json:"limit,omitempty"`
 }
 
@@ -207,24 +207,30 @@ messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
 
 ## 描述字段
 
-`jsonschema` 标签就是这个字段的描述，**模型会读它**。字段名对模型来说往往比对你更含糊——`name` 可能是显示名也可能是法定姓名，`age` 可能是岁数也可能是出生日期——这里就是你消除歧义的地方。
-
-有两种看起来对、其实不对的写法。它们都会在构造时**响亮地失败并告诉你怎么改**，而不是把一份模型用不了的 schema 发出去：
+`ai` 标签说明一个字段**是什么意思、能填什么**，模型会读它。字段名对模型来说往往比对你更含糊——`name` 可能是显示名也可能是法定姓名——而一个只允许固定几个取值的字段，应该直接说出来，而不是指望模型猜对。
 
 ```go
-jsonschema:"要找什么"              // 正确：整个标签内容就是描述文本
-jsonschema:"description=要找什么"  // panic：那是另一个库的语法
-description:"要找什么"             // panic：Go 会静默丢掉这个键
+type Order struct {
+	Item     string `json:"item" description:"要订什么，一行说清"`
+	Priority string `json:"priority" enum:"low|medium|high"`
+	Quantity int    `json:"quantity" description:"数量" minimum:"1" maximum:"99"`
+}
 ```
 
-键之所以是 `jsonschema` 而不是更直白的 `description`，是因为**生态里其他 schema 库用的都是它**，所以那才是人们会条件反射打出来的键。之所以选择"检查"而不是"改名"，恰恰是因为 **Go 对不认识的标签键一声不吭**——键写错的代价是描述被静默丢掉，比值写错糟得多。
+**标签键就是它设置的那个 JSON Schema 关键字。** 没有子语法要学，也没有引号规则——切分由 Go 自己的 struct tag 约定完成，所以描述里含逗号就是含逗号。enum 成员用竖线分隔，因为标签值是字符串，装不下 JSON 数组。
+
+可用的关键字是 `description`、`enum`、`format`、`pattern`、`minimum`、`maximum`、`multipleOf`、`minLength`、`maxLength`、`minItems`、`maxItems`——这是各家 provider 文档里都支持的那个交集，**所以标签写不出一个端点会拒绝的 schema**。
+
+跟某个关键字**只差一个编辑距离**的键——`enums`、`descrption`——会 panic 并告诉你想写的是哪个，因为 Go 本来会一声不吭地丢掉它，那个字段就白标注了。而跟谁都不接近的键会被放过：`db`、`validate` 那些是别人的工具在用。
+
+schema 是按「**能被接受**」推导的，不只是「合法」：所有字段都在 `required` 里（可选的写成 `["T","null"]`，那才是 strict 结构化输出表达"可选"的方式）、每个对象都是封闭的、`time.Time` 是 date-time 字符串而不是一堆未导出字段组成的对象，而一个需要开放 schema 的字段会被**当场拒绝**，而不是发出去再被端点拒。完整规则见 [`pkg/ai/schema`](pkg/ai/schema)。
 
 ## 结构化输出
 
 ```go
 type Person struct {
-	Name string `json:"name" jsonschema:"完整法定姓名，姓氏在后"`
-	Age  int    `json:"age" jsonschema:"周岁年龄"`
+	Name string `json:"name" description:"完整法定姓名，姓氏在后"`
+	Age  int    `json:"age" description:"周岁年龄" minimum:"0"`
 }
 
 person, err := ai.CompleteAs[Person](ctx, client, messages)

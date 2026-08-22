@@ -117,7 +117,7 @@
 //	request.go     one call: what is asked, under what settings, and how they layer
 //	message.go     a turn, and the ordered blocks it carries
 //	tool.go        a tool offered to the model, and its arguments checked on the way back
-//	schema.go      asking a model to answer in a JSON shape, and the JSON Schema behind it
+//	schema.go      asking a model to answer in a JSON shape
 //
 //	response.go    what one call produced, what it cost, and decoding it
 //	errors.go      the failure categories, and how a driver's error becomes one
@@ -134,8 +134,9 @@
 //
 //	driver.go      the protocol seam: what a driver is, is given, and how one is found
 //
-// A set of endpoints and their live model listings is ai/provider, which sits
-// above Client rather than inside it.
+// Deriving a schema from a Go type, and checking an answer against one, is
+// ai/schema. A set of endpoints and their live model listings is ai/provider,
+// which sits above Client rather than inside it.
 //
 // Another modality — image generation, say — would be a sibling package rather
 // than more of this one: it shares a Model, a Config and an Error with what is

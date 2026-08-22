@@ -203,7 +203,7 @@ the struct the arguments decode into cannot drift apart:
 
 ```go
 type SearchArgs struct {
-	Query string `json:"query" jsonschema:"what to look for"`
+	Query string `json:"query" description:"what to look for"`
 	Limit int    `json:"limit,omitempty"`
 }
 
@@ -237,30 +237,48 @@ messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
 
 ## Describing fields
 
-The `jsonschema` tag is a field's description, and the model reads it. Field
-names are often ambiguous to a model in ways they are not to you — `name` could
-be a display name or a legal one, `age` could be years or a date of birth — so
-this is where you disambiguate.
-
-Two spellings look right and are not. Both fail loudly at construction, naming
-the fix, rather than shipping a schema the model cannot use:
+The `ai` tag says what a field means and what it may contain, and the model
+reads it. Field names alone are often ambiguous to a model in ways they are not
+to you — `name` could be a display name or a legal one — and a field with a
+fixed set of answers should say so rather than hope.
 
 ```go
-jsonschema:"what to look for"              // correct: the whole tag is the text
-jsonschema:"description=what to look for"  // panics: another library's grammar
-description:"what to look for"             // panics: Go would drop this silently
+type Order struct {
+	Item     string `json:"item" description:"what to order, one line"`
+	Priority string `json:"priority" enum:"low|medium|high"`
+	Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
+}
 ```
 
-The key is `jsonschema` because that is what the ecosystem's other schema
-libraries use, so it is the one people reach for. It is checked rather than
-renamed precisely because Go ignores an unrecognised tag key without a word.
+**A tag key is the JSON Schema keyword it sets.** Nothing to quote and no
+grammar to learn — Go's own struct-tag convention does the splitting, so a
+description containing a comma is just that. Enum members are pipe-separated,
+since a tag value is a string and a JSON array is not.
+
+The keywords are `description`, `enum`, `format`, `pattern`, `minimum`,
+`maximum`, `multipleOf`, `minLength`, `maxLength`, `minItems` and `maxItems` —
+the intersection the providers document as supported, so a tag cannot produce a
+schema an endpoint refuses.
+
+A key one edit from a keyword — `enums`, `descrption` — is a panic naming the
+field and the keyword you meant, because Go would otherwise drop it without a
+word and the field would lose the only thing it was annotated with. A key that
+is nobody's near miss is left alone: `db`, `validate` and the rest belong to
+other tools.
+
+Schemas are derived to be **accepted**, not merely valid. Every field is in
+`required` — optional ones are `["T","null"]`, which is how strict structured
+output spells optional — every object is closed, `time.Time` is a date-time
+string rather than an object of unexported fields, and a field that would need
+an open schema is refused instead of being sent and rejected.
+See [`pkg/ai/schema`](pkg/ai/schema) for the whole of it.
 
 ## Structured outputs
 
 ```go
 type Person struct {
-	Name string `json:"name" jsonschema:"full legal name, family name last"`
-	Age  int    `json:"age" jsonschema:"age in whole years"`
+	Name string `json:"name" description:"full legal name, family name last"`
+	Age  int    `json:"age" description:"age in whole years" minimum:"0"`
 }
 
 person, err := ai.CompleteAs[Person](ctx, client, messages)

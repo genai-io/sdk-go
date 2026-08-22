@@ -344,6 +344,8 @@ Some rules here are conventions and some are checked. It is worth knowing which:
   pkg/ai                  the core. No repo imports, no vendor SDK,
                           no environment variable, no file.
     |
+    +-- pkg/ai/schema     a Go type becoming a schema a provider accepts
+    |
     +-- pkg/ai/driver/*   one package per protocol. Each pulls in that
     |                     protocol's vendor SDK, and nothing else does.
     |
@@ -360,6 +362,9 @@ Some rules here are conventions and some are checked. It is worth knowing which:
   rather than beside the drivers that read them.
 - `driver/openai/internal/errs` is unreachable from `driver/anthropic`, by
   `internal/`.
+- `pkg/ai`, `pkg/ai/schema`, `pkg/ai/catalog` and `pkg/ai/provider` have **zero
+  module dependencies** between them and the standard library. A vendor SDK
+  enters the build only through the driver you blank-import.
 - `ProtocolOptions` / `ProtocolConfig` reject a value that was never meant to be
   one, at compile time.
 - `Driver` is two methods, so a stub in a test is two methods.

@@ -9,20 +9,13 @@ A Go client library for large language model inference, providing one typed API
 over the Anthropic Messages, OpenAI Chat Completions, OpenAI Responses and
 Google Gemini protocols.
 
-- **One API, five protocols.** The same `Message`, `Response` and streaming
-  events whichever provider serves the request.
-- **Streaming.** Text, thinking, tool calls and images share one
-  start/delta/end lifecycle, so one loop handles every kind of content.
-- **Tool calling.** A tool is a struct and a function. The schema is derived
-  from the struct, and arguments are checked before your code runs.
-- **Structured outputs.** `CompleteAs[T]` derives the schema, constrains
-  generation and decodes the answer, so the type is named once.
-- **Typed errors.** Auth, rate limit, context exceeded and unsupported are
-  separate answers rather than substrings to match on.
-- **A model catalog.** 27 vendors and 55 models — endpoints, limits, pricing
-  and per-endpoint quirks as data, readable without a network call.
-- **No ambient credentials.** `pkg/ai` reads no environment variable and no
-  file. `pkg/ai/auth` is the opt-in that does.
+- **One API, five protocols** — the same types whichever provider serves the request.
+- **Streaming** — text, thinking, tool calls and images on one start/delta/end lifecycle.
+- **Tool calling** — schema derived from your argument struct, arguments checked before your code runs.
+- **Structured outputs** — `CompleteAs[T]` derives the schema, constrains generation and decodes.
+- **Typed errors** — auth, rate limit, context exceeded and unsupported, not substrings to match.
+- **A model catalog** — 27 vendors, 55 models; endpoints, limits and pricing as data.
+- **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
 
 [Installation](#installation) ·
 [Quickstart](#quickstart) ·
@@ -89,7 +82,7 @@ you need to — a server that must not read ambient credentials stops at
 
 ### Switching providers
 
-Change the model reference. Nothing else in the program changes.
+Change the reference. Nothing else changes.
 
 ```go
 ref := "anthropic/claude-opus-5" // or google/gemini-3.5-flash,
@@ -97,8 +90,7 @@ ref := "anthropic/claude-opus-5" // or google/gemini-3.5-flash,
 client, err := auth.Client(ref)
 ```
 
-A reference is `vendor/model`. Both halves come from the catalog, so
-`catalog.Models()` lists everything resolvable without a network call.
+`catalog.Models()` lists every `vendor/model` reference, without a network call.
 
 Runnable examples are in [`examples/`](examples) — one per vendor, plus
 [`tools/`](examples/tools) and [`structured/`](examples/structured).
@@ -137,11 +129,10 @@ for event, err := range client.Stream(ctx, messages) {
 }
 ```
 
-`EventBlockDelta` carries a fragment; `EventBlockEnd` carries the complete
-block, and arrives as soon as an atomic value such as a tool call is assembled.
-`EventDone` carries the aggregated `Response` — the same value `Complete`
-returns. The client closes every block it started, including on failure, and
-abandoning the iterator cancels the request.
+`EventBlockDelta` carries a fragment, `EventBlockEnd` the complete block, and
+`EventDone` the aggregated `Response` — the same value `Complete` returns.
+Every block that opens is closed, including on failure. Abandoning the iterator
+cancels the request.
 
 ## Tool use
 
@@ -201,12 +192,11 @@ rather than a zero value for it.
 
 </details>
 
-The model does not run your tools: it asks you to, you answer, and it
-continues. `Run` is that loop, and `history` is the whole conversation, so a
-follow-up continues from it.
+`Run` is the loop the model needs: it asks, you answer, it continues.
+`history` is the whole conversation, so a follow-up continues from it.
 
 `SearchArgs` is named once, so the schema sent to the model and the struct its
-arguments decode into cannot come to describe different things:
+arguments decode into cannot disagree:
 
 ```json
 {
@@ -220,14 +210,13 @@ arguments decode into cannot come to describe different things:
 }
 ```
 
-Arguments are checked against that schema before your function runs, so a
-model's mistake comes back as something it can correct rather than as whatever
-your tool does with a missing field. An unknown tool name, bad arguments and a
-failing tool all return to the model as a result marked `IsError` rather than
-ending the conversation.
+Arguments are checked against it before your function runs, so a model's
+mistake comes back as something it can correct. An unknown tool name, bad
+arguments and a failing tool all reach the model as an `IsError` result rather
+than ending the conversation.
 
-Constraining the choice is one value with four states — the same four every
-protocol here expresses:
+Constraining the choice is one value with four states, the same four every
+protocol expresses:
 
 ```go
 ai.WithToolChoice(ai.ToolChoiceNone)            // no tool this turn
@@ -235,11 +224,9 @@ ai.WithToolChoice(ai.ToolChoiceRequired)        // some tool, the model's choice
 ai.WithToolChoice(ai.ToolChoiceNamed("search")) // this one
 ```
 
-`ToolFunc` returns an ordinary `ai.Tool` — three fields that go on the wire and
-one function — so a hand-written schema is an assignment and a tool whose shape
-is not known until run time is that value written directly. Write the turn loop
-yourself with `Complete` and `RunTools` when the turns are your business: to
-stream text as it arrives, to stop on a condition, to bill each one.
+Write the turn loop yourself with `Complete` and `RunTools` when the turns are
+your business — to stream as it arrives, to stop on a condition, to bill each
+one.
 
 ## Structured outputs
 
@@ -252,17 +239,13 @@ type Person struct {
 person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
 
-`CompleteAs` derives the schema from `Person`, constrains generation to it and
-decodes the answer, so the type is named once. Every supported protocol
-constrains generation natively.
+The type is named once: `CompleteAs` derives the schema from it, constrains
+generation natively, and decodes the answer into it.
 
-A tag key is the JSON Schema keyword it sets — `description`, `enum`,
-`minimum`, `maximum` and eight more — and every word of it is prompt text.
-Schemas are derived to be *accepted*, not merely valid: every field in
-`required`, every object closed, optionality as `["T","null"]`, because that is
-what a provider's strict mode demands. See
-[`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema)
-for the vocabulary and the rules.
+A tag key is the JSON Schema keyword it sets — eleven of them — and every word
+is prompt text. Schemas are derived to be *accepted*, not merely valid, which
+is a stricter target than the specification. See
+[`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema).
 
 ## Request options
 
@@ -279,14 +262,13 @@ response, err := client.Complete(ctx, messages,
 	ai.WithCacheRetention(ai.CacheLong))
 ```
 
-Passing an option is what marks a setting as explicit, so `WithTemperature(0)`
-is deterministic sampling and omitting it inherits. Resolution runs model
+Passing an option is what marks a setting explicit, so `WithTemperature(0)` is
+deterministic sampling and omitting it inherits. Resolution runs model
 defaults, then client defaults, then call overrides.
 
-Reasoning is requested as a normalized rung. Each model carries its own ladder
-mapping that rung onto whatever its endpoint wants — a token budget, a level
-string, an enable flag — so the same request runs anywhere, and a model that
-does not offer the rung asked for is snapped onto the nearest one it does.
+`WithEffort` is a normalized rung. Each model carries its own ladder onto
+whatever its endpoint wants — a token budget, a level string, an enable flag —
+and snaps to the nearest rung it offers.
 
 ## Messages and content
 
@@ -304,10 +286,9 @@ text := response.Text()
 history = append(history, response.Message()) // keeps every block, in order
 ```
 
-Append `response.Message()` rather than `ai.AssistantMessage(response.Text())`:
-the former carries the model's thinking and reasoning state forward, which is
-what lets a reasoning model resume instead of starting over. For an order the
-constructors do not produce, write the `ai.Message` out with its `Content`.
+Append `response.Message()`, not `ai.AssistantMessage(response.Text())` — the
+first carries thinking and reasoning state forward, which is what lets a
+reasoning model resume instead of starting over.
 
 ## Errors and execution policy
 
@@ -323,25 +304,20 @@ case ai.IsUnsupported(err):     // this model cannot do what was asked
 }
 ```
 
-A failed turn returns both a non-nil error and a non-nil `*Response` carrying
-what arrived first, so a partial answer and its cost are not lost with the
-error. Requests are validated before they leave — an image sent to a text-only
-model, a tool call with no matching result — and the library does not rewrite
-your request to make it work: a model with no system role is reported as an
-error naming the model, because moving those instructions into a user turn is a
-decision about your product, not about the wire.
+A failed turn returns a non-nil error *and* a non-nil `*Response` with what
+arrived, so a partial answer and its cost are not lost. Requests are validated
+before they leave, and never rewritten to make them work: a model with no
+system role is an error naming the model, because moving those instructions
+into a user turn is a decision about your product.
 
-Execution policy is `Middleware` decorating a driver, because only your
-application knows the budget for a turn, what may be cached and what must not
-be logged:
+Execution policy is `Middleware` decorating a driver:
 
 ```go
 client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
 ```
 
-`Retry` is the one policy shipped here, and every driver disables its vendor
-SDK's own, so without it you get none. Caching, logging and cost metering stay
-yours.
+`Retry` is the only policy shipped, and every driver disables its vendor SDK's
+own — so without it you get none. Caching, logging and metering stay yours.
 
 ## Credentials
 
@@ -355,11 +331,9 @@ client, err := ai.NewClient(ai.Config{
 })
 ```
 
-`pkg/ai/auth` is the opt-in that does read the environment, which is what a
-command-line tool wants. `pkg/ai/provider` is the layer between a catalog row
-and a client: one configured host and the list of models on it, where reading
-the list and fetching it are separate verbs so a model picker renders
-immediately and a dead endpoint cannot hang it.
+`pkg/ai/auth` is the opt-in that does read it. `pkg/ai/provider` sits between a
+catalog row and a client: one configured host and the models on it, where
+reading the list and fetching it are separate verbs.
 
 ## Supported protocols
 
@@ -371,9 +345,8 @@ immediately and a dead endpoint cannot hang it.
 | Anthropic on Vertex AI | `pkg/ai/driver/anthropic/vertex` | 1 |
 | Google Gemini | `pkg/ai/driver/google` | 1 |
 
-A vendor is a catalog row, not a package. Most vendors ship an endpoint
-speaking somebody else's protocol, so adding one is a data change in
-`pkg/ai/catalog` — not another HTTP implementation.
+A vendor is a catalog row, not a package: most ship an endpoint speaking
+somebody else's protocol, so adding one is a data change.
 
 ## Documentation
 

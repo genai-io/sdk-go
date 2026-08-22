@@ -88,7 +88,7 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return fmt.Errorf("%s is missing %s: %s", atObject(path),
+		return fmt.Errorf("%smissing required %s: %s", within(path),
 			plural("property", "properties", len(missing)), strings.Join(missing, ", "))
 	}
 
@@ -101,7 +101,7 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 		}
 		if len(unknown) > 0 {
 			sort.Strings(unknown)
-			return fmt.Errorf("%s has unknown %s: %s", atObject(path),
+			return fmt.Errorf("%sunknown %s: %s", within(path),
 				plural("property", "properties", len(unknown)), strings.Join(unknown, ", "))
 		}
 	}
@@ -276,11 +276,14 @@ func at(path string) string {
 	return path
 }
 
-func atObject(path string) string {
+// within prefixes a complaint about an object with where that object is, and
+// says nothing at the root — "missing required property: query" reads as an
+// instruction, where "the arguments is missing property" reads as neither.
+func within(path string) string {
 	if path == "" {
-		return "the arguments"
+		return ""
 	}
-	return path
+	return path + ": "
 }
 
 func join(path, name string) string {

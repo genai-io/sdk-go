@@ -21,10 +21,14 @@ type Tool struct {
 	// typically a map[string]any. Drivers translate it into their wire shape.
 	Parameters any `json:"parameters,omitempty"`
 
-	// run answers this tool's calls, and is set by Handle. It is unexported
-	// because it is behaviour rather than definition: a Tool decoded from JSON
-	// carries what the model is told and nothing that could be executed.
-	run func(ctx context.Context, arguments string) (string, error)
+	// Run answers this tool's calls, taking the model's arguments as the JSON
+	// it sent. ToolOf fills it in from a Go type, which is what most callers
+	// want; set it directly for a tool whose shape is not known until run time
+	// — one loaded from configuration, or proxied from somewhere else.
+	//
+	// It is skipped by encoding/json: what a Tool marshals to is what the
+	// model is told, which never includes anything executable.
+	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
 // ToolInfo is what a model is told about a tool besides its arguments: the
@@ -223,7 +227,7 @@ func ToolOf[T ToolRunner](prototype T) Tool {
 			"keeps two calls in one turn from sharing arguments", kind))
 	}
 	tool := ToolFor[T]()
-	tool.run = func(ctx context.Context, arguments string) (string, error) {
+	tool.Run = func(ctx context.Context, arguments string) (string, error) {
 		args := prototype // the dependencies; the model fills in the rest
 		if err := decodeArgs(arguments, &args); err != nil {
 			return "", fmt.Errorf("arguments for %s: %w", tool.Name, err)
@@ -233,9 +237,9 @@ func ToolOf[T ToolRunner](prototype T) Tool {
 	return tool
 }
 
-// Runnable reports whether this tool was built with Handle and can answer its
-// own calls.
-func (t Tool) Runnable() bool { return t.run != nil }
+// Runnable reports whether this tool can answer its own calls — whether it was
+// built with ToolOf or had Run set directly.
+func (t Tool) Runnable() bool { return t.Run != nil }
 
 // RunTools answers every call in a turn, in order, and returns the results as
 // one user turn's worth of answers:
@@ -281,7 +285,7 @@ func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 		return failed("%v", err)
 	}
 
-	output, err := tool.run(ctx, call.Input)
+	output, err := tool.Run(ctx, call.Input)
 	if err != nil {
 		return failed("%v", err)
 	}

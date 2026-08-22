@@ -196,6 +196,19 @@ tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
 
 关于这个工具的任何东西**都没有写第二遍，也不在别处**：模型要调用的那个名字，挨着它将要填写的字段，也挨着读取这些字段的代码。
 
+`Tool` 就是个普通结构体——`Parameters` 是告诉模型的，`Run` 是回答它的——所以一个到运行时才知道形状的工具，**完全不需要 Go 类型**：
+
+```go
+ai.Tool{
+	Name:        "echo",
+	Description: "repeats what it is given",
+	Parameters:  schemaFromConfig,
+	Run: func(ctx context.Context, arguments string) (string, error) { … },
+}
+```
+
+`ToolOf` 就是从一个 Go 类型把这两样填好——有类型的时候用它。两条路都一样：参数在 `Run` 看到它们之前，先按 `Parameters` 校验过。
+
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，而**它在每个应用里都一模一样**：
 
 ```go

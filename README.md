@@ -233,6 +233,23 @@ Nothing about the tool is written twice, and nothing about it is anywhere else:
 the name the model calls sits next to the fields it will fill in, and next to
 the code that reads them.
 
+`Tool` is a plain struct — `Parameters` is what the model is told, `Run` is what
+answers it — so a tool whose shape is not known until run time needs no Go type
+at all:
+
+```go
+ai.Tool{
+	Name:        "echo",
+	Description: "repeats what it is given",
+	Parameters:  schemaFromConfig,
+	Run: func(ctx context.Context, arguments string) (string, error) { … },
+}
+```
+
+`ToolOf` fills those two in from a Go type, which is what you want when you
+have one. Either way the arguments are checked against `Parameters` before
+`Run` sees them.
+
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and it is the same loop in every application:
 

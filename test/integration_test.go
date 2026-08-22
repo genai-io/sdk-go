@@ -844,7 +844,7 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 
 	for name, tc := range map[string]struct{ input, want string }{
 		"a missing field": {
-			`{"priority":"low","limit":3}`, "missing property: query",
+			`{"priority":"low","limit":3}`, "missing required property: query",
 		},
 		"a value outside the enum": {
 			`{"query":"go","priority":"urgent","limit":3}`, "priority must be one of low, medium or high",
@@ -1071,4 +1071,44 @@ func (r Recorder) Run(context.Context) (string, error) {
 		return "", fmt.Errorf("the prototype's dependency did not survive the copy")
 	}
 	return r.prefix + ":" + r.Note, nil
+}
+
+// Run is a field, so a tool whose shape is not known until run time needs no
+// Go type at all — and a Tool still marshals to exactly what the model is
+// told, with nothing executable in it.
+func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
+	tool := ai.Tool{
+		Name:        "echo",
+		Description: "repeats what it is given",
+		Parameters: map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{"text": map[string]any{"type": "string"}},
+			"required":             []any{"text"},
+			"additionalProperties": false,
+		},
+		Run: func(_ context.Context, arguments string) (string, error) {
+			return "echoed " + arguments, nil
+		},
+	}
+
+	results := ai.RunTools(context.Background(), []ai.Tool{tool}, []ai.ToolCall{
+		{ID: "1", Name: "echo", Input: `{"text":"hi"}`},
+		{ID: "2", Name: "echo", Input: `{"text":"hi","nope":1}`},
+	})
+	if results[0].IsError || results[0].Content != `echoed {"text":"hi"}` {
+		t.Errorf("result 0 = %+v", results[0])
+	}
+	// The hand-written schema is enforced the same way a derived one is.
+	if !results[1].IsError || !strings.Contains(results[1].Content, "unknown property: nope") {
+		t.Errorf("result 1 = %+v, want the schema to have refused it", results[1])
+	}
+
+	// A Tool marshals to what the model is told, and nothing more.
+	wire, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("a Tool must stay marshalable: %v", err)
+	}
+	if strings.Contains(string(wire), "Run") {
+		t.Errorf("Tool marshalled as %s; nothing executable belongs in it", wire)
+	}
 }

@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,14 +57,38 @@ type Schema struct {
 	Strict bool `json:"strict,omitempty"`
 }
 
-// SchemaOf builds a Schema from a Go type, ready for WithSchema.
-func SchemaOf[T any](name, description string) *Schema {
+// SchemaOf builds a Schema from a Go type, ready for WithSchema. The schema is
+// named after T; description is prompt text the model reads, and may be empty
+// when the type name already says what the shape is for.
+func SchemaOf[T any](description string) *Schema {
 	return &Schema{
-		Name:        name,
+		Name:        reflect.TypeFor[T]().Name(),
 		Description: description,
 		Definition:  deriveSchema[T](),
 		Strict:      true,
 	}
+}
+
+// CompleteAs asks for an answer shaped like T and decodes it into one.
+//
+// It is the whole round trip in a single call — derive the schema from T,
+// constrain generation to it, unmarshal the answer — and T is named once.
+// Spelling SchemaOf and Parse separately lets them disagree:
+//
+//	ai.Parse[Company](client.Complete(ctx, msgs,
+//		ai.WithSchema(ai.SchemaOf[Person]("…"))))   // compiles, fails at runtime
+//
+// This cannot:
+//
+//	company, err := ai.CompleteAs[Company](ctx, client, messages)
+//
+// It is a function rather than a method because Go has no generic methods.
+// Pass WithSchema to describe the shape to the model, or to constrain to one T
+// does not capture exactly; options apply in order, so a caller's schema wins
+// over the derived one.
+func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts ...Option) (T, error) {
+	withDerived := append([]Option{WithSchema(SchemaOf[T](""))}, opts...)
+	return Parse[T](c.Complete(ctx, messages, withDerived...))
 }
 
 // DefinitionMap returns an independent JSON-object representation of the

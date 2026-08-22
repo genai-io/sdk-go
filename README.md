@@ -243,9 +243,13 @@ type Person struct {
 	Age  int    `json:"age"`
 }
 
-person, err := ai.Parse[Person](client.Complete(ctx, messages,
-	ai.WithSchema(ai.SchemaOf[Person]("person", "one person's details"))))
+person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
+
+`CompleteAs` derives the schema from `Person`, constrains generation to it and
+decodes the answer — so the type is named once. Add `ai.WithSchema` to give the
+model a description of the shape, or to constrain to something the Go type does
+not capture exactly.
 
 Every supported protocol constrains generation natively. For a model that
 cannot, ask for the shape in the prompt and decode with `Response.Unmarshal`,
@@ -308,7 +312,7 @@ This library does not retry. Retry, caching, logging and cost metering are
 may be cached and what must not be logged:
 
 ```go
-client := ai.New(ai.Wrap(driver, retry, costMeter), model)
+client := ai.New(driver, model).Use(retry, costMeter)
 ```
 
 One rule is not yours to discover: a retry may only replay a call that failed

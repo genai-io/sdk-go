@@ -59,6 +59,13 @@
 //
 //	client, err := ep.Client("llama4")
 //
+// # Typed answers
+//
+// CompleteAs derives a JSON schema from a Go type, constrains generation to it
+// and decodes the answer, so the type is named once:
+//
+//	person, err := ai.CompleteAs[Person](ctx, client, messages)
+//
 // # Stream blocks
 //
 // Every content kind uses one start/delta/end lifecycle. Textual Delta blocks
@@ -85,11 +92,17 @@
 // # Middleware
 //
 // Middleware wraps execution policy — retry, logging, caching, metering. It
-// decorates the driver, not the client, so the composition is visible where
-// the client is built: ai.New(ai.Wrap(driver, retry), model). The policy
-// itself belongs to the caller, who alone knows the budget for a turn and what
-// must not be logged. One rule is not theirs to discover: a retry may only
-// replay a call that failed before any delta reached the caller.
+// decorates the driver rather than the client, because a Handler and
+// Driver.Stream are the same shape; Use is the flat way to attach it and Wrap
+// is the same thing returning a Driver:
+//
+//	client := ai.New(driver, model).Use(retry, costMeter)
+//	decorated := ai.Wrap(driver, retry, costMeter)
+//
+// The policy itself belongs to the caller, who alone knows the budget for a
+// turn and what must not be logged. One rule is not theirs to discover: a
+// retry may only replay a call that failed before any delta reached the
+// caller.
 //
 // # Where things live
 //

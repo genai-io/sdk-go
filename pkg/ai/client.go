@@ -29,6 +29,23 @@ func New(d Driver, m Model, defaults ...Option) *Client {
 	return &Client{driver: d, model: cloneModel(m), defaults: slices.Clone(defaults)}
 }
 
+// Use wraps this client's driver in middleware, outermost first, and returns
+// the client so it chains onto New:
+//
+//	client := ai.New(driver, model).Use(retry, costMeter)
+//
+// That is the flat spelling of ai.New(ai.Wrap(driver, retry, costMeter),
+// model), and it does exactly that. Reach for Wrap directly when you want the
+// decorated Driver itself — to build several clients from, or to hand
+// somewhere a Driver is expected.
+//
+// Call it before the client is shared. A Client is safe for concurrent use;
+// changing what it wraps while another goroutine is mid-call is not.
+func (c *Client) Use(mw ...Middleware) *Client {
+	c.driver = Wrap(c.driver, mw...)
+	return c
+}
+
 // Model describes the model this client talks to. The value is a detached
 // snapshot, so editing it changes nothing here — a client is bound to one
 // model for its lifetime, and this hands back a description of that binding,

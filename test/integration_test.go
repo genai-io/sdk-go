@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -484,4 +485,79 @@ func toolResultContent(b ai.Block) string {
 		return ""
 	}
 	return b.ToolResult.Content
+}
+
+// Structured output is one call and one mention of the type. The schema that
+// goes out and the value that comes back are derived from the same T, which is
+// what SchemaOf and Parse spelled separately cannot guarantee.
+func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
+	type Person struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	// Chat Completions streams, so the answer arrives as SSE like any other.
+	e := sse(t, false,
+		[2]string{"", `{"id":"1","model":"m","choices":[{"index":0,` +
+			`"delta":{"content":"{\"name\":\"Ada\",\"age\":36}"},"finish_reason":"stop"}]}`})
+
+	client := open(t, e.server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
+	person, err := ai.CompleteAs[Person](context.Background(), client,
+		[]ai.Message{ai.UserMessage("who wrote the first algorithm?")})
+	if err != nil {
+		t.Fatalf("CompleteAs: %v", err)
+	}
+	if person.Name != "Ada" || person.Age != 36 {
+		t.Errorf("person = %+v, want the decoded answer", person)
+	}
+
+	// The schema reached the endpoint, named after the Go type.
+	sent, _ := json.Marshal(e.body["response_format"])
+	for _, want := range []string{"Person", "json_schema", "age"} {
+		if !strings.Contains(string(sent), want) {
+			t.Errorf("response_format = %s\nwant it to contain %q", sent, want)
+		}
+	}
+}
+
+// Middleware reaches the driver whichever way it was attached, and runs
+// outermost first.
+func TestUseIsTheFlatSpellingOfWrap(t *testing.T) {
+	e := sse(t, false, [2]string{"", `{"id":"1","model":"m","choices":[{"index":0,` +
+		`"delta":{"content":"ok"},"finish_reason":"stop"}]}`})
+	model := ai.Model{ID: "m", API: ai.APIOpenAIChat, BaseURL: e.server.URL}
+
+	var order []string
+	tag := func(name string) ai.Middleware {
+		return func(next ai.Handler) ai.Handler {
+			return func(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+				order = append(order, name)
+				return next(ctx, req)
+			}
+		}
+	}
+
+	driver, err := ai.NewDriver(ai.Config{Model: model, APIKey: "k"})
+	if err != nil {
+		t.Fatalf("NewDriver: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		build func() *ai.Client
+	}{
+		{"Wrap", func() *ai.Client { return ai.New(ai.Wrap(driver, tag("outer"), tag("inner")), model) }},
+		{"Use", func() *ai.Client { return ai.New(driver, model).Use(tag("outer"), tag("inner")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			order = nil
+			if _, err := tc.build().Complete(context.Background(),
+				[]ai.Message{ai.UserMessage("hi")}); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			if len(order) != 2 || order[0] != "outer" || order[1] != "inner" {
+				t.Errorf("middleware ran %v, want outermost first", order)
+			}
+		})
+	}
 }

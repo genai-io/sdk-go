@@ -213,9 +213,10 @@ type Person struct {
 	Age  int    `json:"age"`
 }
 
-person, err := ai.Parse[Person](client.Complete(ctx, messages,
-	ai.WithSchema(ai.SchemaOf[Person]("person", "一个人的信息"))))
+person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
+
+`CompleteAs` 从 `Person` 推导 schema、约束生成、再把答案解码回来——**这个类型只写一次**。想给模型一段关于这个形状的说明，或者想约束成一个 Go 类型表达不了的形状，再加 `ai.WithSchema`。
 
 支持的每套协议都能原生约束生成。模型如果不支持，就在 prompt 里描述形状，然后用 `Response.Unmarshal` 解码——它能容忍被 markdown 围栏包住、或者前面带一段废话的答案。
 
@@ -262,7 +263,7 @@ case ai.IsUnsupported(err):
 **这个库不重试。** 重试、缓存、日志、成本计量都是 `Middleware`，因为只有你的应用知道一轮的预算、什么可以缓存、什么绝不能记进日志：
 
 ```go
-client := ai.New(ai.Wrap(driver, retry, costMeter), model)
+client := ai.New(driver, model).Use(retry, costMeter)
 ```
 
 有一条规则不该让你自己去踩出来：**重试只能重放一个在产出任何 delta 之前就失败的调用。** 一旦有输出到了你手里，答案就已经开始了，重发要么把已经显示的文字重复一遍，要么把它丢掉。

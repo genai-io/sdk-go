@@ -249,7 +249,7 @@ vendor SDK — destroying the blank-import selectivity the registry exists for.
 ## What the SDK will not do
 
 It does no retry. Retry, caching, logging and cost metering are `Middleware`
-decorating a driver (`ai.Wrap(driver, retry, meter)`), because only the
+(`ai.New(driver, model).Use(retry, meter)`), because only the
 application knows the budget for a turn, what may be cached and what must not
 be logged. One rule is not the caller's to discover: a retry may only replay a
 call that failed *before producing any delta*.

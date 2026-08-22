@@ -560,4 +560,29 @@ func TestUseIsTheFlatSpellingOfWrap(t *testing.T) {
 			}
 		})
 	}
+
+	// Use returns a copy. A client already shared with other goroutines must
+	// not start running someone else's middleware.
+	t.Run("Use does not touch the client it came from", func(t *testing.T) {
+		plain := ai.New(driver, model)
+		metered := plain.Use(tag("metered"))
+
+		order = nil
+		if _, err := plain.Complete(context.Background(),
+			[]ai.Message{ai.UserMessage("hi")}); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if len(order) != 0 {
+			t.Errorf("the original client ran %v; Use edited it in place", order)
+		}
+
+		order = nil
+		if _, err := metered.Complete(context.Background(),
+			[]ai.Message{ai.UserMessage("hi")}); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if len(order) != 1 {
+			t.Errorf("the derived client ran %v, want the middleware", order)
+		}
+	})
 }

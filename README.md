@@ -81,10 +81,11 @@ documents — `OPENAI_API_KEY` here. The blank import registers one wire
 protocol; import only the ones you use, or `pkg/ai/driver/all` when the model
 is chosen at run time.
 
-This is the shortest of six ways to reach a client. A server that must not read
-ambient credentials, a model picker that needs a host's model list, and a
-client wrapped in retry middleware each take a different one —
-[Constructing a client](docs/clients.md) lays them out side by side.
+This is the short end of one chain: `auth.Client` is `auth.Config` plus
+`ai.NewClient`, which is `ai.NewDriver` plus `ai.New`. Stop earlier when you
+need to — a server that must not read ambient credentials stops at
+`ai.NewClient`, middleware stops at `ai.NewDriver`. See
+[Constructing a client](docs/clients.md).
 
 ### Switching providers
 
@@ -341,7 +342,7 @@ speaking somebody else's protocol, so adding one is a data change in
 | | |
 | --- | --- |
 | [API reference](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | Every type and function, with the rationale beside the code it governs |
-| [Constructing a client](docs/clients.md) | The six ways to reach an `ai.Client`, and when each is the right one ([中文](docs/clients.zh-CN.md)) |
+| [Constructing a client](docs/clients.md) | One chain from a model reference to an `ai.Client`, and where to stop on it ([中文](docs/clients.zh-CN.md)) |
 | [Architecture](docs/architecture.md) | How the pieces fit and what a request passes through ([中文](docs/architecture.zh-CN.md)) |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
 | [`examples/`](examples) | Runnable programs, one per vendor plus tools and structured output |

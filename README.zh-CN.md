@@ -69,7 +69,7 @@ func main() {
 
 `auth.Client` 会从厂商文档规定的那个环境变量里读凭证——这里是 `OPENAI_API_KEY`。那个空导入注册的是**一种线协议**；只导入你要用的，或者在模型要到运行时才确定时用 `pkg/ai/driver/all`。
 
-这是到达客户端的**六条路里最短的一条**。一台绝不能顺手读凭证的服务器、一个需要 host 模型列表的选择器、一个套了重试 middleware 的客户端，走的各是另一条——[构造客户端](docs/clients.zh-CN.md)把它们并排摆开。
+这是**一条链的最短端**：`auth.Client` 就是 `auth.Config` 加 `ai.NewClient`，后者又是 `ai.NewDriver` 加 `ai.New`。需要的话就早点停——绝不能顺手读凭证的服务端停在 `ai.NewClient`，要套 middleware 就停在 `ai.NewDriver`。见[构造客户端](docs/clients.zh-CN.md)。
 
 ### 换一家服务
 
@@ -269,7 +269,7 @@ client, err := ai.NewClient(ai.Config{
 | | |
 | --- | --- |
 | [API 参考](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | 每个类型和函数，设计理由就写在它管辖的代码旁边 |
-| [构造客户端](docs/clients.zh-CN.md) | 到达 `ai.Client` 的六条路，以及各自适用的场景（[English](docs/clients.md)） |
+| [构造客户端](docs/clients.zh-CN.md) | 从模型引用到 `ai.Client` 的一条链，以及在哪里停下（[English](docs/clients.md)） |
 | [架构](docs/architecture.zh-CN.md) | 各部分如何拼合，一个请求要经过什么（[English](docs/architecture.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
 | [`examples/`](examples) | 可运行的程序，每家厂商一个，外加工具调用和结构化输出 |

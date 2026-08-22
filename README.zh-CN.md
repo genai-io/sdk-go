@@ -272,11 +272,16 @@ client, err := ai.NewClient(ai.Config{
 | [构造客户端](docs/clients.zh-CN.md) | 从模型引用到 `ai.Client` 的一条链，以及在哪里停下（[English](docs/clients.md)） |
 | [架构](docs/architecture.zh-CN.md) | 各部分如何拼合，一个请求要经过什么（[English](docs/architecture.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
+| [更新日志](CHANGELOG.md) | 每个版本改了什么 |
 | [`examples/`](examples) | 可运行的程序，每家厂商一个，外加工具调用和结构化输出 |
 
 ## 版本
 
-API 仍处于早期开发阶段，可能变动。在发布带 tag 的版本之前，请固定到某个 commit。
+遵循[语义化版本](https://semver.org/lang/zh-CN/)。主版本号还是 `0`，所以 API 在次版本之间仍可能变动；[更新日志](CHANGELOG.md)会写清楚动了什么、该改成什么。
+
+```sh
+go get github.com/genai-io/sdk-go@v0.1.0
+```
 
 ## 许可
 

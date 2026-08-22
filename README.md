@@ -345,12 +345,18 @@ speaking somebody else's protocol, so adding one is a data change in
 | [Constructing a client](docs/clients.md) | One chain from a model reference to an `ai.Client`, and where to stop on it ([中文](docs/clients.zh-CN.md)) |
 | [Architecture](docs/architecture.md) | How the pieces fit and what a request passes through ([中文](docs/architecture.zh-CN.md)) |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
+| [Changelog](CHANGELOG.md) | What changed in each release |
 | [`examples/`](examples) | Runnable programs, one per vendor plus tools and structured output |
 
 ## Versioning
 
-The API is in early development and may change. Pin a commit until a tagged
-release is published.
+Released under [semantic versioning](https://semver.org). While the major
+version is `0` the API may still change between minor releases; the
+[changelog](CHANGELOG.md) says what moved and what to write instead.
+
+```sh
+go get github.com/genai-io/sdk-go@v0.1.0
+```
 
 ## License
 

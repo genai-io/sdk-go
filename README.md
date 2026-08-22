@@ -215,6 +215,38 @@ search := ai.ToolFunc("search", "Search the documentation and return matching pa
 	})
 ```
 
+<details>
+<summary><code>ToolFunc</code> is shorthand. This is what it folds down to.</summary>
+
+```go
+search := ai.Tool{
+	Name:        "search",
+	Description: "Search the documentation and return matching passages.",
+	Parameters:  jsonschema.For[SearchArgs](),
+	Run: func(ctx context.Context, arguments string) (string, error) {
+		var a SearchArgs
+		decoder := json.NewDecoder(bytes.NewReader([]byte(arguments)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&a); err != nil {
+			return "", fmt.Errorf("arguments for search: %w", err)
+		}
+		return docs.Search(ctx, a.Query, a.Limit)
+	},
+}
+```
+
+`ai.Tool` is the whole of what a tool is: the three fields that go on the wire,
+and one function that answers a call. `ToolFunc` derives the schema from
+`SearchArgs` and decodes into it. That is all it does — the two forms produce
+byte-identical definitions and behave identically, errors included.
+
+So the escape hatches are not features. A hand-written schema is an assignment,
+`search.Parameters = handWritten`. A tool whose shape is not known until run
+time is this form with `Parameters` from somewhere else. Neither needs anything
+the common case does not already use.
+
+</details>
+
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and `history` is the whole conversation — the
 calls, their results, the answer — so a follow-up continues from it:
@@ -265,17 +297,10 @@ ending a conversation over. Each goes back to the model as a result marked
 ✗ search  → arguments for search: limit must be at most 20
 ```
 
-### Beyond the common case
+### Writing the loop yourself
 
-`ToolFunc` returns an ordinary `ai.Tool`, so a hand-written schema is an
-assignment — `search.Parameters = handWritten` — and a tool whose shape is not
-known until run time is that value written directly, with `Run` set on it:
-
-```go
-ai.Tool{Name: "echo", Parameters: schemaFromConfig, Run: func(ctx context.Context, arguments string) (string, error) { … }}
-```
-
-Write the loop yourself when the turns are your business — to stream text as it
+`Run` is the same loop every application writes. Write it yourself when the
+turns are your business — to stream text as it
 arrives, to stop on a condition, to bill each one:
 
 ```go

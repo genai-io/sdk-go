@@ -185,6 +185,32 @@ search := ai.ToolFunc("search", "搜索文档，返回匹配的段落。",
 	})
 ```
 
+<details>
+<summary><code>ToolFunc</code> 是简写。它折叠掉的就是下面这段。</summary>
+
+```go
+search := ai.Tool{
+	Name:        "search",
+	Description: "搜索文档，返回匹配的段落。",
+	Parameters:  jsonschema.For[SearchArgs](),
+	Run: func(ctx context.Context, arguments string) (string, error) {
+		var a SearchArgs
+		decoder := json.NewDecoder(bytes.NewReader([]byte(arguments)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&a); err != nil {
+			return "", fmt.Errorf("arguments for search: %w", err)
+		}
+		return docs.Search(ctx, a.Query, a.Limit)
+	},
+}
+```
+
+**`ai.Tool` 就是一个工具的全部**：上线的那三个字段，加一个应答调用的函数。`ToolFunc` 做的事只有两件——从 `SearchArgs` 推出 schema、把参数解码进它。仅此而已：两种写法产出的定义**逐字节相同**，行为也相同，连错误都一样。
+
+所以那些"逃生口"根本不是特性。手写 schema 是一次赋值 `search.Parameters = handWritten`；到运行时才知道形状的工具就是上面这个写法、`Parameters` 从别处来。两者都没用到常规路径之外的任何东西。
+
+</details>
+
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环；`history` 是整段对话——调用、结果、答案都在里面——所以追问直接从它接着走：
 
 ```go
@@ -220,15 +246,9 @@ schema 从 `SearchArgs` 推导，**里面每一个字都是 prompt 文本**。�
 ✗ search  → arguments for search: limit must be at most 20
 ```
 
-### 常规之外
+### 自己写这个循环
 
-`ToolFunc` 返回的就是一个普通 `ai.Tool`，所以手写 schema 是一次赋值——`search.Parameters = handWritten`——而一个到运行时才知道形状的工具，就是**直接写出那个值并给它设上 `Run`**：
-
-```go
-ai.Tool{Name: "echo", Parameters: schemaFromConfig, Run: func(ctx context.Context, arguments string) (string, error) { … }}
-```
-
-轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），自己写这个循环：
+`Run` 就是每个应用都会写的那个循环。轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），自己写：
 
 ```go
 for range maxTurns {

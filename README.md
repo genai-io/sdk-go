@@ -226,39 +226,53 @@ tells you which one it meant by name only, so a hand-written `switch call.Name`
 has to remember which argument type belongs to which string, and renaming one
 still compiles.
 
-The model does not run your tools. It asks you to, you answer, and it
-continues — so the loop is yours:
+The model does not run your tools: it asks you to, you answer, and it
+continues. `Run` is that loop, and it is the same loop in every application:
 
 ```go
-messages := []ai.Message{ai.UserMessage(question)}
+response, history, err := client.Run(ctx,
+	[]ai.Message{ai.UserMessage(question)}, ai.WithTools(tools...))
 
+fmt.Println(response.Text())
+```
+
+`history` is the whole conversation — the calls, their results, the answer — so
+a follow-up continues from it:
+
+```go
+response, history, err = client.Run(ctx,
+	append(history, ai.UserMessage(next)), ai.WithTools(tools...))
+```
+
+`Run` checks each call's arguments against that tool's own schema before
+running anything, so a model's mistake comes back as something it can correct
+rather than as whatever your tool does with a missing field. Nothing it can hit
+is returned as an error — an unknown tool name, bad arguments, a tool that
+failed — because none of those are worth ending a conversation over. Each comes
+back to the model as a result marked `IsError`, which it sees and retries:
+
+```
+✗ weather → no tool named "weather"; the tools available are search and fetch
+✗ search  → arguments for search: limit must be at most 20
+```
+
+Write the loop yourself when the turns are your business — to stream text as it
+arrives, to stop on a condition, to bill each one:
+
+```go
 for range maxTurns {
 	response, err := client.Complete(ctx, messages, ai.WithTools(tools...))
 	if err != nil {
 		return err
 	}
-
 	calls := response.ToolCalls()
 	if len(calls) == 0 {
-		return use(response.Text())          // the model is done
+		return use(response.Text())
 	}
-
 	messages = append(messages,
-		response.Message(),                  // keeps its thinking, for the next turn
+		response.Message(),
 		ai.ToolResultsMessage(ai.RunTools(ctx, tools, calls)...))
 }
-```
-
-`RunTools` checks each call's arguments against that tool's own schema before
-running anything, so a model's mistake comes back as something it can correct
-rather than as whatever your tool does with a missing field. Nothing it can hit
-is returned as an error — an unknown tool name, bad arguments, a tool that
-failed — because none of those are worth ending a conversation over. Each comes
-back as a result marked `IsError`, which the model sees and retries:
-
-```
-✗ weather → no tool named "weather"; the tools available are search and fetch
-✗ search  → arguments for search: limit must be at most 20
 ```
 
 Two rules are not yours to discover. Every call must be answered in the turn

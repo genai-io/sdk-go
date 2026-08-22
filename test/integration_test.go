@@ -944,3 +944,70 @@ func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 		t.Errorf("result 3 = %q, want it to list the available tools", results[3].Content)
 	}
 }
+
+// Run is the loop every application would otherwise write. It ends when the
+// model stops asking, hands back the whole conversation so the next question
+// continues from it, and answers a bad call rather than failing the turn.
+func TestRunHoldsTheWholeConversation(t *testing.T) {
+	type CityArgs struct {
+		City string `json:"city" enum:"Tokyo|Delhi"`
+	}
+
+	turn := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		turn++
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch turn {
+		case 1: // one good call and one the schema refuses
+			fmt.Fprint(w, `data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[`+
+				`{"index":0,"id":"a","type":"function","function":{"name":"area","arguments":"{\"city\":\"Delhi\"}"}},`+
+				`{"index":1,"id":"b","type":"function","function":{"name":"area","arguments":"{\"city\":\"Mumbai\"}"}}`+
+				`]},"finish_reason":"tool_calls"}]}`+"\n\n")
+		default:
+			fmt.Fprint(w, `data: {"id":"2","choices":[{"index":0,`+
+				`"delta":{"content":"Delhi is 1484 km²."},"finish_reason":"stop"}]}`+"\n\n")
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var ran []string
+	tools := []ai.Tool{ai.Handle("area", "area of a city",
+		func(_ context.Context, a CityArgs) (string, error) {
+			ran = append(ran, a.City)
+			return "1484 km²", nil
+		})}
+
+	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
+	response, history, err := client.Run(context.Background(),
+		[]ai.Message{ai.UserMessage("how big is Delhi?")}, ai.WithTools(tools...))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := response.Text(); got != "Delhi is 1484 km²." {
+		t.Errorf("Text() = %q, want the model's final answer", got)
+	}
+	if len(ran) != 1 || ran[0] != "Delhi" {
+		t.Errorf("the handler ran for %v; the out-of-enum call must not reach it", ran)
+	}
+
+	// user → assistant(calls) → tool results → assistant(answer)
+	if len(history) != 4 {
+		t.Fatalf("history has %d messages, want the whole conversation", len(history))
+	}
+	results := history[2].ToolResults()
+	if len(results) != 2 {
+		t.Fatalf("got %d tool results, want one per call", len(results))
+	}
+	if results[0].IsError || !results[1].IsError {
+		t.Errorf("results = %+v, want the second marked as the failure", results)
+	}
+	if !strings.Contains(results[1].Content, "city must be one of") {
+		t.Errorf("the refused call came back as %q", results[1].Content)
+	}
+
+	// The history is a continuation: asking again starts from it.
+	if history[3].Role != ai.RoleAssistant || history[3].Text() != response.Text() {
+		t.Errorf("the last message is %+v, want the model's answer", history[3])
+	}
+}

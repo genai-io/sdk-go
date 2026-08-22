@@ -103,46 +103,37 @@ func run(ref, question string) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
 
-	// The argument type is never named here. It comes from each function's own
-	// parameter, which is the only place it appears.
+	// A tool is its name, what it is for, and the function that answers it.
+	// The argument type is never written here — it comes from each function's
+	// own parameter, which is the only place it appears.
 	tools := []ai.Tool{
 		ai.Handle("population", "Population of a city in millions, for one census year.", population),
 		ai.Handle("area", "Area of a city in square kilometres.", area),
 	}
 
-	messages := []ai.Message{ai.UserMessage(question)}
+	// Run is the loop: complete, answer whatever the model asked for, repeat
+	// until it stops asking. history is the whole conversation, so a follow-up
+	// question continues from it.
+	response, history, err := client.Run(context.Background(),
+		[]ai.Message{ai.UserMessage(question)}, ai.WithTools(tools...))
+	if err != nil {
+		return err
+	}
 
-	// A turn limit rather than for{}: a model that keeps calling tools is a
-	// bug somewhere, and an example that spins forever is a bad example.
-	for turn := 1; turn <= 8; turn++ {
-		response, err := client.Complete(ctx, messages, ai.WithTools(tools...))
-		if err != nil {
-			return err
-		}
-
-		calls := response.ToolCalls()
-		if len(calls) == 0 {
-			fmt.Printf("\n%s\n", response.Text())
-			fmt.Printf("\n\033[2m%d turns · %d in / %d out\033[0m\n",
-				turn, response.Usage.TotalInput(), response.Usage.Output)
-			return nil
-		}
-
-		// RunTools validates, decodes and dispatches each call, and turns
-		// anything that goes wrong into a result the model can act on rather
-		// than an error that ends the conversation.
-		results := ai.RunTools(ctx, tools, calls)
-		for _, result := range results {
+	// What the model got wrong along the way, and was told about. RunTools
+	// hands each of these back as a tool result rather than failing the turn,
+	// which is why the conversation above still reached an answer.
+	for _, message := range history {
+		for _, result := range message.ToolResults() {
 			if result.IsError {
 				fmt.Printf("  \033[31m✗\033[0m %s → %s\n", result.ToolName, result.Content)
 			}
 		}
-
-		// response.Message() carries every block the model produced, thinking
-		// included; the results answer every call in the turn that follows.
-		messages = append(messages, response.Message(), ai.ToolResultsMessage(results...))
 	}
-	return fmt.Errorf("the model was still calling tools after 8 turns")
+
+	fmt.Printf("\n%s\n", response.Text())
+	fmt.Printf("\n\033[2m%d messages · %d in / %d out\033[0m\n",
+		len(history), response.Usage.TotalInput(), response.Usage.Output)
+	return nil
 }

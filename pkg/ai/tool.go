@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
@@ -229,4 +230,55 @@ func toolNames(tools []Tool) string {
 		return names[0]
 	}
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// maxToolTurns bounds Run against a model that keeps calling tools. It is
+// deliberately generous — a real conversation ends in a handful of turns — and
+// hitting it means something is wrong, not that the budget was too small.
+const maxToolTurns = 32
+
+// Run holds a conversation to the end, answering tool calls as they arrive.
+//
+// The loop it replaces is the same in every application — complete, run the
+// calls, append the results, repeat — so it is written here once:
+//
+//	response, history, err := client.Run(ctx, messages, ai.WithTools(tools...))
+//	fmt.Println(response.Text())
+//
+// It returns the final response, and the whole conversation including every
+// turn it added, so the next question continues from where this one finished:
+//
+//	response, history, err = client.Run(ctx, append(history, ai.UserMessage(next)), ai.WithTools(tools...))
+//
+// Tools come from WithTools like any other setting, and a tool built with
+// ToolFor rather than Handle has nothing to run — Run says so in the result
+// rather than guessing.
+//
+// Write the loop yourself when the turns are your business: to stream text as
+// it arrives, to stop on a condition, to log or bill each turn, or to decide
+// per-turn whether to continue. Run stops when the model stops asking, when
+// ctx is done, or after maxToolTurns, which is a runaway guard rather than a
+// budget — cost control is Middleware's job.
+func (c *Client) Run(ctx context.Context, messages []Message, opts ...Option) (*Response, []Message, error) {
+	// The tools are resolved the same way the request resolves them, so what
+	// Run dispatches to is exactly what the model was offered.
+	tools := newRequest(c.model, nil, c.defaults, opts).Tools
+
+	history := slices.Clone(messages)
+	for turn := 1; turn <= maxToolTurns; turn++ {
+		response, err := c.Complete(ctx, history, opts...)
+		if err != nil {
+			return response, history, err
+		}
+		calls := response.ToolCalls()
+		if len(calls) == 0 {
+			return response, append(history, response.Message()), nil
+		}
+		history = append(history,
+			response.Message(),
+			ToolResultsMessage(RunTools(ctx, tools, calls)...))
+	}
+	return nil, history, &Error{Kind: KindInvalidRequest, Message: fmt.Sprintf(
+		"ai: the model was still calling tools after %d turns; "+
+			"write the loop yourself if a conversation should run longer", maxToolTurns)}
 }

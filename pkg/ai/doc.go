@@ -68,14 +68,15 @@
 //
 // # Tools
 //
-// A tool is a Go function; its parameters come from the function's own
+// A tool is a Go function. Its parameters come from the function's own
 // argument type, so the schema, the decode and the code that runs it agree by
-// construction. RunTools dispatches a turn's calls and turns anything that
-// goes wrong into a result the model can correct:
+// construction, and Run holds the conversation to the end:
 //
 //	tools := []ai.Tool{ai.Handle("search", "Search the docs.", search)}
-//	messages = append(messages, response.Message(),
-//		ai.ToolResultsMessage(ai.RunTools(ctx, tools, response.ToolCalls())...))
+//	response, history, err := client.Run(ctx, messages, ai.WithTools(tools...))
+//
+// Write the loop with Complete and RunTools instead when the turns are your
+// business — to stream, to stop on a condition, to bill each one.
 //
 // # Stream blocks
 //

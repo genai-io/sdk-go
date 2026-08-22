@@ -24,6 +24,14 @@ permissions:
 
 jobs:
   dco_check:
+    # A bot cannot add a Signed-off-by trailer, and there is no human
+    # contribution for it to certify: Dependabot's PRs would fail forever and
+    # never be mergeable. Skipping them keeps the check meaningful instead of
+    # permanently red. workflow_dispatch has no pull_request context, so it is
+    # allowed through explicitly.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.user.type != 'Bot'
     permissions:
       pull-requests: read
     runs-on: ubuntu-latest

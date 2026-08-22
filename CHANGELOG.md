@@ -7,6 +7,17 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API may change between minor releases.
 Each such change is listed under **Changed** with what to write instead.
 
+## [0.1.1] - 2026-08-22
+
+### Fixed
+
+- **DeepSeek and Alibaba (Model Studio) now replay their own reasoning.** Both
+  endpoints accept `reasoning_content` on an assistant message, but neither
+  catalog entry said so, so `Client` refused to send a thinking block back to
+  them. That ended any conversation the moment it continued past the model's
+  first thinking turn — the turn could be read but never replayed. Both entries
+  now set `OpenAIChatCompat.ReasoningContent`, verified against both endpoints.
+
 ## [0.1.0] - 2026-08-22
 
 First release.
@@ -38,4 +49,5 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.1.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.1
 [0.1.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.0

@@ -234,7 +234,14 @@ var vendors = []Vendor{
 		Input: textOnly,
 		// DeepSeek reasons unless told not to, so "off" has to be sent.
 		Reasoning: deepseekEfforts,
-		Compat:    ai.OpenAIChatCompat{Thinking: ai.ThinkingEffortOrDisable},
+		Compat: ai.OpenAIChatCompat{
+			Thinking: ai.ThinkingEffortOrDisable,
+			// DeepSeek takes its own reasoning back on an assistant message.
+			// Without this a reasoning turn cannot be replayed at all, which
+			// ends any conversation that continues past the model's first
+			// thinking turn.
+			ReasoningContent: true,
+		},
 		Note: "Prices are the standard (peak) USD rate; DeepSeek bills 50% of it off-peak " +
 			"(outside 09:00-12:00 and 14:00-18:00 Beijing time), which Pricing cannot express. " +
 			"The Chinese-language docs state the same card in CNY. Cache writes are billed at the ordinary input rate — a cache miss is the write — so the figure below matches Input and the cost comes out right even though Chat Completions reports no cache-write token count.",
@@ -333,8 +340,13 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"DASHSCOPE_API_KEY"},
 		Input:       textImage,
 		Reasoning:   budgetLadder,
-		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingEnableFlag},
-		Note:        "Model IDs are confirmed; Model Studio publishes limits and prices per model behind its console rather than in the docs, so no windows are stated here.",
+		Compat: ai.OpenAIChatCompat{
+			Thinking: ai.ThinkingEnableFlag,
+			// Model Studio takes its own reasoning back on an assistant
+			// message, as DeepSeek does.
+			ReasoningContent: true,
+		},
+		Note: "Model IDs are confirmed; Model Studio publishes limits and prices per model behind its console rather than in the docs, so no windows are stated here.",
 		Models: []ai.Model{
 			{ID: "qwen3.8-max", Name: "Qwen3.8 Max"},
 			{ID: "qwen3.7-plus", Name: "Qwen3.7 Plus"},

@@ -376,6 +376,58 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 	}
 }
 
+// A model that reasons has to be able to have that turn replayed, or the
+// conversation ends the first time it thinks: the turn can be read, appended to
+// history, and then never sent back. Which endpoints take their own reasoning
+// back is catalog data, and the failure of getting it wrong is silent until the
+// second turn — so it is asserted here rather than left to a caller to discover.
+func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
+	thought := ai.Message{Role: ai.RoleAssistant, Content: ai.Content{
+		ai.ThinkingBlock("two plus two is four", ""),
+		ai.TextBlock("4"),
+	}}
+
+	for _, ref := range []string{
+		"deepseek/deepseek-v4-pro",
+		"alibaba/qwen3.7-plus",
+		"moonshot/kimi-k3",
+		"bigmodel/glm-5",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			model, err := catalog.Model(ref)
+			if err != nil {
+				t.Fatalf("catalog.Model: %v", err)
+			}
+			var body map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw := make([]byte, r.ContentLength)
+				_, _ = r.Body.Read(raw)
+				_ = json.Unmarshal(raw, &body)
+				w.Header().Set("Content-Type", "text/event-stream")
+			}))
+			defer server.Close()
+
+			client, err := ai.NewClient(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			if _, err := client.Complete(context.Background(),
+				[]ai.Message{ai.UserMessage("what is 2+2?"), thought, ai.UserMessage("and 3+3?")}); err != nil {
+				t.Fatalf("a reasoning turn could not be replayed: %v", err)
+			}
+
+			messages, _ := body["messages"].([]any)
+			if len(messages) != 3 {
+				t.Fatalf("messages on the wire = %d, want the whole conversation", len(messages))
+			}
+			assistant, _ := messages[1].(map[string]any)
+			if got := fmt.Sprint(assistant["reasoning_content"]); !strings.Contains(got, "two plus two") {
+				t.Errorf("reasoning_content = %q, want the model's own thinking", got)
+			}
+		})
+	}
+}
+
 // And the trap itself: on DeepSeek, saying nothing is not the same as saying
 // off. A caller who leaves Effort unset is reasoning, and paying for it.
 func TestUnsetEffortIsNotOffOnAModelThatReasonsByDefault(t *testing.T) {

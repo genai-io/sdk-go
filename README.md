@@ -9,12 +9,32 @@ A Go client library for large language model inference, providing one typed API
 over the Anthropic Messages, OpenAI Chat Completions, OpenAI Responses and
 Google Gemini protocols.
 
-You get the same `Message`, `Response` and streaming event types whichever
-provider serves the request. The library ships a catalog of 27 vendors and 55
-models — endpoints, limits, pricing and per-endpoint quirks as data — and reads
-no credentials unless you opt in.
+- **One API, five protocols.** The same `Message`, `Response` and streaming
+  events whichever provider serves the request.
+- **Streaming.** Text, thinking, tool calls and images share one
+  start/delta/end lifecycle, so one loop handles every kind of content.
+- **Tool calling.** A tool is a struct and a function. The schema is derived
+  from the struct, and arguments are checked before your code runs.
+- **Structured outputs.** `CompleteAs[T]` derives the schema, constrains
+  generation and decodes the answer, so the type is named once.
+- **Typed errors.** Auth, rate limit, context exceeded and unsupported are
+  separate answers rather than substrings to match on.
+- **A model catalog.** 27 vendors and 55 models — endpoints, limits, pricing
+  and per-endpoint quirks as data, readable without a network call.
+- **No ambient credentials.** `pkg/ai` reads no environment variable and no
+  file. `pkg/ai/auth` is the opt-in that does.
 
-> 中文文档：[README.zh-CN.md](README.zh-CN.md)
+[Installation](#installation) ·
+[Quickstart](#quickstart) ·
+[Streaming](#streaming) ·
+[Tool use](#tool-use) ·
+[Structured outputs](#structured-outputs) ·
+[Request options](#request-options) ·
+[Messages](#messages-and-content) ·
+[Errors](#errors-and-execution-policy) ·
+[Credentials](#credentials) ·
+[Protocols](#supported-protocols) ·
+[中文文档](README.zh-CN.md)
 
 ## Installation
 
@@ -61,16 +81,23 @@ documents — `OPENAI_API_KEY` here. The blank import registers one wire
 protocol; import only the ones you use, or `pkg/ai/driver/all` when the model
 is chosen at run time.
 
+This is the shortest of six ways to reach a client. A server that must not read
+ambient credentials, a model picker that needs a host's model list, and a
+client wrapped in retry middleware each take a different one —
+[Constructing a client](docs/clients.md) lays them out side by side.
+
 ### Switching providers
 
-Change the model reference. Nothing else changes.
+Change the model reference. Nothing else in the program changes.
 
 ```go
-client, err := auth.Client("anthropic/claude-opus-5")
-client, err := auth.Client("google/gemini-3.5-flash")
-client, err := auth.Client("deepseek/deepseek-v4-pro")
-client, err := auth.Client("ollama/llama4")
+ref := "anthropic/claude-opus-5" // or google/gemini-3.5-flash,
+                                 //    deepseek/deepseek-v4-pro, ollama/llama4
+client, err := auth.Client(ref)
 ```
+
+A reference is `vendor/model`. Both halves come from the catalog, so
+`catalog.Models()` lists everything resolvable without a network call.
 
 Runnable examples are in [`examples/`](examples) — one per vendor, plus
 [`tools/`](examples/tools) and [`structured/`](examples/structured).
@@ -314,6 +341,7 @@ speaking somebody else's protocol, so adding one is a data change in
 | | |
 | --- | --- |
 | [API reference](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | Every type and function, with the rationale beside the code it governs |
+| [Constructing a client](docs/clients.md) | The six ways to reach an `ai.Client`, and when each is the right one ([中文](docs/clients.zh-CN.md)) |
 | [Architecture](docs/architecture.md) | How the pieces fit and what a request passes through ([中文](docs/architecture.zh-CN.md)) |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
 | [`examples/`](examples) | Runnable programs, one per vendor plus tools and structured output |

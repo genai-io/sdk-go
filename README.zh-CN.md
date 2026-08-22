@@ -7,9 +7,25 @@
 
 一个用于大模型推理的 Go 客户端库，在 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 和 Google Gemini 四种协议之上提供**同一套带类型的 API**。
 
-不管请求最终由哪家服务，你拿到的都是同样的 `Message`、`Response` 和流式事件类型。库里自带一份 27 家厂商、55 个模型的目录——**端点、限额、价格和各端点的怪癖都是数据**——并且**不会主动读取任何凭证**，除非你明确选择让它读。
+- **一套 API，五种协议。**不管请求最终由哪家服务，拿到的都是同样的 `Message`、`Response` 和流式事件。
+- **流式。**文本、thinking、工具调用、图片共用同一套 start/delta/end 生命周期，**一个循环处理所有内容类型**。
+- **工具调用。**一个工具就是一个 struct 加一个函数。schema 从 struct 推导，参数在你的代码运行之前先校验。
+- **结构化输出。**`CompleteAs[T]` 推导 schema、约束生成、解码答案，**类型只写一次**。
+- **带类型的错误。**认证、限流、超上下文、不支持是**四个不同的答案**，不是四个要去匹配的子串。
+- **模型目录。**27 家厂商、55 个模型——端点、限额、价格和各端点的怪癖都是数据，**不联网就能读**。
+- **不会顺手读凭证。**`pkg/ai` 不读任何环境变量、不读任何文件。`pkg/ai/auth` 是那个**选择性开启**的、确实会读的入口。
 
-> English: [README.md](README.md)
+[安装](#安装) ·
+[快速开始](#快速开始) ·
+[流式](#流式) ·
+[工具调用](#工具调用) ·
+[结构化输出](#结构化输出) ·
+[请求选项](#请求选项) ·
+[消息与内容](#消息与内容) ·
+[错误](#错误与执行策略) ·
+[凭证](#凭证) ·
+[协议](#支持的协议) ·
+[English](README.md)
 
 ## 安装
 
@@ -53,16 +69,19 @@ func main() {
 
 `auth.Client` 会从厂商文档规定的那个环境变量里读凭证——这里是 `OPENAI_API_KEY`。那个空导入注册的是**一种线协议**；只导入你要用的，或者在模型要到运行时才确定时用 `pkg/ai/driver/all`。
 
+这是到达客户端的**六条路里最短的一条**。一台绝不能顺手读凭证的服务器、一个需要 host 模型列表的选择器、一个套了重试 middleware 的客户端，走的各是另一条——[构造客户端](docs/clients.zh-CN.md)把它们并排摆开。
+
 ### 换一家服务
 
-**只改模型引用，其他什么都不用动。**
+**只改模型引用，程序里其他什么都不用动。**
 
 ```go
-client, err := auth.Client("anthropic/claude-opus-5")
-client, err := auth.Client("google/gemini-3.5-flash")
-client, err := auth.Client("deepseek/deepseek-v4-pro")
-client, err := auth.Client("ollama/llama4")
+ref := "anthropic/claude-opus-5" // 或 google/gemini-3.5-flash、
+                                 //    deepseek/deepseek-v4-pro、ollama/llama4
+client, err := auth.Client(ref)
 ```
+
+引用的格式是 `厂商/模型`。两半都来自目录，所以 `catalog.Models()` **不联网**就能列出全部可解析的模型。
 
 可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`tools/`](examples/tools) 和 [`structured/`](examples/structured)。
 
@@ -250,6 +269,7 @@ client, err := ai.NewClient(ai.Config{
 | | |
 | --- | --- |
 | [API 参考](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | 每个类型和函数，设计理由就写在它管辖的代码旁边 |
+| [构造客户端](docs/clients.zh-CN.md) | 到达 `ai.Client` 的六条路，以及各自适用的场景（[English](docs/clients.md)） |
 | [架构](docs/architecture.zh-CN.md) | 各部分如何拼合，一个请求要经过什么（[English](docs/architecture.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
 | [`examples/`](examples) | 可运行的程序，每家厂商一个，外加工具调用和结构化输出 |

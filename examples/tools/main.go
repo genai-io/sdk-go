@@ -49,9 +49,10 @@ import (
 )
 
 // A type per tool, carrying everything the model is told about it: the
-// arguments as fields, what each one means as tags, and the name and purpose
-// as its Tool method. The tags matter — a field name alone does not say that
-// "city" means one of a fixed few, and enum does.
+// arguments as fields, what each one means as tags, what the tool is for as its
+// Description, and its name from the type's own — Population is offered as
+// "population". The tags matter: a field name alone does not say that "city"
+// means one of a fixed few, and enum does.
 type Population struct {
 	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
 	Year int    `json:"year" description:"census year" enum:"2000|2010|2020"`
@@ -59,11 +60,8 @@ type Population struct {
 	census map[string]map[int]float64 // unexported: ours, never the model's
 }
 
-func (Population) Tool() ai.ToolInfo {
-	return ai.ToolInfo{
-		Name:        "population",
-		Description: "Population of a city in millions, for one census year.",
-	}
+func (Population) Description() string {
+	return "Population of a city in millions, for one census year."
 }
 
 func (p Population) Run(context.Context) (string, error) {
@@ -78,9 +76,7 @@ type Area struct {
 	km2 map[string]int
 }
 
-func (Area) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "area", Description: "Area of a city in square kilometres."}
-}
+func (Area) Description() string { return "Area of a city in square kilometres." }
 
 func (a Area) Run(context.Context) (string, error) {
 	km2 := a.km2[a.City]

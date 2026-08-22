@@ -31,55 +31,20 @@ type Tool struct {
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
-// ToolInfo is what a model is told about a tool besides its arguments: the
-// name it calls, and what the tool is for.
-type ToolInfo struct {
-	// Name is what the model puts in ToolCall.Name. It has to be stable —
-	// renaming it mid-conversation orphans the calls already in the history.
-	Name string
-	// Description is prompt text. It is the model's only guide to when this
-	// tool applies rather than the one next to it.
-	Description string
-}
+// ToolRunner is a tool written as a Go type, which is all a tool needs to be.
+//
+// The type already carries the arguments as its fields and what each one means
+// as its tags. Two methods finish it — what the tool is for, and what it does —
+// and its name comes from the type's own, so nothing about a tool is written
+// down twice or kept in step by hand.
+type ToolRunner interface {
+	// Description tells the model when this tool applies rather than the one
+	// next to it. It is prompt text.
+	Description() string
 
-// ToolDescriber is implemented by a tool's argument type, and is what keeps a
-// tool from being three things in three places.
-//
-// The type already carries the arguments and their descriptions. Making it
-// carry the name and the purpose too means everything the model is told about
-// the tool is in one declaration, and the string the model calls sits next to
-// the fields it will fill in:
-//
-//	type Search struct {
-//		Query string `json:"query" description:"what to look for"`
-//		Limit int    `json:"limit,omitempty" description:"how many" maximum:"20"`
-//	}
-//
-//	func (Search) Tool() ai.ToolInfo {
-//		return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
-//	}
-type ToolDescriber interface {
-	Tool() ToolInfo
-}
-
-// ToolFor builds a tool from its argument type: the schema from the fields,
-// the name and purpose from the type's own Tool method.
-//
-// It defines the tool without saying what runs it, which leaves you to match
-// call.Name back to the right argument type yourself. Handle does both at once
-// and is what most callers want.
-func ToolFor[T ToolDescriber]() Tool {
-	var zero T
-	info := zero.Tool()
-	if info.Name == "" {
-		panic(fmt.Sprintf("ai: %T returns a ToolInfo with no Name; "+
-			"that is the string the model calls", zero))
-	}
-	return Tool{
-		Name:        info.Name,
-		Description: info.Description,
-		Parameters:  jsonschema.For[T](),
-	}
+	// Run answers one call. The receiver is this tool's own value with the
+	// model's arguments filled in.
+	Run(ctx context.Context) (string, error)
 }
 
 // ParameterSchema returns an independent JSON-object representation of the
@@ -125,19 +90,6 @@ func (t Tool) ValidateArgs(input string) error {
 	return nil
 }
 
-// UnmarshalArgs decodes a tool call's arguments into T.
-//
-// Unknown fields are rejected rather than dropped: a model inventing an
-// argument is a mistake worth surfacing, and silently ignoring it hides both
-// the model's error and, sometimes, the caller's own tag typo.
-func UnmarshalArgs[T any](call ToolCall) (T, error) {
-	var out T
-	if err := decodeArgs(call.Input, &out); err != nil {
-		return out, fmt.Errorf("arguments for %s: %w", call.Name, err)
-	}
-	return out, nil
-}
-
 // decodeArgs writes a model's arguments over whatever the target already
 // holds, so a field the model did not send keeps the value it was given.
 func decodeArgs(arguments string, into any) error {
@@ -162,38 +114,11 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 
 // ─── Running the tools a model asked for ───
 
-// ToolFor derives a tool's schema from a Go type, which keeps the shape the
-// model is told about from drifting away from the shape you parse. It leaves
-// one join unguarded: when the model calls, only call.Name says which tool it
-// meant, and matching that name back to the right argument type is the
-// caller's to remember.
+// ToolOf builds a tool from a value of the type that is one.
 //
-//	switch call.Name {
-//	case "search":
-//		args, _ := ai.UnmarshalArgs[SearchArgs](call)      // nothing checks
-//	case "population":                                     // that these agree
-//		args, _ := ai.UnmarshalArgs[PopulationArgs](call)
-//	}
-//
-// Rename the string, or decode into the neighbouring type, and it still
-// compiles. Handle closes that join the way CompleteAs closes the same one for
-// structured output: the name, the type and the code that runs it are written
-// once, together.
-
-// ToolRunner is a tool that is one Go type: its fields are the arguments, its
-// tags say what each one means, and its two methods say what it is called and
-// what it does.
-type ToolRunner interface {
-	ToolDescriber
-	// Run answers one call. The receiver is this tool's own value with the
-	// model's arguments filled in.
-	Run(ctx context.Context) (string, error)
-}
-
-// ToolOf builds a tool from a value of the type that implements it.
-//
-// Everything is in one declaration — the arguments, what they mean, the name
-// the model calls, and the code that answers:
+// Everything about the tool is in that one declaration — the arguments, what
+// they mean, what it is for, and the code that answers — and its name is the
+// type's own:
 //
 //	type Search struct {
 //		Query string `json:"query" description:"what to look for"`
@@ -202,15 +127,15 @@ type ToolRunner interface {
 //		index *Index // unexported: yours, not the model's
 //	}
 //
-//	func (Search) Tool() ai.ToolInfo {
-//		return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
-//	}
+//	func (Search) Description() string { return "Search the knowledge base." }
 //
 //	func (s Search) Run(ctx context.Context) (string, error) {
 //		return s.index.Query(ctx, s.Query, s.Limit)
 //	}
 //
 //	tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
+//
+// Search is offered to the model as "search"; see toolName for the rule.
 //
 // The value you pass is the tool's dependencies. Each call runs against a copy
 // of it with the model's arguments decoded over the top, so what the model
@@ -226,7 +151,11 @@ func ToolOf[T ToolRunner](prototype T) Tool {
 		panic(fmt.Sprintf("ai: ToolOf needs a struct, not %s: a copy per call is what "+
 			"keeps two calls in one turn from sharing arguments", kind))
 	}
-	tool := ToolFor[T]()
+	tool := Tool{
+		Name:        toolName(reflect.TypeFor[T]()),
+		Description: prototype.Description(),
+		Parameters:  jsonschema.For[T](),
+	}
 	tool.Run = func(ctx context.Context, arguments string) (string, error) {
 		args := prototype // the dependencies; the model fills in the rest
 		if err := decodeArgs(arguments, &args); err != nil {
@@ -236,10 +165,6 @@ func ToolOf[T ToolRunner](prototype T) Tool {
 	}
 	return tool
 }
-
-// Runnable reports whether this tool can answer its own calls — whether it was
-// built with ToolOf or had Run set directly.
-func (t Tool) Runnable() bool { return t.Run != nil }
 
 // RunTools answers every call in a turn, in order, and returns the results as
 // one user turn's worth of answers:
@@ -278,7 +203,7 @@ func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 		// pick a real one, where "unknown tool" leaves it guessing again.
 		return failed("no tool named %q; the tools available are %s", call.Name, toolNames(tools))
 	}
-	if !tool.Runnable() {
+	if tool.Run == nil {
 		return failed("tool %q was offered without anything to run it", call.Name)
 	}
 	if err := tool.ValidateArgs(call.Input); err != nil {
@@ -356,4 +281,22 @@ func (c *Client) Run(ctx context.Context, messages []Message, opts ...Option) (*
 	return nil, history, &Error{Kind: KindInvalidRequest, Message: fmt.Sprintf(
 		"ai: the model was still calling tools after %d turns; "+
 			"write the loop yourself if a conversation should run longer", maxToolTurns)}
+}
+
+// toolName is the type's own name, lower-cased with words separated by
+// underscores: Search becomes "search", FetchDocument becomes "fetch_document".
+//
+// Deriving it means one less thing to keep in step, and the model's vocabulary
+// then matches the code's. Set Tool.Name on the result for a tool that has to
+// answer to something else.
+func toolName(t reflect.Type) string {
+	name := t.Name()
+	var out strings.Builder
+	for i, r := range name {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			out.WriteByte('_')
+		}
+		out.WriteRune(r)
+	}
+	return strings.ToLower(out.String())
 }

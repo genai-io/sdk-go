@@ -201,7 +201,8 @@ called.
 ## Tool use
 
 A tool is one Go type. Its fields are the arguments, its tags say what each one
-means, and its two methods say what it is called and what it does:
+means, its `Description` says what it is for, and its name is the type's own —
+`Search` is offered to the model as `search`:
 
 ```go
 type Search struct {
@@ -211,9 +212,7 @@ type Search struct {
 	index *Index // unexported: yours, never the model's
 }
 
-func (Search) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
-}
+func (Search) Description() string { return "Search the knowledge base." }
 
 func (s Search) Run(ctx context.Context) (string, error) {
 	return s.index.Query(ctx, s.Query, s.Limit)

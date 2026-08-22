@@ -171,7 +171,7 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-一个工具就是**一个 Go 类型**。它的字段是参数，标签说明每个参数的含义，两个方法说明它叫什么、做什么：
+一个工具就是**一个 Go 类型**。它的字段是参数，标签说明每个参数的含义，`Description` 说明它是干什么的，**名字来自类型本身**——`Search` 以 `search` 提供给模型：
 
 ```go
 type Search struct {
@@ -181,9 +181,7 @@ type Search struct {
 	index *Index // 未导出：你的东西，模型永远看不到
 }
 
-func (Search) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "search", Description: "搜索知识库。"}
-}
+func (Search) Description() string { return "搜索知识库。" }
 
 func (s Search) Run(ctx context.Context) (string, error) {
 	return s.index.Query(ctx, s.Query, s.Limit)

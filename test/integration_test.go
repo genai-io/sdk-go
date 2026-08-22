@@ -179,7 +179,7 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 // A tool offered, called, answered, and replayed — the shape of every turn a
 // tool-using application sends after its first.
 func TestToolsRoundTrip(t *testing.T) {
-	tool := ai.ToolFor[SearchArgs]()
+	tool := ai.ToolOf(Search{})
 
 	e := sse(t, true,
 		[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{"input_tokens":10}}}`},
@@ -215,9 +215,10 @@ func TestToolsRoundTrip(t *testing.T) {
 	if err := tool.ValidateArgs(calls[0].Input); err != nil {
 		t.Fatalf("the model's own arguments failed their schema: %v", err)
 	}
-	args, err := ai.UnmarshalArgs[SearchArgs](calls[0])
-	if err != nil || args.Query != "go" {
-		t.Errorf("UnmarshalArgs = %+v, %v", args, err)
+	// And the tool answers its own call, decoding into the type it came from.
+	out, err := tool.Run(context.Background(), calls[0].Input)
+	if err != nil || !strings.Contains(out, "go") {
+		t.Errorf("Run = %q, %v", out, err)
 	}
 
 	// Replaying the call with its result is what the next turn sends.
@@ -840,7 +841,7 @@ func sortedKeys(m map[string]any) []string {
 // The checker exists for one job: turn a model's mistake into a sentence the
 // model can act on. These are the mistakes models actually make.
 func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
-	tool := ai.ToolFor[SearchArgs]()
+	tool := ai.ToolOf(Search{})
 
 	for name, tc := range map[string]struct{ input, want string }{
 		"a missing field": {
@@ -882,9 +883,9 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 // cannot disagree.
 func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 	tools := []ai.Tool{
-		ai.ToolOf(AreaArgs{}),
-		ai.ToolOf(CensusArgs{}),
-		ai.ToolFor[UnhandledArgs](),
+		ai.ToolOf(Area{}),
+		ai.ToolOf(Census{}),
+		{Name: "unhandled", Description: "offered without a handler"},
 	}
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
@@ -950,7 +951,7 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 
 	var ran []string
 	ranBy := &ran
-	tools := []ai.Tool{ai.ToolOf(AreaArgs{seen: ranBy})}
+	tools := []ai.Tool{ai.ToolOf(Area{seen: ranBy})}
 
 	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
 	response, history, err := client.Run(context.Background(),
@@ -987,48 +988,41 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 	}
 }
 
-// Argument types for the tool tests. Everything the model is told about a tool
-// lives on its type: the fields, their descriptions, and the name and purpose.
+// The tool types for these tests. Everything the model is told about a tool is
+// on its type — the fields, their descriptions, what it is for — and its name
+// comes from the type's own, so Search is offered as "search".
 type (
-	SearchArgs struct {
+	Search struct {
 		Query    string `json:"query" description:"what to look for"`
 		Priority string `json:"priority" enum:"low|medium|high"`
 		Limit    int    `json:"limit" description:"how many results" minimum:"1" maximum:"50"`
 	}
-	AreaArgs struct {
+	Area struct {
 		City string `json:"city" enum:"Tokyo|Delhi"`
 
 		seen *[]string // unexported: never described to the model
 	}
-	CensusArgs struct {
+	Census struct {
 		Year int `json:"year" minimum:"2000" maximum:"2020"`
-	}
-	UnhandledArgs struct {
-		City string `json:"city" enum:"Tokyo|Delhi"`
 	}
 )
 
-func (SearchArgs) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "search", Description: "search the knowledge base"}
-}
-func (AreaArgs) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "area", Description: "area of a city"}
-}
-func (CensusArgs) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "census", Description: "population in a year"}
-}
-func (UnhandledArgs) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "unhandled", Description: "offered without a handler"}
-}
+func (Search) Description() string { return "search the knowledge base" }
 
-func (a AreaArgs) Run(context.Context) (string, error) {
+func (a Search) Run(context.Context) (string, error) {
+	return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
+}
+func (Area) Description() string   { return "area of a city" }
+func (Census) Description() string { return "population in a year" }
+
+func (a Area) Run(context.Context) (string, error) {
 	if a.seen != nil {
 		*a.seen = append(*a.seen, a.City)
 	}
 	return "area of " + a.City, nil
 }
 
-func (c CensusArgs) Run(context.Context) (string, error) {
+func (c Census) Run(context.Context) (string, error) {
 	return fmt.Sprintf("census %d", c.Year), nil
 }
 
@@ -1062,9 +1056,7 @@ type Recorder struct {
 	prefix string
 }
 
-func (Recorder) Tool() ai.ToolInfo {
-	return ai.ToolInfo{Name: "recorder", Description: "records a note"}
-}
+func (Recorder) Description() string { return "records a note" }
 
 func (r Recorder) Run(context.Context) (string, error) {
 	if r.prefix == "" {
@@ -1112,3 +1104,36 @@ func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 		t.Errorf("Tool marshalled as %s; nothing executable belongs in it", wire)
 	}
 }
+
+// The name comes from the type, so the model's vocabulary and the code's are
+// the same thing rather than two strings kept in step.
+func TestAToolIsNamedAfterItsType(t *testing.T) {
+	for _, tc := range []struct {
+		tool ai.Tool
+		want string
+	}{
+		{ai.ToolOf(Search{}), "search"},
+		{ai.ToolOf(FetchDocument{}), "fetch_document"},
+	} {
+		if tc.tool.Name != tc.want {
+			t.Errorf("Name = %q, want %q", tc.tool.Name, tc.want)
+		}
+	}
+
+	// And a tool that has to answer to something else just says so.
+	renamed := ai.ToolOf(FetchDocument{})
+	renamed.Name = "fetch"
+	results := ai.RunTools(context.Background(), []ai.Tool{renamed},
+		[]ai.ToolCall{{ID: "1", Name: "fetch", Input: `{"id":"x"}`}})
+	if results[0].IsError {
+		t.Errorf("the renamed tool did not answer: %s", results[0].Content)
+	}
+}
+
+type FetchDocument struct {
+	ID string `json:"id" description:"the document to fetch"`
+}
+
+func (FetchDocument) Description() string { return "fetch one document by ID" }
+
+func (f FetchDocument) Run(context.Context) (string, error) { return "doc " + f.ID, nil }

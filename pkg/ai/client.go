@@ -19,13 +19,14 @@ type Client struct {
 	defaults []Option
 }
 
-// New wraps a Driver and the Model it was configured for. Any options given
-// here become this client's defaults, which a per-call option overrides.
+// NewWithDriver wraps a Driver and the Model it was configured for. Any
+// options given here become this client's defaults, which a per-call option
+// overrides.
 //
 // Use it when you already hold a Driver — one you built yourself, or one
-// returned by Wrap. NewClient is the same thing starting from a Config, with
-// the registry finding the driver.
-func New(d Driver, m Model, defaults ...Option) *Client {
+// returned by Wrap. New is the same thing starting from a Config, with the
+// registry finding the driver, and is what most callers want.
+func NewWithDriver(d Driver, m Model, defaults ...Option) *Client {
 	return &Client{driver: d, model: cloneModel(m), defaults: slices.Clone(defaults)}
 }
 
@@ -39,7 +40,7 @@ func New(d Driver, m Model, defaults ...Option) *Client {
 // reads. What to do instead depends on what you meant:
 //
 //	client.Complete(ctx, msgs, ai.WithEffort(ai.EffortHigh)) // change a setting for a call
-//	other := ai.New(driver, tweaked)                         // talk to a different model
+//	other := ai.NewWithDriver(driver, tweaked)                         // talk to a different model
 func (c *Client) Model() Model { return cloneModel(c.model) }
 
 // Driver returns the underlying driver.
@@ -247,7 +248,7 @@ type Middleware func(Handler) Handler
 
 // Wrap returns a Driver that runs mw around d, outermost first.
 //
-//	client := ai.New(ai.Wrap(driver, retry, costMeter), model)
+//	client := ai.NewWithDriver(ai.Wrap(driver, retry, costMeter), model)
 //
 // Middleware decorates the driver rather than the client because that is what
 // it actually is: Handler and Driver.Stream are the same shape, so a wrapped

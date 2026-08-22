@@ -220,15 +220,17 @@ func NewDriver(cfg Config) (Driver, error) {
 	return f(cfg)
 }
 
-// NewClient builds the driver for cfg.Model's protocol and wraps it in a
-// Client. It is NewDriver plus New: use it when you have a Config and want the
-// registry to find the driver, and New when you already hold one.
-func NewClient(cfg Config, opts ...Option) (*Client, error) {
+// New builds the driver for cfg.Model's protocol and wraps it in a Client. It
+// is NewDriver plus NewWithDriver, and it is the constructor most callers
+// want: reach for NewDriver and NewWithDriver only when the driver has to pass
+// through your hands on the way, which is what wrapping it in Middleware
+// needs.
+func New(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return New(d, cfg.Model, opts...), nil
+	return NewWithDriver(d, cfg.Model, opts...), nil
 }
 
 // UnregisteredAPIError reports a model whose protocol has no driver linked

@@ -3,31 +3,32 @@
 **只有一条链，你从自己已经在的位置接进去。**它不分叉，所以没有"选错"这回事。
 
 ```
-   "openai/gpt-4.1"          ai.Config           ai.Driver           *ai.Client
-          │                      │                   │                    │
-          └─── auth.Config ──────┴─── ai.NewDriver ──┴─── ai.New ─────────┘
-                     读环境                  建传输层              装模型和默认值
+   "openai/gpt-4.1"        ai.Config          ai.Driver         *ai.Client
+          │                    │                  │                  │
+          └─── auth.Config ────┴─── ai.NewDriver ─┴─ ai.NewWithDriver ┘
+                   reads the            builds the          holds the
+                   environment          transport           model + defaults
 ```
 
 你实际会敲的那两个名字，是这条链上的**捷径**，而且每个都**literally 只有一行**：
 
 ```go
-// auth.Client = auth.Config + ai.NewClient
+// auth.Client = auth.Config + ai.New
 func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	cfg, err := Config(ref)
 	if err != nil {
 		return nil, err
 	}
-	return ai.NewClient(cfg, opts...)
+	return ai.New(cfg, opts...)
 }
 
-// ai.NewClient = ai.NewDriver + ai.New
-func NewClient(cfg Config, opts ...Option) (*Client, error) {
+// ai.New = ai.NewDriver + ai.NewWithDriver
+func New(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return New(d, cfg.Model, opts...), nil
+	return NewWithDriver(d, cfg.Model, opts...), nil
 }
 ```
 
@@ -37,10 +38,10 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 client, err := auth.Client("openai/gpt-4.1")
 
 cfg, err := auth.Config("openai/gpt-4.1")
-client, err := ai.NewClient(cfg)
+client, err := ai.New(cfg)
 
 driver, err := ai.NewDriver(cfg)
-client := ai.New(driver, cfg.Model)
+client := ai.NewWithDriver(driver, cfg.Model)
 ```
 
 所以问题不是"用哪个构造函数"，而是**你需要在这条链上走到哪里就停**：
@@ -49,9 +50,9 @@ client := ai.New(driver, cfg.Model)
 | --- | --- | --- |
 | `auth.Client(ref)` | 命令行工具，凭证在环境里 | 会读环境 |
 | `auth.Config(ref)` | 同上，但要改端点或 `http.Client` | 会读环境 |
-| `ai.NewClient(cfg)` | 服务端。凭证你给，**不读任何环境状态** | 无 |
+| `ai.New(cfg)` | 服务端。凭证你给，**不读任何环境状态** | 无 |
 | `ai.NewDriver(cfg)` | 需要拿到 driver 这个值，去套 middleware | 无 |
-| `ai.New(driver, model)` | 你已经有 driver 了——包括测试里的桩 | 无 |
+| `ai.NewWithDriver(driver, model)` | 你已经有 driver 了——包括测试里的桩 | 无 |
 
 每条路都需要对应协议的 driver 已注册，一个空导入就够。模型要到运行时才确定就用 `all`；编译期就知道协议、又不想把其他厂商的 SDK 链进来，就只导入那一个。
 
@@ -77,19 +78,19 @@ cfg, err := auth.Config("openai/gpt-4.1")
 cfg.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
-client, err := ai.NewClient(cfg)
+client, err := ai.New(cfg)
 ```
 
 `auth.Config` 填好凭证和端点就停下，所以它返回的是一个**你可以随便改的普通 `ai.Config`**。
 
-## 停在 `ai.NewClient`
+## 停在 `ai.New`
 
 **`pkg/ai` 不读任何环境变量、不读任何文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：它做的任何事都不依赖环境状态，所以**两个请求不可能拿到彼此的凭证**。
 
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
-client, err := ai.NewClient(ai.Config{
+client, err := ai.New(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
 	BaseURL:    "https://gateway.internal/v1",
@@ -106,17 +107,17 @@ client, err := ai.NewClient(ai.Config{
 
 ```go
 driver, err := ai.NewDriver(cfg)
-client := ai.New(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), cfg.Model)
+client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), cfg.Model)
 ```
 
 `Retry` 是这里唯一自带的策略，而且**每个 driver 都关掉了它厂商 SDK 自己的重试**，所以不加它就一次重试都没有。顺序是**最外层在前**：第一个 middleware 最先看到请求、最后看到响应。一个 `Middleware` 是"包着 `Handler` 的 `Handler`"，和 `Driver.Stream` 同一个形状，所以你写的任何东西都能和自带的组合起来。
 
-## 停在 `ai.New`
+## 停在 `ai.NewWithDriver`
 
-`ai.New` **不做 I/O、不查表、不校验凭证**。上面每一条路最终都落到它，而测试要的也正是它：
+`ai.NewWithDriver` **不做 I/O、不查表、不校验凭证**。上面每一条路最终都落到它，而测试要的也正是它：
 
 ```go
-client := ai.New(scripted{deltas: deltas}, ai.Model{
+client := ai.NewWithDriver(scripted{deltas: deltas}, ai.Model{
 	ID: "test", API: ai.APIAnthropicMessages, MaxOutput: 1024,
 })
 ```

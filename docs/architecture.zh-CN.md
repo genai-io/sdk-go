@@ -46,17 +46,17 @@ ai.Client           一个模型
 | --- | --- | --- |
 | `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
 | `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
-| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
 | `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
 | 一个引用字符串 | `auth.Client(ref)` | `*ai.Client` |
 | 一个厂商 ID | `auth.Provider(id)` | `*provider.Provider` |
 
-`ai.New(driver, model)` 是唯一走 Go 自身惯例的那个：`New` 从你手里已有的零件返回本包的主类型，而 `NewClient` 是从一个 `Config` 把这些零件解析出来。
+**每一个包级构造函数都收 `Config`，并以它返回什么命名**——`ai.New` 给 `*Client`，`ai.NewDriver` 给 `Driver`，五个 driver 包和 `provider.New` 也是同一个形状。`ai.NewWithDriver(driver, model)` 是唯一的例外，而它的名字已经说明了原因：它从**你手里已有的 `Driver`** 出发。
 
 两个包级入口，区别只有一个——**允不允许环境变量说话**：
 
 ```go
-ai.NewClient(Config)         // 模型、密钥、主机都由你提供
+ai.New(Config)         // 模型、密钥、主机都由你提供
 auth.Client("vendor/model")  // catalog 和环境变量提供
 ```
 

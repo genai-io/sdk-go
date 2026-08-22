@@ -60,20 +60,22 @@ whichever rung you enter it at:
 | --- | --- | --- |
 | `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
 | `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
-| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
 | `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
 | a reference | `auth.Client(ref)` | `*ai.Client` |
 | a vendor ID | `auth.Provider(id)` | `*provider.Provider` |
 
-`ai.New(driver, model)` is the one that follows Go's own convention instead:
-`New` returns the package's main type from parts you already hold, where
-`NewClient` resolves them from a `Config`.
+Every package-level constructor takes a `Config` and is named for what it
+returns — `ai.New` a `*Client`, `ai.NewDriver` a `Driver`, and the same shape
+in every driver package and in `provider.New`. `ai.NewWithDriver(driver, model)`
+is the exception, and its name says why: it starts from a `Driver` you already
+hold.
 
 Two package-level ways in, and the difference is whether the environment is
 allowed to answer:
 
 ```go
-ai.NewClient(Config)              // you supply the model, the key and the host
+ai.New(Config)              // you supply the model, the key and the host
 auth.Client("vendor/model")  // the catalog and the environment supply them
 ```
 

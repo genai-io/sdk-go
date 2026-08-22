@@ -82,9 +82,9 @@ protocol; import only the ones you use, or `pkg/ai/driver/all` when the model
 is chosen at run time.
 
 This is the short end of one chain: `auth.Client` is `auth.Config` plus
-`ai.NewClient`, which is `ai.NewDriver` plus `ai.New`. Stop earlier when you
-need to — a server that must not read ambient credentials stops at
-`ai.NewClient`, middleware stops at `ai.NewDriver`. See
+`ai.New`, which is `ai.NewDriver` plus `ai.NewWithDriver`. Stop earlier when
+you need to — a server that must not read ambient credentials stops at
+`ai.New`, middleware stops at `ai.NewDriver`. See
 [Constructing a client](docs/clients.md).
 
 ### Switching providers
@@ -232,7 +232,7 @@ The conversation is an ordinary `[]ai.Message`. Everything else is an `Option`,
 and the same option is a default at `ai.New` and an override at the call:
 
 ```go
-client := ai.New(driver, model, ai.WithEffort(ai.EffortHigh)) // default
+client := ai.NewWithDriver(driver, model, ai.WithEffort(ai.EffortHigh)) // default
 
 response, err := client.Complete(ctx, messages,
 	ai.WithTemperature(0),
@@ -298,7 +298,7 @@ application knows the budget for a turn, what may be cached and what must not
 be logged:
 
 ```go
-client := ai.New(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
+client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
 ```
 
 `Retry` is the one policy shipped here, and every driver disables its vendor
@@ -311,7 +311,7 @@ yours.
 safe in a server holding several tenants' keys:
 
 ```go
-client, err := ai.NewClient(ai.Config{
+client, err := ai.New(ai.Config{
 	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
 	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
 })

@@ -174,7 +174,7 @@ func defaultFetch(ctx context.Context, p *Provider) ([]ai.Model, error) {
 	if len(p.cfg.Models) > 0 {
 		probe = p.cfg.Models[0]
 	}
-	client, err := ai.NewClient(p.ConfigFor(probe))
+	client, err := ai.New(p.ConfigFor(probe))
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (p *Provider) Client(modelID string, opts ...ai.Option) (*ai.Client, error)
 		return nil, &ai.Error{Kind: ai.KindInvalidRequest, Message: fmt.Sprintf(
 			"ai: provider %q states no protocol, so it cannot open model %q", p.cfg.ID, modelID)}
 	}
-	return ai.NewClient(p.ConfigFor(m), opts...)
+	return ai.New(p.ConfigFor(m), opts...)
 }
 
 // decorate stamps a model with the provider's identity and protocol. It only

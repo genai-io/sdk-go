@@ -153,7 +153,7 @@ func TestReachingEachVendor(t *testing.T) {
 			defer server.Close()
 
 			cfg.BaseURL = server.URL
-			client, err := ai.NewClient(cfg)
+			client, err := ai.New(cfg)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -301,7 +301,7 @@ func TestOnePromptThreeWireShapes(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.NewClient(ai.Config{Model: tc.model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: tc.model, APIKey: "k", BaseURL: server.URL})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -355,7 +355,7 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.NewClient(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -486,7 +486,7 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	model.BaseURL = server.URL
-	client, err := ai.NewClient(ai.Config{Model: model, APIKey: "k"})
+	client, err := ai.New(ai.Config{Model: model, APIKey: "k"})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -68,7 +68,7 @@ type Request struct {
 // The same option means "default" when given to New and "override" when given
 // to a call, so a knob is spelled one way wherever it is set:
 //
-//	client := ai.New(driver, model, ai.WithEffort(ai.EffortHigh))
+//	client := ai.NewWithDriver(driver, model, ai.WithEffort(ai.EffortHigh))
 //	resp, err := client.Complete(ctx, messages, ai.WithEffort(ai.EffortLow))
 //
 // Applying an option is what marks a field as set. That is why there is no

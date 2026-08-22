@@ -19,7 +19,7 @@ import (
 // Retry replays a failed call, at most attempts times in total, waiting
 // backoff before the second try and doubling it after each further failure.
 //
-//	client := ai.New(ai.Wrap(driver, ai.Retry(3, time.Second)), model)
+//	client := ai.NewWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second)), model)
 //
 // Three conditions all have to hold before it replays:
 //

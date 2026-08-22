@@ -113,12 +113,12 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 //
 //	client, err := auth.Client("openai/gpt-4.1")
 //
-// It is the one-line form of Config followed by ai.NewClient, and the driver for the
+// It is the one-line form of Config followed by ai.New, and the driver for the
 // model's protocol must be linked in — see ai/driver/all.
 func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	cfg, err := Config(ref)
 	if err != nil {
 		return nil, err
 	}
-	return ai.NewClient(cfg, opts...)
+	return ai.New(cfg, opts...)
 }

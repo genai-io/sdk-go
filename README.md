@@ -200,42 +200,77 @@ called.
 
 ## Tool use
 
-Tool parameters are derived from a Go type, so the schema the model sees and
-the struct the arguments decode into cannot drift apart:
+A tool is a Go function. Its parameters come from the function's own argument
+type, so the schema the model is told about, the struct the arguments decode
+into, and the code that runs them are written once, together:
 
 ```go
 type SearchArgs struct {
 	Query string `json:"query" description:"what to look for"`
-	Limit int    `json:"limit,omitempty"`
+	Limit int    `json:"limit,omitempty" description:"how many results" maximum:"20"`
 }
 
-search := ai.ToolFor[SearchArgs]("search", "Search the knowledge base")
+func search(ctx context.Context, args SearchArgs) (string, error) {
+	return index.Query(ctx, args.Query, args.Limit)
+}
 
-response, err := client.Complete(ctx, messages, ai.WithTools(search))
-
-for _, call := range response.ToolCalls() {
-	if err := search.ValidateArgs(call.Input); err != nil {
-		// Hand this back as a tool result; the model can correct it.
-	}
-	args, err := ai.UnmarshalArgs[SearchArgs](call)
-	// ...
+tools := []ai.Tool{
+	ai.Handle("search", "Search the knowledge base.", search),
+	ai.Handle("fetch", "Fetch one document by ID.", fetch),
 }
 ```
 
-`ValidateArgs` checks a call against the tool's own schema before you run it, so
-a model's mistake comes back as something it can fix rather than as whatever
-your tool does with a missing field.
+`SearchArgs` is never named at the call site — `ai.Handle` takes it from
+`search`'s own parameter. That matters once there is a second tool: the model
+tells you which one it meant by name only, so a hand-written `switch call.Name`
+has to remember which argument type belongs to which string, and renaming one
+still compiles.
 
-Answer each call in the turn that follows:
+The model does not run your tools. It asks you to, you answer, and it
+continues — so the loop is yours:
 
 ```go
-messages = append(messages, response.Message())
-messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
-	ToolCallID: call.ID,
-	ToolName:   call.Name,
-	Content:    output,
-}))
+messages := []ai.Message{ai.UserMessage(question)}
+
+for range maxTurns {
+	response, err := client.Complete(ctx, messages, ai.WithTools(tools...))
+	if err != nil {
+		return err
+	}
+
+	calls := response.ToolCalls()
+	if len(calls) == 0 {
+		return use(response.Text())          // the model is done
+	}
+
+	messages = append(messages,
+		response.Message(),                  // keeps its thinking, for the next turn
+		ai.ToolResultsMessage(ai.RunTools(ctx, tools, calls)...))
+}
 ```
+
+`RunTools` checks each call's arguments against that tool's own schema before
+running anything, so a model's mistake comes back as something it can correct
+rather than as whatever your tool does with a missing field. Nothing it can hit
+is returned as an error — an unknown tool name, bad arguments, a tool that
+failed — because none of those are worth ending a conversation over. Each comes
+back as a result marked `IsError`, which the model sees and retries:
+
+```
+✗ weather → no tool named "weather"; the tools available are search and fetch
+✗ search  → arguments for search: limit must be at most 20
+```
+
+Two rules are not yours to discover. Every call must be answered in the turn
+that *immediately* follows, or the next request is rejected. And append
+`response.Message()` rather than `ai.AssistantMessage(response.Text())` — the
+first carries the model's thinking and reasoning state forward, the second
+drops it and a reasoning model starts over every turn.
+
+Use `ai.ToolFor[T](name, description)` for a tool you dispatch yourself; it is
+the same definition without the handler.
+
+[`examples/tools`](examples/tools) is the whole of this, runnable.
 
 ## Describing fields
 

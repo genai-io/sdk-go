@@ -881,3 +881,66 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 		t.Errorf("a correct call was rejected: %v", err)
 	}
 }
+
+// With more than one tool the model says which it meant by name only, so the
+// join between that name and the Go type its arguments decode into is the one
+// a hand-written switch leaves unguarded. Handle takes the type from the
+// function that receives it, and RunTools dispatches on the name — so the two
+// cannot disagree.
+func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
+	type CityArgs struct {
+		City string `json:"city" enum:"Tokyo|Delhi"`
+	}
+	type YearArgs struct {
+		Year int `json:"year" minimum:"2000" maximum:"2020"`
+	}
+
+	tools := []ai.Tool{
+		ai.Handle("area", "area of a city", func(_ context.Context, a CityArgs) (string, error) {
+			return "area of " + a.City, nil
+		}),
+		ai.Handle("census", "population in a year", func(_ context.Context, a YearArgs) (string, error) {
+			return fmt.Sprintf("census %d", a.Year), nil
+		}),
+		ai.ToolFor[CityArgs]("unhandled", "offered without a handler"),
+	}
+
+	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
+		{ID: "1", Name: "census", Input: `{"year":2010}`},
+		{ID: "2", Name: "area", Input: `{"city":"Delhi"}`},
+		{ID: "3", Name: "area", Input: `{"city":"Mumbai"}`},
+		{ID: "4", Name: "weather", Input: `{}`},
+		{ID: "5", Name: "unhandled", Input: `{"city":"Delhi"}`},
+	})
+
+	if len(results) != 5 {
+		t.Fatalf("got %d results, want one per call", len(results))
+	}
+	for i, want := range []struct {
+		content string
+		isError bool
+	}{
+		{"census 2010", false},                       // decoded as YearArgs, not CityArgs
+		{"area of Delhi", false},                     // decoded as CityArgs
+		{"city must be one of Tokyo or Delhi", true}, // checked before it ran
+		{`no tool named "weather"`, true},            // and says what does exist
+		{"without anything to run it", true},         // ToolFor, no handler
+	} {
+		if results[i].IsError != want.isError {
+			t.Errorf("result %d IsError = %v, want %v (%q)", i, results[i].IsError, want.isError, results[i].Content)
+		}
+		if !strings.Contains(results[i].Content, want.content) {
+			t.Errorf("result %d = %q\nwant it to contain %q", i, results[i].Content, want.content)
+		}
+		// Every result must be paired, or the next request is rejected.
+		if results[i].ToolCallID == "" {
+			t.Errorf("result %d has no ToolCallID", i)
+		}
+	}
+
+	// The unknown-tool message names the tools that do exist, so a model that
+	// invented one can pick a real one instead of guessing again.
+	if !strings.Contains(results[3].Content, "area, census and unhandled") {
+		t.Errorf("result 3 = %q, want it to list the available tools", results[3].Content)
+	}
+}

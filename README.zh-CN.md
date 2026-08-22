@@ -171,39 +171,60 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-工具参数是从 Go 类型推导出来的，所以**模型看到的 schema 和参数解码进去的那个结构体不可能对不上**：
+一个工具就是一个 Go 函数。它的参数来自函数自己的参数类型——**模型看到的 schema、参数解码进去的结构体、以及执行它的代码，只写一次，写在一起**：
 
 ```go
 type SearchArgs struct {
 	Query string `json:"query" description:"要找什么"`
-	Limit int    `json:"limit,omitempty"`
+	Limit int    `json:"limit,omitempty" description:"要几条结果" maximum:"20"`
 }
 
-search := ai.ToolFor[SearchArgs]("search", "搜索知识库")
+func search(ctx context.Context, args SearchArgs) (string, error) {
+	return index.Query(ctx, args.Query, args.Limit)
+}
 
-response, err := client.Complete(ctx, messages, ai.WithTools(search))
-
-for _, call := range response.ToolCalls() {
-	if err := search.ValidateArgs(call.Input); err != nil {
-		// 把它作为 tool result 交回去，模型能自己改对。
-	}
-	args, err := ai.UnmarshalArgs[SearchArgs](call)
-	// ...
+tools := []ai.Tool{
+	ai.Handle("search", "搜索知识库。", search),
+	ai.Handle("fetch", "按 ID 取一篇文档。", fetch),
 }
 ```
 
-`ValidateArgs` 在你真正执行之前，拿工具自己的 schema 校验这次调用——**这样模型的错误会以"它能修正的形式"回到它那里**，而不是变成你的工具拿着一个缺失字段做出的任何事。
+`SearchArgs` 在调用处**一次都没出现**——`ai.Handle` 从 `search` 自己的参数里取。这一点在有第二个工具之后才显出价值：模型只用**名字**告诉你它想调哪个，所以手写的 `switch call.Name` 必须自己记住哪个字符串对应哪个参数类型，而改错一个名字**照样能编译**。
 
-每次调用都必须在紧接着的那一轮里被应答：
+模型不会执行你的工具。它请求你执行、你回答、它继续——所以循环是你的：
 
 ```go
-messages = append(messages, response.Message())
-messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
-	ToolCallID: call.ID,
-	ToolName:   call.Name,
-	Content:    output,
-}))
+messages := []ai.Message{ai.UserMessage(question)}
+
+for range maxTurns {
+	response, err := client.Complete(ctx, messages, ai.WithTools(tools...))
+	if err != nil {
+		return err
+	}
+
+	calls := response.ToolCalls()
+	if len(calls) == 0 {
+		return use(response.Text())          // 模型说完了
+	}
+
+	messages = append(messages,
+		response.Message(),                  // 带着它的思考进下一轮
+		ai.ToolResultsMessage(ai.RunTools(ctx, tools, calls)...))
+}
 ```
+
+`RunTools` 在执行任何东西**之前**，先拿那个工具自己的 schema 校验参数——**这样模型的错误会以"它能改对的形式"回到它那里**，而不是变成你的工具拿着一个缺失字段做出的任何事。它遇到的任何问题都不会作为 error 返回——未知的工具名、参数不对、工具自己失败了——因为这些都不值得让一整段对话结束。每一个都变成一条 `IsError` 的结果，模型看得到，也能据此重试：
+
+```
+✗ weather → no tool named "weather"; the tools available are search and fetch
+✗ search  → arguments for search: limit must be at most 20
+```
+
+有两条规则不该让你自己去踩出来。**每次调用都必须在紧接着的那一轮里被应答**，否则下一个请求会被拒。以及**用 `response.Message()`，不要用 `ai.AssistantMessage(response.Text())`**——前者把模型的思考和 reasoning 状态带进下一轮，后者会丢掉它，推理模型就得每轮从头想起。
+
+想自己分发的话用 `ai.ToolFor[T](name, description)`，它是同样的定义、只是不带 handler。
+
+[`examples/tools`](examples/tools) 是这一整套，可以直接跑。
 
 ## 描述字段
 

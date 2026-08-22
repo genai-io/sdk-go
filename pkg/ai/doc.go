@@ -66,6 +66,17 @@
 //
 //	person, err := ai.CompleteAs[Person](ctx, client, messages)
 //
+// # Tools
+//
+// A tool is a Go function; its parameters come from the function's own
+// argument type, so the schema, the decode and the code that runs it agree by
+// construction. RunTools dispatches a turn's calls and turns anything that
+// goes wrong into a result the model can correct:
+//
+//	tools := []ai.Tool{ai.Handle("search", "Search the docs.", search)}
+//	messages = append(messages, response.Message(),
+//		ai.ToolResultsMessage(ai.RunTools(ctx, tools, response.ToolCalls())...))
+//
 // # Stream blocks
 //
 // Every content kind uses one start/delta/end lifecycle. Textual Delta blocks
@@ -116,7 +127,7 @@
 //
 //	request.go     one call: what is asked, under what settings, and how they layer
 //	message.go     a turn, and the ordered blocks it carries
-//	tool.go        a tool offered to the model, and its arguments checked on the way back
+//	tool.go        a tool: defined from a Go type, offered, and run when called
 //	schema.go      asking a model to answer in a JSON shape
 //
 //	response.go    what one call produced, what it cost, and decoding it

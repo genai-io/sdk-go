@@ -251,7 +251,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
   pkg/ai                  核心。不 import 仓库内任何包，不带厂商 SDK，
                           不读环境变量，不读文件。
     |
-    +-- pkg/ai/schema     Go 类型变成一份 provider 会接受的 schema
+    +-- pkg/ai/jsonschema Go 类型变成一份 provider 会接受的 schema
     |
     +-- pkg/ai/driver/*   一个协议一个包。厂商 SDK 只被它拖进来，
     |                     别的地方都不碰。
@@ -266,7 +266,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
   `catalog` **不依赖任何 driver 包**——它的整棵树只有 `pkg/ai` 加 `pkg/ai/provider`。这就是"只跟一家厂商说话的程序不必链接所有厂商 SDK"的保证，也是 `Compat` 类型必须待在 `pkg/ai` 而不是各自 driver 旁边的原因。
 
 - `driver/openai/internal/errs` 对 `driver/anthropic` 不可达，靠 `internal/`。
-- `pkg/ai`、`pkg/ai/schema`、`pkg/ai/catalog`、`pkg/ai/provider` 的**模块依赖数是 0**——除标准库外什么都不依赖。厂商 SDK 只能通过你 blank import 的那个 driver 进入构建。
+- `pkg/ai`、`pkg/ai/jsonschema`、`pkg/ai/catalog`、`pkg/ai/provider` 的**模块依赖数是 0**——除标准库外什么都不依赖。厂商 SDK 只能通过你 blank import 的那个 driver 进入构建。
 - `ProtocolOptions` / `ProtocolConfig` 在编译期拒绝一个本来就不该是它的值。
 - `Driver` 只有两个方法，所以测试里的桩也只有两个方法。
 

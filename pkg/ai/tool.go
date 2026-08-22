@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/genai-io/sdk-go/pkg/ai/schema"
+	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
 // Tool is a tool definition offered to the model.
@@ -25,7 +25,7 @@ func ToolFor[T any](name, description string) Tool {
 	return Tool{
 		Name:        name,
 		Description: description,
-		Parameters:  schema.For[T](),
+		Parameters:  jsonschema.For[T](),
 	}
 }
 
@@ -53,8 +53,8 @@ func (t Tool) ParameterSchema() map[string]any {
 // A tool that declares no schema is not checked, because there is nothing to
 // check against.
 func (t Tool) ValidateArgs(input string) error {
-	definition := t.ParameterSchema()
-	if len(definition) == 0 {
+	schema := t.ParameterSchema()
+	if len(schema) == 0 {
 		return nil
 	}
 	var value any
@@ -66,7 +66,7 @@ func (t Tool) ValidateArgs(input string) error {
 	} else if err := json.Unmarshal(trimmed, &value); err != nil {
 		return fmt.Errorf("arguments for %s are not valid JSON: %w", t.Name, err)
 	}
-	if err := schema.Check(definition, value); err != nil {
+	if err := jsonschema.Check(schema, value); err != nil {
 		return fmt.Errorf("arguments for %s: %w", t.Name, err)
 	}
 	return nil

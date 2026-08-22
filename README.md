@@ -271,7 +271,7 @@ Schemas are derived to be **accepted**, not merely valid. Every field is in
 output spells optional — every object is closed, `time.Time` is a date-time
 string rather than an object of unexported fields, and a field that would need
 an open schema is refused instead of being sent and rejected.
-See [`pkg/ai/schema`](pkg/ai/schema) for the whole of it.
+See [`pkg/ai/jsonschema`](pkg/ai/jsonschema) for the whole of it.
 
 ## Structured outputs
 

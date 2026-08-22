@@ -6,7 +6,7 @@ import (
 	"maps"
 	"reflect"
 
-	"github.com/genai-io/sdk-go/pkg/ai/schema"
+	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
 // Asking a model for a shape, and the JSON Schema machinery behind it.
@@ -17,7 +17,7 @@ import (
 // ordinary map — built and checked by the second half of this file.
 //
 // Building one from a Go type, and checking a value against one, live in
-// ai/schema. That package targets what the providers accept rather than JSON
+// ai/jsonschema. That package targets what the providers accept rather than JSON
 // Schema in general, which is a different and stricter target.
 //
 // Reading the answer back is in response.go.
@@ -64,13 +64,13 @@ type Schema struct {
 //		Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
 //	}
 //
-// A tag key is the JSON Schema keyword it sets; see ai/schema for the full
+// A tag key is the JSON Schema keyword it sets; see ai/jsonschema for the full
 // list and what it refuses.
 func SchemaOf[T any](description string) *Schema {
 	return &Schema{
 		Name:        reflect.TypeFor[T]().Name(),
 		Description: description,
-		Definition:  schema.For[T](),
+		Definition:  jsonschema.For[T](),
 		Strict:      true,
 	}
 }

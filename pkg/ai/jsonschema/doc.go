@@ -1,8 +1,8 @@
-// Package schema turns a Go type into a JSON Schema a model provider will
+// Package jsonschema turns a Go type into a JSON Schema a model provider will
 // accept, and checks a model's answer against one.
 //
-//	definition := schema.For[Person]()
-//	err := schema.Check(definition, decoded)
+//	definition := jsonschema.For[Person]()
+//	err := jsonschema.Check(definition, decoded)
 //
 // # Not JSON Schema in general
 //
@@ -70,4 +70,4 @@
 //
 //	derive.go  a Go type and its ai tags becoming a schema
 //	check.go   a decoded value measured against one
-package schema
+package jsonschema

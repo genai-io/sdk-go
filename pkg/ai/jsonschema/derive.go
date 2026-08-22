@@ -1,4 +1,4 @@
-package schema
+package jsonschema
 
 import (
 	"fmt"
@@ -70,7 +70,7 @@ func applyTags(field reflect.StructField, schema map[string]any, t reflect.Type,
 			continue
 		}
 		if strings.TrimSpace(value) == "" {
-			panic(fmt.Sprintf("schema: %s has an empty %s tag", where, key))
+			panic(fmt.Sprintf("jsonschema: %s has an empty %s tag", where, key))
 		}
 		switch {
 		case key == "enum":
@@ -78,7 +78,7 @@ func applyTags(field reflect.StructField, schema map[string]any, t reflect.Type,
 		case spec.numeric:
 			n, err := strconv.ParseFloat(value, 64)
 			if err != nil {
-				panic(fmt.Sprintf("schema: %s sets %s:%q, which is not a number", where, key, value))
+				panic(fmt.Sprintf("jsonschema: %s sets %s:%q, which is not a number", where, key, value))
 			}
 			schema[key] = n
 		default:
@@ -100,12 +100,12 @@ func rejectNearMisses(field reflect.StructField, where string) {
 			continue
 		}
 		if key == "jsonschema" || key == "ai" {
-			panic(fmt.Sprintf("schema: %s carries a %q tag. Keywords go in tags of their own: "+
+			panic(fmt.Sprintf("jsonschema: %s carries a %q tag. Keywords go in tags of their own: "+
 				"`description:\"…\" enum:\"a|b\"`", where, key))
 		}
 		for candidate := range keywords {
 			if nearMiss(key, candidate) {
-				panic(fmt.Sprintf("schema: %s has a %s tag; did you mean %s?", where, key, candidate))
+				panic(fmt.Sprintf("jsonschema: %s has a %s tag; did you mean %s?", where, key, candidate))
 			}
 		}
 	}
@@ -203,13 +203,13 @@ func parseEnum(value string, t reflect.Type, where string) []any {
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			n, err := strconv.ParseInt(m, 10, 64)
 			if err != nil {
-				panic(fmt.Sprintf("schema: %s has enum member %q, which is not an integer", where, m))
+				panic(fmt.Sprintf("jsonschema: %s has enum member %q, which is not an integer", where, m))
 			}
 			out = append(out, n)
 		case reflect.Float32, reflect.Float64:
 			n, err := strconv.ParseFloat(m, 64)
 			if err != nil {
-				panic(fmt.Sprintf("schema: %s has enum member %q, which is not a number", where, m))
+				panic(fmt.Sprintf("jsonschema: %s has enum member %q, which is not a number", where, m))
 			}
 			out = append(out, n)
 		default:
@@ -217,7 +217,7 @@ func parseEnum(value string, t reflect.Type, where string) []any {
 		}
 	}
 	if len(out) == 0 {
-		panic(fmt.Sprintf("schema: %s has an empty enum", where))
+		panic(fmt.Sprintf("jsonschema: %s has an empty enum", where))
 	}
 	return out
 }
@@ -275,7 +275,7 @@ func schemaForType(t reflect.Type, seen map[reflect.Type]bool, where string) map
 		}
 	case reflect.Map:
 		if t.Key().Kind() != reflect.String {
-			panic(fmt.Sprintf("schema: %s is a map keyed by %s; JSON object keys are strings, "+
+			panic(fmt.Sprintf("jsonschema: %s is a map keyed by %s; JSON object keys are strings, "+
 				"so this cannot be described to a model", where, t.Key().Kind()))
 		}
 		out = map[string]any{
@@ -286,11 +286,11 @@ func schemaForType(t reflect.Type, seen map[reflect.Type]bool, where string) map
 		out = structSchema(t, seen, where)
 
 	case reflect.Interface:
-		panic(fmt.Sprintf("schema: %s is %s, which describes nothing a model can fill in. "+
+		panic(fmt.Sprintf("jsonschema: %s is %s, which describes nothing a model can fill in. "+
 			"Strict structured output rejects an open schema outright — give the field a "+
 			"concrete type, or write the schema by hand", where, kindName(t)))
 	default:
-		panic(fmt.Sprintf("schema: %s is %s, which has no JSON representation", where, kindName(t)))
+		panic(fmt.Sprintf("jsonschema: %s is %s, which has no JSON representation", where, kindName(t)))
 	}
 
 	return out
@@ -325,7 +325,7 @@ func nullable(schema map[string]any) map[string]any {
 
 func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[string]any {
 	if seen[t] {
-		panic(fmt.Sprintf("schema: %s refers to itself; a recursive type has no finite schema", where))
+		panic(fmt.Sprintf("jsonschema: %s refers to itself; a recursive type has no finite schema", where))
 	}
 	seen[t] = true
 	defer delete(seen, t)

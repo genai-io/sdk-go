@@ -135,7 +135,7 @@
 //	driver.go      the protocol seam: what a driver is, is given, and how one is found
 //
 // Deriving a schema from a Go type, and checking an answer against one, is
-// ai/schema. A set of endpoints and their live model listings is ai/provider,
+// ai/jsonschema. A set of endpoints and their live model listings is ai/provider,
 // which sits above Client rather than inside it.
 //
 // Another modality — image generation, say — would be a sibling package rather

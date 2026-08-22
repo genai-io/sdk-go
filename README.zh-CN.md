@@ -223,7 +223,7 @@ type Order struct {
 
 跟某个关键字**只差一个编辑距离**的键——`enums`、`descrption`——会 panic 并告诉你想写的是哪个，因为 Go 本来会一声不吭地丢掉它，那个字段就白标注了。而跟谁都不接近的键会被放过：`db`、`validate` 那些是别人的工具在用。
 
-schema 是按「**能被接受**」推导的，不只是「合法」：所有字段都在 `required` 里（可选的写成 `["T","null"]`，那才是 strict 结构化输出表达"可选"的方式）、每个对象都是封闭的、`time.Time` 是 date-time 字符串而不是一堆未导出字段组成的对象，而一个需要开放 schema 的字段会被**当场拒绝**，而不是发出去再被端点拒。完整规则见 [`pkg/ai/schema`](pkg/ai/schema)。
+schema 是按「**能被接受**」推导的，不只是「合法」：所有字段都在 `required` 里（可选的写成 `["T","null"]`，那才是 strict 结构化输出表达"可选"的方式）、每个对象都是封闭的、`time.Time` 是 date-time 字符串而不是一堆未导出字段组成的对象，而一个需要开放 schema 的字段会被**当场拒绝**，而不是发出去再被端点拒。完整规则见 [`pkg/ai/jsonschema`](pkg/ai/jsonschema)。
 
 ## 结构化输出
 

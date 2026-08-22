@@ -64,7 +64,13 @@ type Schema struct {
 // Per-field descriptions come from a jsonschema struct tag, and the model
 // reads those too — field names alone are often ambiguous to it in ways they
 // are not to you. The whole tag is the text; a "description=" prefix is
-// rejected rather than sent, because it is another library's spelling:
+// rejected rather than sent, because it is another library's spelling.
+//
+// The key is jsonschema and not the more literal description because Go drops
+// an unrecognised tag key without a word: a wrong value under the key people
+// reach for fails loudly, where the right value under a key we invented would
+// cost the field its description in silence. Both mistakes now panic naming
+// the fix.
 //
 //	type Person struct {
 //		Name string `json:"name" jsonschema:"full legal name, family name last"`
@@ -193,6 +199,11 @@ var byteSchema = map[reflect.Type]*jsonschema.Schema{
 // model would be offered a tool it cannot call and its arguments would never be
 // checked.
 func deriveSchema[T any]() map[string]any {
+	if field := describedByTheWrongTag(reflect.TypeFor[T](), map[reflect.Type]bool{}); field != "" {
+		panic(fmt.Sprintf(`ai: %s has a description tag on %s, which nothing reads. `+
+			"Field descriptions go in the jsonschema tag: `jsonschema:\"what to look for\"`",
+			reflect.TypeFor[T](), field))
+	}
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: byteSchema})
 	if err != nil {
 		panic(fmt.Sprintf("ai: cannot describe %s as a JSON Schema: %v%s",
@@ -315,4 +326,36 @@ func tagHint(err error) string {
 	return `; the whole tag is the description — write ` +
 		"`jsonschema:\"what to look for\"`, not " +
 		"`jsonschema:\"description=what to look for\"`"
+}
+
+// describedByTheWrongTag finds a field annotated with a `description` tag,
+// naming it, or returns "" when there is none.
+//
+// The tag key here is jsonschema, which is what the Go ecosystem's other
+// schema libraries also use — so that is the key people reach for, and a wrong
+// value under it fails loudly. The reverse does not: Go ignores an unrecognised
+// tag key silently, so `description:"…"` costs the field its description with
+// nothing said. This is the check that says it.
+//
+// It only looks for the key. Attaching a description would need the Go
+// field-to-JSON-property mapping, which is precisely what this package
+// delegates upstream rather than reimplementing.
+func describedByTheWrongTag(t reflect.Type, seen map[reflect.Type]bool) string {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if _, ok := field.Tag.Lookup("description"); ok {
+			return t.Name() + "." + field.Name
+		}
+		if nested := describedByTheWrongTag(field.Type, seen); nested != "" {
+			return nested
+		}
+	}
+	return ""
 }

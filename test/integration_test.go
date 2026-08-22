@@ -698,3 +698,30 @@ func TestABadSchemaTagSaysHowToFixIt(t *testing.T) {
 	}()
 	_ = ai.SchemaOf[Wrong]("")
 }
+
+// Go ignores an unrecognised struct tag silently, so the reasonable-looking
+// `description` key would cost a field its description with nothing said. That
+// is the worse failure of the two — the model simply never gets told.
+func TestTheWrongTagKeyIsNotSilent(t *testing.T) {
+	type Nested struct {
+		Note string `json:"note" description:"why this matters"`
+	}
+	type Outer struct {
+		Name  string `json:"name" jsonschema:"full legal name"`
+		Inner Nested `json:"inner"`
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a description tag must not be silently dropped")
+		}
+		msg := fmt.Sprint(r)
+		for _, want := range []string{"Nested.Note", "jsonschema tag"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("panic = %q\nwant it to mention %q", msg, want)
+			}
+		}
+	}()
+	_ = ai.SchemaOf[Outer]("")
+}

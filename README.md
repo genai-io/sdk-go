@@ -450,6 +450,7 @@ wrong.
 [`docs/architecture.md`](docs/architecture.md) is the part no single file owns:
 how the pieces fit, which direction the dependencies run, and what a request
 passes through between your call and the bytes on the wire.
+([中文](docs/architecture.zh-CN.md))
 
 ## Versioning
 

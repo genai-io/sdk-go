@@ -6,6 +6,8 @@ governs. This one is the part no single file owns: **how the pieces fit** —
 which package knows what, which direction the dependencies run, and what a
 request passes through between your call and the bytes on the wire.
 
+> 中文版：[architecture.zh-CN.md](architecture.zh-CN.md)
+
 ## The thesis
 
 **A package is a unit of code, so there is one per wire format and none per

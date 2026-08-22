@@ -1,14 +1,35 @@
 # 构造客户端
 
-**只有一条链，你从自己已经在的位置接进去。**它不分叉，所以没有"选错"这回事。
+**从模型引用到客户端只有一条链。**你从自己已经在的位置接进去，而**每一步加的东西都是能叫得出名字的**：
 
 ```
-   "openai/gpt-4.1"       ai.Config        ai.Driver          *ai.Client
-          │                   │                │                   │
-          └── auth.Config ────┴─ ai.NewDriver ─┴─ ai.NewClientWithDriver ┘
-                  reads the          builds the           holds the
-                  environment        transport            model + defaults
+   "openai/gpt-4.1"          一个字符串，仅此而已
+          │
+          │  catalog.Model      这个模型自身的事实
+          ▼
+       ai.Model               它说哪种协议、上下文窗口和最大输出是多少、
+          │                   接受哪些模态、推理档位梯子、价格、
+          │                   以及它做不了什么
+          │
+          │  auth.Config       凭证，以及发到哪里
+          ▼
+      ai.Config               从厂商自己的环境变量读到的 APIKey、BaseURL、
+          │                   部署相关设置——而且需要 key 却没有时
+          │                   **就在这里失败**，而不是三次调用之后甩你一个 401
+          │
+          │  ai.NewDriver      协议的具体实现
+          ▼
+      ai.Driver               按 Model.API 从注册表里找到——注册表正是
+          │                   那个空导入填进去的；它握着 HTTP 传输层
+          │                   和厂商的认证头
+          │
+          │  ai.NewClientWithDriver
+          ▼
+     *ai.Client               每次调用都继承的默认值，加上一份 Model 的私有
+                              副本——所以你事后改动它，够不着已经在飞的请求
 ```
+
+**它不分叉，所以没有"选错"这回事**——只有"你需要走到哪里就停"。
 
 你实际会敲的那两个名字，是这条链上的**捷径**，而且每个都**literally 只有一行**：
 
@@ -46,13 +67,13 @@ client := ai.NewClientWithDriver(driver, cfg.Model)
 
 所以问题不是"用哪个构造函数"，而是**你需要在这条链上走到哪里就停**：
 
-| 停在 | 什么时候 | 代价 |
+| 停在 | 什么时候 | 你要自己给什么 |
 | --- | --- | --- |
-| `auth.Client(ref)` | 命令行工具，凭证在环境里 | 会读环境 |
-| `auth.Config(ref)` | 同上，但要改端点或 `http.Client` | 会读环境 |
-| `ai.NewClient(cfg)` | 服务端。凭证你给，**不读任何环境状态** | 无 |
-| `ai.NewDriver(cfg)` | 需要拿到 driver 这个值，去套 middleware | 无 |
-| `ai.NewClientWithDriver(driver, model)` | 你已经有 driver 了——包括测试里的桩 | 无 |
+| `auth.Client(ref)` | 命令行工具 | 一个引用。凭证由环境提供。 |
+| `auth.Config(ref)` | 同上，但端点或 `http.Client` 必须改 | 引用，外加你对 `Config` 的改动 |
+| `ai.NewClient(cfg)` | 服务端。**一点环境状态都不许读** | `Model` 和凭证 |
+| `ai.NewDriver(cfg)` | driver 必须经你的手——套 middleware | 同上，外加最后一步自己拼 |
+| `ai.NewClientWithDriver(driver, model)` | 你已经握着 driver 了，包括测试里的桩 | driver 和 `Model` |
 
 每条路都需要对应协议的 driver 已注册，一个空导入就够。模型要到运行时才确定就用 `all`；编译期就知道协议、又不想把其他厂商的 SDK 链进来，就只导入那一个。
 

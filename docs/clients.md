@@ -1,15 +1,39 @@
 # Constructing a client
 
-There is one chain, and you join it wherever you already are. Nothing branches,
-so there is no choice to get wrong.
+There is one chain from a model reference to a client. You join it wherever
+you already are, and each step adds one nameable thing:
 
 ```
-   "openai/gpt-4.1"       ai.Config        ai.Driver          *ai.Client
-          │                   │                │                   │
-          └── auth.Config ────┴─ ai.NewDriver ─┴─ ai.NewClientWithDriver ┘
-                  reads the          builds the           holds the
-                  environment        transport            model + defaults
+   "openai/gpt-4.1"          a string, and nothing else
+          │
+          │  catalog.Model      the model's own facts
+          ▼
+       ai.Model               which protocol it speaks, its context window and
+          │                   max output, the modalities it accepts, its
+          │                   reasoning ladder, its prices, what it cannot do
+          │
+          │  auth.Config       the credential, and where to send it
+          ▼
+      ai.Config               APIKey from the vendor's own environment
+          │                   variable, BaseURL, any deployment settings —
+          │                   and a failure here if a key is required and
+          │                   missing, rather than a 401 three calls later
+          │
+          │  ai.NewDriver      the protocol implementation
+          ▼
+      ai.Driver               found in the registry by Model.API, which is
+          │                   what the blank import fills in; holds the HTTP
+          │                   transport and the vendor's auth headers
+          │
+          │  ai.NewClientWithDriver
+          ▼
+     *ai.Client               the defaults every call inherits, and a private
+                              copy of the Model so a later edit on your side
+                              cannot reach a request already in flight
 ```
+
+Nothing branches, so there is no choice to get wrong — only how far along you
+need to stop.
 
 The two names you will actually type are shortcuts along it, and each is
 literally one line:
@@ -49,13 +73,13 @@ client := ai.NewClientWithDriver(driver, cfg.Model)
 So the question is not which constructor to use. It is **how far along the
 chain you need to stop**:
 
-| Stop at | When | Cost |
+| Stop at | When | What you supply |
 | --- | --- | --- |
-| `auth.Client(ref)` | A command-line tool. The credential is in the environment. | Reads the environment |
-| `auth.Config(ref)` | Same, but you need to change the endpoint or the `http.Client` | Reads the environment |
-| `ai.NewClient(cfg)` | A server. You supply the credential; nothing ambient is read. | None |
-| `ai.NewDriver(cfg)` | You need the driver as a value, to wrap it in middleware | None |
-| `ai.NewClientWithDriver(driver, model)` | You already have a driver — including a stub, in tests | None |
+| `auth.Client(ref)` | A command-line tool | The reference. The credential comes from the environment. |
+| `auth.Config(ref)` | Same, but the endpoint or the `http.Client` has to change | The reference, then your edits to the `Config` |
+| `ai.NewClient(cfg)` | A server. Nothing ambient may be read. | The `Model` and the credential |
+| `ai.NewDriver(cfg)` | The driver has to pass through your hands — middleware | The same, and the last step yourself |
+| `ai.NewClientWithDriver(driver, model)` | You already hold a driver, including a stub in tests | The driver and the `Model` |
 
 Every path needs the driver for its protocol registered, which a blank import
 does. Use `all` when the model is chosen at run time; use one when you know the

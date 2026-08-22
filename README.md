@@ -319,7 +319,7 @@ and resending either duplicates the text already shown or discards it.
 safe in a server holding several tenants' keys — supply a `Config` directly:
 
 ```go
-client, err := ai.Open(ai.Config{
+client, err := ai.NewClient(ai.Config{
 	Model:      model,
 	APIKey:     key,
 	BaseURL:    "https://gateway.internal/v1",
@@ -348,7 +348,7 @@ Three layers, named for what tells them apart:
 ep, err := auth.Provider("ollama")
 models := ep.Models()      // synchronous, never blocks, never fails
 err = ep.Refresh(ctx)      // the only call that reaches the network
-client, err := ep.Open("llama4")
+client, err := ep.Client("llama4")
 ```
 
 Reading the list and fetching it are separate verbs so a model picker renders

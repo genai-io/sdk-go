@@ -43,7 +43,7 @@ catalog.Vendor      data - a row you can read without a network
       | .Provider(cfg)
       v
 provider.Provider   that row configured and credentialed, with a live model list
-      | .Open(id)
+      | .Client(modelID)
       v
 ai.Client           one model
 ```
@@ -51,11 +51,27 @@ ai.Client           one model
 Each rung adds one kind of knowledge and delegates down. `catalog` needs no
 network; `provider` reaches one; `Client` runs one call.
 
+Every step down is named for what it hands back, so the chain reads the same
+whichever rung you enter it at:
+
+| From | Call | You get |
+| --- | --- | --- |
+| `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
+| `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
+| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
+| a reference | `auth.Client(ref)` | `*ai.Client` |
+| a vendor ID | `auth.Provider(id)` | `*provider.Provider` |
+
+`ai.New(driver, model)` is the one that follows Go's own convention instead:
+`New` returns the package's main type from parts you already hold, where
+`NewClient` resolves them from a `Config`.
+
 Two package-level ways in, and the difference is whether the environment is
 allowed to answer:
 
 ```go
-ai.Open(Config)              // you supply the model, the key and the host
+ai.NewClient(Config)              // you supply the model, the key and the host
 auth.Client("vendor/model")  // the catalog and the environment supply them
 ```
 

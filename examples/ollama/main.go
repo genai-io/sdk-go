@@ -57,7 +57,7 @@ func run(modelID, question string) error {
 	}
 	show(p)
 
-	client, err := p.Open(modelID)
+	client, err := p.Client(modelID)
 	if err != nil {
 		return err
 	}

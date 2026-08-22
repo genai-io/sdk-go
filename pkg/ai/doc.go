@@ -21,7 +21,7 @@
 //	)
 //
 //	model, err := catalog.Model("anthropic/claude-opus-5")
-//	client, err := ai.Open(ai.Config{Model: model, APIKey: key})
+//	client, err := ai.NewClient(ai.Config{Model: model, APIKey: key})
 //	messages := []ai.Message{ai.UserMessage("Explain goroutine leaks.")}
 //	response, err := client.Complete(ctx, messages,
 //		ai.WithSystem("You are concise."),
@@ -29,6 +29,13 @@
 //	if err == nil {
 //		fmt.Println(response.Text())
 //	}
+//
+// Every constructor is named for what it returns: auth.Client and
+// Provider.Client hand back a *Client, auth.Provider and Vendor.Provider hand
+// back a *provider.Provider, NewDriver hands back a Driver. New is the one
+// that follows Go's own convention instead — it returns this package's main
+// type from parts you already hold, where NewClient resolves them from a
+// Config.
 //
 // The conversation is an ordinary []Message; everything else is an Option.
 // The same Option is a default when given to New and an override when given to
@@ -40,7 +47,7 @@
 // There are two package-level ways to get a Client, and the difference is
 // whether the environment is allowed to answer:
 //
-//	ai.Open(Config)              you supply the model, the key and the host
+//	ai.NewClient(Config)         you supply the model, the key and the host
 //	auth.Client("vendor/model")  the catalog and the environment supply them
 //
 // Core ai never reads an environment variable or a file, which is what makes
@@ -48,9 +55,9 @@
 // opt-in that does, and a command-line tool wants exactly that.
 //
 // Holding an ai/provider.Provider — a configured host with a live model list —
-// its Open method is the same thing scoped to that host:
+// its Client method is the same thing scoped to that host:
 //
-//	client, err := ep.Open("llama4")
+//	client, err := ep.Client("llama4")
 //
 // # Stream blocks
 //

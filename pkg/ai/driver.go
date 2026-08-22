@@ -220,8 +220,10 @@ func NewDriver(cfg Config) (Driver, error) {
 	return f(cfg)
 }
 
-// Open builds the driver for cfg.Model's protocol and wraps it in a Client.
-func Open(cfg Config, opts ...Option) (*Client, error) {
+// NewClient builds the driver for cfg.Model's protocol and wraps it in a
+// Client. It is NewDriver plus New: use it when you have a Config and want the
+// registry to find the driver, and New when you already hold one.
+func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err

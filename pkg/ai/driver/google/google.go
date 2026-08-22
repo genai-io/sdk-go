@@ -1,6 +1,6 @@
 // Package google implements the Google Gemini generateContent protocol.
 //
-// Import it for its side effect to make ai.Open handle ai.APIGoogleGenAI:
+// Import it for its side effect to make ai.NewClient handle ai.APIGoogleGenAI:
 //
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/google"
 //

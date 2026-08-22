@@ -12,10 +12,10 @@
 // and the catalog filling the rest — because a model stripped of its quirks
 // stops working, and a model the catalog has never heard of still has to open.
 //
-//	e := provider.New(provider.Config{ID: "acme", API: ai.APIOpenAIChat, APIKey: key})
-//	models := e.Models()        // what is known now: never blocks, never fails
-//	err := e.Refresh(ctx)       // the only call that reaches the network
-//	client, err := e.Open("acme-pro")
+//	p := provider.New(provider.Config{ID: "acme", API: ai.APIOpenAIChat, APIKey: key})
+//	models := p.Models()        // what is known now: never blocks, never fails
+//	err := p.Refresh(ctx)       // the only call that reaches the network
+//	client, err := p.Client("acme-pro")
 //
 // Reading the list and fetching it are separate verbs on purpose. A picker has
 // to render immediately and a host that is down must not hang it, so Models

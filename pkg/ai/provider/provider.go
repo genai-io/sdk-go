@@ -174,7 +174,7 @@ func defaultFetch(ctx context.Context, p *Provider) ([]ai.Model, error) {
 	if len(p.cfg.Models) > 0 {
 		probe = p.cfg.Models[0]
 	}
-	client, err := ai.Open(p.ConfigFor(probe))
+	client, err := ai.NewClient(p.ConfigFor(probe))
 	if err != nil {
 		return nil, err
 	}
@@ -193,9 +193,9 @@ func (p *Provider) ConfigFor(m ai.Model) ai.Config {
 	}
 }
 
-// Open returns a client for one of this provider's models. An ID the provider
-// does not list still opens, carrying the provider's protocol and provider.
-func (p *Provider) Open(modelID string, opts ...ai.Option) (*ai.Client, error) {
+// Client returns a client for one of this provider's models. An ID this
+// provider does not list still resolves, carrying its protocol and base URL.
+func (p *Provider) Client(modelID string, opts ...ai.Option) (*ai.Client, error) {
 	// The bool is discarded on purpose: an unlisted ID is fine — Model
 	// decorates it with this provider's protocol. What is not fine is having
 	// no protocol to decorate it with.
@@ -204,7 +204,7 @@ func (p *Provider) Open(modelID string, opts ...ai.Option) (*ai.Client, error) {
 		return nil, &ai.Error{Kind: ai.KindInvalidRequest, Message: fmt.Sprintf(
 			"ai: provider %q states no protocol, so it cannot open model %q", p.cfg.ID, modelID)}
 	}
-	return ai.Open(p.ConfigFor(m), opts...)
+	return ai.NewClient(p.ConfigFor(m), opts...)
 }
 
 // decorate stamps a model with the provider's identity and protocol. It only

@@ -73,7 +73,7 @@ func jsonEndpoint(t *testing.T, status int, body string) *stub {
 
 func open(t *testing.T, url string, m ai.Model) *ai.Client {
 	t.Helper()
-	c, err := ai.Open(ai.Config{Model: m, APIKey: "k", BaseURL: url})
+	c, err := ai.NewClient(ai.Config{Model: m, APIKey: "k", BaseURL: url})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

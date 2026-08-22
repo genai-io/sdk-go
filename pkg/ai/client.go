@@ -21,6 +21,10 @@ type Client struct {
 
 // New wraps a Driver and the Model it was configured for. Any options given
 // here become this client's defaults, which a per-call option overrides.
+//
+// Use it when you already hold a Driver — one you built yourself, or one
+// returned by Wrap. NewClient is the same thing starting from a Config, with
+// the registry finding the driver.
 func New(d Driver, m Model, defaults ...Option) *Client {
 	return &Client{driver: d, model: cloneModel(m), defaults: slices.Clone(defaults)}
 }

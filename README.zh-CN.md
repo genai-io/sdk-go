@@ -175,7 +175,7 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ```go
 type SearchArgs struct {
-	Query string `json:"query" jsonschema:"description=要找什么"`
+	Query string `json:"query" jsonschema:"要找什么"`
 	Limit int    `json:"limit,omitempty"`
 }
 
@@ -209,12 +209,14 @@ messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
 
 ```go
 type Person struct {
-	Name string `json:"name"`
-	Age  int    `json:"age"`
+	Name string `json:"name" jsonschema:"完整法定姓名，姓氏在后"`
+	Age  int    `json:"age" jsonschema:"周岁年龄"`
 }
 
 person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
+
+`jsonschema` 标签就是这个字段的描述，**模型会读它**——整个标签内容就是描述文本，**没有 `description=` 前缀**。字段名对模型来说往往比对你更含糊：`name` 可能是显示名也可能是法定姓名，`age` 可能是岁数也可能是出生日期。
 
 `CompleteAs` 从 `Person` 推导 schema、约束生成、再把答案解码回来——**这个类型只写一次**。想给模型一段关于这个形状的说明，或者想约束成一个 Go 类型表达不了的形状，再加 `ai.WithSchema`。
 

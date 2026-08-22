@@ -60,6 +60,16 @@ type Schema struct {
 // SchemaOf builds a Schema from a Go type, ready for WithSchema. The schema is
 // named after T; description is prompt text the model reads, and may be empty
 // when the type name already says what the shape is for.
+//
+// Per-field descriptions come from a jsonschema struct tag, and the model
+// reads those too — field names alone are often ambiguous to it in ways they
+// are not to you. The whole tag is the text; a "description=" prefix is
+// rejected rather than sent, because it is another library's spelling:
+//
+//	type Person struct {
+//		Name string `json:"name" jsonschema:"full legal name, family name last"`
+//		Age  int    `json:"age" jsonschema:"age in whole years"`
+//	}
 func SchemaOf[T any](description string) *Schema {
 	return &Schema{
 		Name:        reflect.TypeFor[T]().Name(),

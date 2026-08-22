@@ -203,7 +203,7 @@ the struct the arguments decode into cannot drift apart:
 
 ```go
 type SearchArgs struct {
-	Query string `json:"query" jsonschema:"description=what to look for"`
+	Query string `json:"query" jsonschema:"what to look for"`
 	Limit int    `json:"limit,omitempty"`
 }
 
@@ -239,12 +239,17 @@ messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
 
 ```go
 type Person struct {
-	Name string `json:"name"`
-	Age  int    `json:"age"`
+	Name string `json:"name" jsonschema:"full legal name, family name last"`
+	Age  int    `json:"age" jsonschema:"age in whole years"`
 }
 
 person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
+
+The `jsonschema` tag is the field's description, and the model reads it — the
+whole tag is the text, with no `description=` prefix. Field names alone are
+often ambiguous to a model in ways they are not to you: `name` could be a
+display name or a legal one, `age` could be years or a birth date.
 
 `CompleteAs` derives the schema from `Person`, constrains generation to it and
 decodes the answer — so the type is named once. Add `ai.WithSchema` to give the

@@ -492,9 +492,11 @@ func toolResultContent(b ai.Block) string {
 // goes out and the value that comes back are derived from the same T, which is
 // what SchemaOf and Parse spelled separately cannot guarantee.
 func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
+	// The jsonschema tag is the field's description. It is prompt text: the
+	// model reads it, so it has to reach the wire.
 	type Person struct {
-		Name string `json:"name"`
-		Age  int    `json:"age"`
+		Name string `json:"name" jsonschema:"full legal name, family name last"`
+		Age  int    `json:"age" jsonschema:"age in whole years"`
 	}
 
 	// Chat Completions streams, so the answer arrives as SSE like any other.
@@ -512,9 +514,13 @@ func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
 		t.Errorf("person = %+v, want the decoded answer", person)
 	}
 
-	// The schema reached the endpoint, named after the Go type.
+	// The schema reached the endpoint, named after the Go type, carrying the
+	// field descriptions the model is meant to read.
 	sent, _ := json.Marshal(e.body["response_format"])
-	for _, want := range []string{"Person", "json_schema", "age"} {
+	for _, want := range []string{
+		"Person", "json_schema", "age",
+		"full legal name, family name last", "age in whole years",
+	} {
 		if !strings.Contains(string(sent), want) {
 			t.Errorf("response_format = %s\nwant it to contain %q", sent, want)
 		}

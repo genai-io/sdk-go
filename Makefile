@@ -1,9 +1,10 @@
 GOFILES := $(shell find . -path './vendor' -prune -o -path './.git' -prune -o -name '*.go' -print)
-GOIMPORTS_VERSION := v0.43.0
+# The newest x/tools that still builds on the go directive in go.mod.
+GOIMPORTS_VERSION := v0.42.0
 
 .PHONY: build format format-check lint test cover ci clean install-format-tools check-format-tools
 
-build: format
+build:
 	go build ./...
 
 format: check-format-tools
@@ -35,15 +36,14 @@ lint:
 	@$(MAKE) format-check
 
 test:
-	go test ./...
+	go test -race -timeout 120s ./...
 
 cover:
 	go test -race -covermode=atomic -timeout 120s \
 		-coverpkg=./pkg/... -coverprofile=coverage.out \
-		./pkg/...
+		./...
 
-ci: format-check build lint
-	$(MAKE) cover
+ci: format-check build lint test
 
 clean:
 	rm -f coverage.out

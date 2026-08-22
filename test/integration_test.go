@@ -905,7 +905,7 @@ func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 		{"area of Delhi", false},                     // decoded as CityArgs
 		{"city must be one of Tokyo or Delhi", true}, // checked before it ran
 		{`no tool named "weather"`, true},            // and says what does exist
-		{"without anything to run it", true},         // ToolFor, no handler
+		{"without anything to run it", true},         // a definition offered without a handler
 	} {
 		if results[i].IsError != want.isError {
 			t.Errorf("result %d IsError = %v, want %v (%q)", i, results[i].IsError, want.isError, results[i].Content)

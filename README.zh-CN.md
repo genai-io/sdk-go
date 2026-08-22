@@ -185,17 +185,19 @@ search := ai.ToolFunc("search", "搜索文档，返回匹配的段落。",
 	})
 ```
 
-用它跑一段对话是一次调用：
+模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环；`history` 是整段对话——调用、结果、答案都在里面——所以追问直接从它接着走：
 
 ```go
 response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)},
-	[]ai.Tool{search, fetch})
+	[]ai.Message{ai.UserMessage(question)}, []ai.Tool{search, fetch})
+
+response, history, err = client.Run(ctx,
+	append(history, ai.UserMessage(next)), tools)
 ```
 
-### 模型实际收到的东西
+### 模型收到的东西
 
-`Parameters` 就是一个普通的 JSON Schema 对象，**里面每一个字都是 prompt 文本**。`jsonschema.For` 从类型推导一份，所以它不会跟它所描述的那些字段漂移——**标签的 key 就是它要设的那个 JSON Schema 关键字**，没有另一套语法要学：
+schema 从 `SearchArgs` 推导，**里面每一个字都是 prompt 文本**。标签的 key 就是它要设的那个 JSON Schema 关键字，没有另一套语法要学：
 
 ```json
 {
@@ -209,56 +211,24 @@ response, history, err := client.Run(ctx,
 }
 ```
 
-**每个参数都写上描述。**不写也能跑，但模型就只能从字段名去猜这个参数是什么；答案只有固定几种的字段更该直接说出来——`enum:"a|b|c"`——而不是指望它。
+**每个参数都写上描述**，答案只有固定几种的用 `enum:"a|b|c"` 说出来——不写描述，模型就只能从字段名猜这个参数是什么。`omitempty` 才是"可选"的开关；不管可选与否，所有字段都进 `required`、对象都是封闭的，因为各家的 strict 模式就是这么要求的。
 
-`omitempty` 才是"可选"的开关：`limit` 以 `["integer","null"]` 发出去、可以回 null，`query` 不行。不管可选与否，所有字段都进 `required`、对象都是封闭的——因为各家的 strict 模式就是这么要求的。
-
-**`SearchArgs` 只写了一次**，两半都从它来：发给模型的 schema、参数解码进去的那个 struct。它们不可能各说各话——而"schema 从一个类型来、解码进另一个类型"正是会悄悄放过这种事的写法。参数在你的函数被调用之前，先按这份 schema 校验过。
-
-`ToolFunc` 返回的就是一个普通 `ai.Tool`，所以措辞值得一个字一个字调的时候，覆盖推导出来的 schema 就是一次赋值：
-
-```go
-search.Parameters = handWritten
-```
-
-工具的依赖就是**函数闭包里的东西**——数据库连接、HTTP client——这是 Go 的常规做法，不需要本包提供任何东西。它们不在 struct 上，所以永远不可能被描述给模型、也不可能被它填。
-
-这里没有任何东西"是 Tool 但又不是 Tool"：`Schema` 返回的就是发给模型的那个 `ai.Tool`，所以一个到运行时才知道形状的工具，就是**直接写出那个值并给它设上 `Run`**：
-
-```go
-ai.Tool{
-	Name:        "echo",
-	Description: "repeats what it is given",
-	Parameters:  schemaFromConfig,
-	Run: func(ctx context.Context, arguments string) (string, error) { … },
-}
-```
-
-模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，而**它在每个应用里都一模一样**：
-
-```go
-response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)},
-	[]ai.Tool{search, fetch})
-
-fmt.Println(response.Text())
-```
-
-`history` 是整段对话——调用、结果、答案都在里面——所以追问直接从它接着走：
-
-```go
-response, history, err = client.Run(ctx,
-	append(history, ai.UserMessage(next)), tools)
-```
-
-`Run` 在执行任何东西**之前**，先拿那个工具自己的 schema 校验参数——**这样模型的错误会以"它能改对的形式"回到它那里**，而不是变成你的工具拿着一个缺失字段做出的任何事。它遇到的任何问题都不会作为 error 返回——未知的工具名、参数不对、工具自己失败了——因为这些都不值得让一整段对话结束。每一个都作为 `IsError` 的结果回到模型那里，它看得到，也能据此重试：
+**`SearchArgs` 只写了一次**，所以发出去的 schema 和参数解码进去的 struct 不可能各说各话。参数在你的函数被调用之前先按它校验过，于是**模型的错误会变成它能自己改正的东西**，而不是变成"你的工具拿着一个缺字段的输入去干活"。一个坏调用能踩到的所有情况——工具名不存在、参数不对、工具自己失败——都不会作为 error 返回，因为它们都不值得终止一整段对话。每一个都作为 `IsError` 结果回给模型，它看得见、会重试：
 
 ```
 ✗ weather → no tool named "weather"; the tools available are search and fetch
 ✗ search  → arguments for search: limit must be at most 20
 ```
 
-**当"轮次"本身是你要管的事情时**——想边到达边流式输出、想在某个条件上停下、想给每一轮记账——再自己写循环：
+### 常规之外
+
+`ToolFunc` 返回的就是一个普通 `ai.Tool`，所以手写 schema 是一次赋值——`search.Parameters = handWritten`——而一个到运行时才知道形状的工具，就是**直接写出那个值并给它设上 `Run`**：
+
+```go
+ai.Tool{Name: "echo", Parameters: schemaFromConfig, Run: func(ctx context.Context, arguments string) (string, error) { … }}
+```
+
+轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），自己写这个循环：
 
 ```go
 for range maxTurns {
@@ -276,11 +246,9 @@ for range maxTurns {
 }
 ```
 
-有两条规则不该让你自己去踩出来。**每次调用都必须在紧接着的那一轮里被应答**，否则下一个请求会被拒。以及**用 `response.Message()`，不要用 `ai.AssistantMessage(response.Text())`**——前者把模型的思考和 reasoning 状态带进下一轮，后者会丢掉它，推理模型就得每轮从头想起。
+里面有两条规则不该由你去踩坑发现。**每个调用都必须在紧接着的那一轮里被回答**，否则下一次请求会被拒。以及**用 `response.Message()`，不要用 `ai.AssistantMessage(response.Text())`**——前者把模型的 thinking 和 reasoning 状态带到下一轮，后者会丢掉，推理模型于是每轮从头想。
 
-想自己分发的话用 `ai.ToolFor[T](name, description)`，它是同样的定义、只是不带 handler。
-
-[`examples/tools`](examples/tools) 是这一整套，可以直接跑。
+[`examples/tools`](examples/tools) 就是这一整节，可以直接跑。
 
 ## 描述字段
 

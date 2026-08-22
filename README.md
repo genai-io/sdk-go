@@ -200,8 +200,8 @@ called.
 
 ## Tool use
 
-A tool is a name, a description, and a function. The struct holds exactly what
-the model may send.
+A tool is a name, a description, and a function. The struct is exactly what the
+model may send.
 
 ```go
 type SearchArgs struct {
@@ -215,20 +215,23 @@ search := ai.ToolFunc("search", "Search the documentation and return matching pa
 	})
 ```
 
-Running a conversation with it is one call:
+The model does not run your tools: it asks you to, you answer, and it
+continues. `Run` is that loop, and `history` is the whole conversation — the
+calls, their results, the answer — so a follow-up continues from it:
 
 ```go
 response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)},
-	[]ai.Tool{search, fetch})
+	[]ai.Message{ai.UserMessage(question)}, []ai.Tool{search, fetch})
+
+response, history, err = client.Run(ctx,
+	append(history, ai.UserMessage(next)), tools)
 ```
 
-### What the model is actually sent
+### What the model is sent
 
-`Parameters` is an ordinary JSON Schema object, and every word in it is prompt
-text. `jsonschema.For` derives one from the type, so it cannot drift away from
-the fields it describes — the tag key is the JSON Schema keyword it sets, so
-there is no grammar to learn:
+The schema is derived from `SearchArgs`, and every word of it is prompt text.
+The tag key is the JSON Schema keyword it sets, so there is no grammar to
+learn:
 
 ```json
 {
@@ -242,75 +245,34 @@ there is no grammar to learn:
 }
 ```
 
-Describe every parameter. A field with no `description` still works, but the
-model is left inferring the argument from the name alone, and the one with a
-fixed set of answers should say so — `enum:"a|b|c"` — rather than hope.
-
-`omitempty` is what makes a field optional: `limit` is sent as
-`["integer","null"]` and may come back null, while `query` cannot. Everything
+Describe every parameter, and use `enum:"a|b|c"` where a field has a fixed set
+of answers — a field with no description leaves the model inferring the
+argument from its name. `omitempty` is what makes a field optional; everything
 is in `required` and the object is closed regardless, because that is what a
 provider's strict mode demands.
 
-`SearchArgs` is named once, and both halves come from it — the schema the model
-is sent and the struct its arguments decode into. They cannot come to describe
-different things, which is what a schema built from one type and a decode into
-another quietly permits. Arguments are checked against that schema before your
-function is called.
-
-`ToolFunc` returns an ordinary `ai.Tool`, so overriding the derived schema is
-an assignment when the wording is worth tuning word by word:
-
-```go
-search.Parameters = handWritten
-```
-
-A tool's dependencies are whatever the function closes over — a database
-handle, an HTTP client — which is the ordinary Go answer and needs nothing from
-this package. They are not on the struct, so they can never be described to the
-model or filled in by it.
-
-Nothing here is a Tool without being one: `Schema` returns the same `ai.Tool`
-the model is sent, so a tool whose shape is not known until run time is that
-value written directly, with `Run` set on it:
-
-```go
-ai.Tool{
-	Name:        "echo",
-	Description: "repeats what it is given",
-	Parameters:  schemaFromConfig,
-	Run: func(ctx context.Context, arguments string) (string, error) { … },
-}
-```
-
-The model does not run your tools: it asks you to, you answer, and it
-continues. `Run` is that loop, and it is the same loop in every application:
-
-```go
-response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)},
-	[]ai.Tool{search, fetch})
-
-fmt.Println(response.Text())
-```
-
-`history` is the whole conversation — the calls, their results, the answer — so
-a follow-up continues from it:
-
-```go
-response, history, err = client.Run(ctx,
-	append(history, ai.UserMessage(next)), tools)
-```
-
-`Run` checks each call's arguments against that tool's own schema before
-running anything, so a model's mistake comes back as something it can correct
-rather than as whatever your tool does with a missing field. Nothing it can hit
-is returned as an error — an unknown tool name, bad arguments, a tool that
-failed — because none of those are worth ending a conversation over. Each comes
-back to the model as a result marked `IsError`, which it sees and retries:
+`SearchArgs` is named once, so the schema that goes out and the struct the
+arguments decode into cannot come to describe different things. Arguments are
+checked against it before your function is called, so a model's mistake comes
+back as something it can correct rather than as whatever your tool does with a
+missing field. Nothing a bad call can hit is returned as an error — an unknown
+name, bad arguments, a tool that failed — because none of those are worth
+ending a conversation over. Each goes back to the model as a result marked
+`IsError`, which it sees and retries:
 
 ```
 ✗ weather → no tool named "weather"; the tools available are search and fetch
 ✗ search  → arguments for search: limit must be at most 20
+```
+
+### Beyond the common case
+
+`ToolFunc` returns an ordinary `ai.Tool`, so a hand-written schema is an
+assignment — `search.Parameters = handWritten` — and a tool whose shape is not
+known until run time is that value written directly, with `Run` set on it:
+
+```go
+ai.Tool{Name: "echo", Parameters: schemaFromConfig, Run: func(ctx context.Context, arguments string) (string, error) { … }}
 ```
 
 Write the loop yourself when the turns are your business — to stream text as it
@@ -332,14 +294,11 @@ for range maxTurns {
 }
 ```
 
-Two rules are not yours to discover. Every call must be answered in the turn
-that *immediately* follows, or the next request is rejected. And append
+Two rules there are not yours to discover. Every call must be answered in the
+turn that *immediately* follows, or the next request is rejected. And append
 `response.Message()` rather than `ai.AssistantMessage(response.Text())` — the
 first carries the model's thinking and reasoning state forward, the second
 drops it and a reasoning model starts over every turn.
-
-Use `ai.ToolFor[T](name, description)` for a tool you dispatch yourself; it is
-the same definition without the handler.
 
 [`examples/tools`](examples/tools) is the whole of this, runnable.
 

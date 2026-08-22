@@ -200,31 +200,36 @@ called.
 
 ## Tool use
 
-A tool is a Go function. Its parameters come from the function's own argument
-type, so the schema the model is told about, the struct the arguments decode
-into, and the code that runs them are written once, together:
+A tool is a Go type and a Go function. The type carries everything the model is
+told — the arguments, what each one means, the tool's own name and purpose —
+and the function is what answers it:
 
 ```go
-type SearchArgs struct {
+type Search struct {
 	Query string `json:"query" description:"what to look for"`
 	Limit int    `json:"limit,omitempty" description:"how many results" maximum:"20"`
 }
 
-func search(ctx context.Context, args SearchArgs) (string, error) {
+func (Search) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
+}
+
+func search(ctx context.Context, args Search) (string, error) {
 	return index.Query(ctx, args.Query, args.Limit)
 }
 
-tools := []ai.Tool{
-	ai.Handle("search", "Search the knowledge base.", search),
-	ai.Handle("fetch", "Fetch one document by ID.", fetch),
-}
+tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
 ```
 
-`SearchArgs` is never named at the call site — `ai.Handle` takes it from
-`search`'s own parameter. That matters once there is a second tool: the model
-tells you which one it meant by name only, so a hand-written `switch call.Name`
-has to remember which argument type belongs to which string, and renaming one
-still compiles.
+Nothing is repeated at the registration site: `ai.Handle` takes the type from
+`search`'s own parameter, and everything else from the type. So the name the
+model calls sits next to the fields it will fill in, and a rename cannot leave
+them disagreeing — which is what a `switch call.Name` with a matching
+`ai.UnmarshalArgs[T]` in each arm quietly allows.
+
+The handler stays an ordinary function rather than a method, so it can close
+over an index, a database, a client — none of which belongs in a struct the
+model fills in.
 
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and it is the same loop in every application:

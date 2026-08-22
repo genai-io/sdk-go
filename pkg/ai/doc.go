@@ -68,11 +68,12 @@
 //
 // # Tools
 //
-// A tool is a Go function. Its parameters come from the function's own
-// argument type, so the schema, the decode and the code that runs it agree by
-// construction, and Run holds the conversation to the end:
+// A tool is a Go type and a Go function. The type carries everything the model
+// is told — the arguments, their descriptions, and the tool's own name and
+// purpose through a Tool method — and the function answers it. Nothing is
+// repeated at the registration site, and Run holds the conversation to the end:
 //
-//	tools := []ai.Tool{ai.Handle("search", "Search the docs.", search)}
+//	tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
 //	response, history, err := client.Run(ctx, messages, ai.WithTools(tools...))
 //
 // Write the loop with Complete and RunTools instead when the turns are your

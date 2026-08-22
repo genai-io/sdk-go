@@ -179,17 +179,15 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 // A tool offered, called, answered, and replayed — the shape of every turn a
 // tool-using application sends after its first.
 func TestToolsRoundTrip(t *testing.T) {
-	type SearchArgs struct {
-		Query string `json:"query" description:"what to look for"`
-	}
-	tool := ai.ToolFor[SearchArgs]("search", "search the web")
+	tool := ai.ToolFor[SearchArgs]()
 
 	e := sse(t, true,
 		[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{"input_tokens":10}}}`},
 		[2]string{"content_block_start", `{"type":"content_block_start","index":0,` +
 			`"content_block":{"type":"tool_use","id":"call_1","name":"search","input":{}}}`},
 		[2]string{"content_block_delta", `{"type":"content_block_delta","index":0,` +
-			`"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"go\"}"}}`},
+			`"delta":{"type":"input_json_delta","partial_json":` +
+			`"{\"query\":\"go\",\"priority\":\"low\",\"limit\":5}"}}`},
 		[2]string{"content_block_stop", `{"type":"content_block_stop","index":0}`},
 		[2]string{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`},
 	)
@@ -842,12 +840,7 @@ func sortedKeys(m map[string]any) []string {
 // The checker exists for one job: turn a model's mistake into a sentence the
 // model can act on. These are the mistakes models actually make.
 func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
-	type Args struct {
-		Query    string `json:"query" description:"what to look for"`
-		Priority string `json:"priority" enum:"low|medium|high"`
-		Limit    int    `json:"limit" minimum:"1" maximum:"50"`
-	}
-	tool := ai.ToolFor[Args]("search", "search the knowledge base")
+	tool := ai.ToolFor[SearchArgs]()
 
 	for name, tc := range map[string]struct{ input, want string }{
 		"a missing field": {
@@ -888,21 +881,14 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 // function that receives it, and RunTools dispatches on the name — so the two
 // cannot disagree.
 func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
-	type CityArgs struct {
-		City string `json:"city" enum:"Tokyo|Delhi"`
-	}
-	type YearArgs struct {
-		Year int `json:"year" minimum:"2000" maximum:"2020"`
-	}
-
 	tools := []ai.Tool{
-		ai.Handle("area", "area of a city", func(_ context.Context, a CityArgs) (string, error) {
+		ai.Handle(func(_ context.Context, a AreaArgs) (string, error) {
 			return "area of " + a.City, nil
 		}),
-		ai.Handle("census", "population in a year", func(_ context.Context, a YearArgs) (string, error) {
+		ai.Handle(func(_ context.Context, a CensusArgs) (string, error) {
 			return fmt.Sprintf("census %d", a.Year), nil
 		}),
-		ai.ToolFor[CityArgs]("unhandled", "offered without a handler"),
+		ai.ToolFor[UnhandledArgs](),
 	}
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
@@ -949,10 +935,6 @@ func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 // model stops asking, hands back the whole conversation so the next question
 // continues from it, and answers a bad call rather than failing the turn.
 func TestRunHoldsTheWholeConversation(t *testing.T) {
-	type CityArgs struct {
-		City string `json:"city" enum:"Tokyo|Delhi"`
-	}
-
 	turn := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		turn++
@@ -971,11 +953,10 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var ran []string
-	tools := []ai.Tool{ai.Handle("area", "area of a city",
-		func(_ context.Context, a CityArgs) (string, error) {
-			ran = append(ran, a.City)
-			return "1484 km²", nil
-		})}
+	tools := []ai.Tool{ai.Handle(func(_ context.Context, a AreaArgs) (string, error) {
+		ran = append(ran, a.City)
+		return "1484 km²", nil
+	})}
 
 	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
 	response, history, err := client.Run(context.Background(),
@@ -1010,4 +991,36 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 	if history[3].Role != ai.RoleAssistant || history[3].Text() != response.Text() {
 		t.Errorf("the last message is %+v, want the model's answer", history[3])
 	}
+}
+
+// Argument types for the tool tests. Everything the model is told about a tool
+// lives on its type: the fields, their descriptions, and the name and purpose.
+type (
+	SearchArgs struct {
+		Query    string `json:"query" description:"what to look for"`
+		Priority string `json:"priority" enum:"low|medium|high"`
+		Limit    int    `json:"limit" description:"how many results" minimum:"1" maximum:"50"`
+	}
+	AreaArgs struct {
+		City string `json:"city" enum:"Tokyo|Delhi"`
+	}
+	CensusArgs struct {
+		Year int `json:"year" minimum:"2000" maximum:"2020"`
+	}
+	UnhandledArgs struct {
+		City string `json:"city" enum:"Tokyo|Delhi"`
+	}
+)
+
+func (SearchArgs) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "search", Description: "search the knowledge base"}
+}
+func (AreaArgs) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "area", Description: "area of a city"}
+}
+func (CensusArgs) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "census", Description: "population in a year"}
+}
+func (UnhandledArgs) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "unhandled", Description: "offered without a handler"}
 }

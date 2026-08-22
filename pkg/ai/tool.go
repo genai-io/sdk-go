@@ -26,17 +26,53 @@ type Tool struct {
 	run func(ctx context.Context, arguments string) (string, error)
 }
 
-// ToolFor builds a tool whose parameters are derived from a Go type, so the
-// schema the model sees and the struct the arguments decode into cannot drift
-// apart.
+// ToolInfo is what a model is told about a tool besides its arguments: the
+// name it calls, and what the tool is for.
+type ToolInfo struct {
+	// Name is what the model puts in ToolCall.Name. It has to be stable —
+	// renaming it mid-conversation orphans the calls already in the history.
+	Name string
+	// Description is prompt text. It is the model's only guide to when this
+	// tool applies rather than the one next to it.
+	Description string
+}
+
+// ToolDescriber is implemented by a tool's argument type, and is what keeps a
+// tool from being three things in three places.
+//
+// The type already carries the arguments and their descriptions. Making it
+// carry the name and the purpose too means everything the model is told about
+// the tool is in one declaration, and the string the model calls sits next to
+// the fields it will fill in:
+//
+//	type Search struct {
+//		Query string `json:"query" description:"what to look for"`
+//		Limit int    `json:"limit,omitempty" description:"how many" maximum:"20"`
+//	}
+//
+//	func (Search) Tool() ai.ToolInfo {
+//		return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
+//	}
+type ToolDescriber interface {
+	Tool() ToolInfo
+}
+
+// ToolFor builds a tool from its argument type: the schema from the fields,
+// the name and purpose from the type's own Tool method.
 //
 // It defines the tool without saying what runs it, which leaves you to match
 // call.Name back to the right argument type yourself. Handle does both at once
 // and is what most callers want.
-func ToolFor[T any](name, description string) Tool {
+func ToolFor[T ToolDescriber]() Tool {
+	var zero T
+	info := zero.Tool()
+	if info.Name == "" {
+		panic(fmt.Sprintf("ai: %T returns a ToolInfo with no Name; "+
+			"that is the string the model calls", zero))
+	}
 	return Tool{
-		Name:        name,
-		Description: description,
+		Name:        info.Name,
+		Description: info.Description,
 		Parameters:  jsonschema.For[T](),
 	}
 }
@@ -135,25 +171,28 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 
 // Handle builds a tool that knows how to run itself.
 //
-// The argument type is inferred from run, so it is stated once — as run's own
-// parameter — and the schema, the decode and the call cannot disagree:
+// Everything is taken from the argument type — its fields become the schema,
+// its Tool method gives the name and the purpose — and the type itself is
+// taken from run's own parameter. So nothing about the tool is repeated at the
+// call site, and nothing can disagree:
 //
-//	func population(ctx context.Context, args PopulationArgs) (string, error) {
-//		return fmt.Sprintf("%.1f million", census[args.City][args.Year]), nil
+//	func search(ctx context.Context, args Search) (string, error) {
+//		return index.Query(ctx, args.Query, args.Limit)
 //	}
 //
-//	tools := []ai.Tool{
-//		ai.Handle("population", "Population of a city, in millions.", population),
-//		ai.Handle("area", "Area of a city, in square kilometres.", area),
-//	}
+//	tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
+//
+// run stays an ordinary function rather than a method on the type, so it can
+// close over whatever it needs — an index, a database, a client — none of
+// which belongs in a struct the model fills in.
 //
 // RunTools is what dispatches to it. A tool built with ToolFor instead is
 // offered to the model exactly the same way; it simply has nothing to run, and
 // RunTools says so rather than guessing.
-func Handle[T any](name, description string, run func(context.Context, T) (string, error)) Tool {
-	tool := ToolFor[T](name, description)
+func Handle[T ToolDescriber](run func(context.Context, T) (string, error)) Tool {
+	tool := ToolFor[T]()
 	tool.run = func(ctx context.Context, arguments string) (string, error) {
-		args, err := UnmarshalArgs[T](ToolCall{Name: name, Input: arguments})
+		args, err := UnmarshalArgs[T](ToolCall{Name: tool.Name, Input: arguments})
 		if err != nil {
 			return "", err
 		}

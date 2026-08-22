@@ -171,25 +171,28 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-一个工具就是一个 Go 函数。它的参数来自函数自己的参数类型——**模型看到的 schema、参数解码进去的结构体、以及执行它的代码，只写一次，写在一起**：
+一个工具是**一个 Go 类型加一个 Go 函数**。类型承载模型被告知的一切——参数、每个参数的含义、工具自己的名字和用途——函数负责回答它：
 
 ```go
-type SearchArgs struct {
+type Search struct {
 	Query string `json:"query" description:"要找什么"`
 	Limit int    `json:"limit,omitempty" description:"要几条结果" maximum:"20"`
 }
 
-func search(ctx context.Context, args SearchArgs) (string, error) {
+func (Search) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "search", Description: "搜索知识库。"}
+}
+
+func search(ctx context.Context, args Search) (string, error) {
 	return index.Query(ctx, args.Query, args.Limit)
 }
 
-tools := []ai.Tool{
-	ai.Handle("search", "搜索知识库。", search),
-	ai.Handle("fetch", "按 ID 取一篇文档。", fetch),
-}
+tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
 ```
 
-`SearchArgs` 在调用处**一次都没出现**——`ai.Handle` 从 `search` 自己的参数里取。这一点在有第二个工具之后才显出价值：模型只用**名字**告诉你它想调哪个，所以手写的 `switch call.Name` 必须自己记住哪个字符串对应哪个参数类型，而改错一个名字**照样能编译**。
+**注册处什么都不重复**：`ai.Handle` 从 `search` 自己的参数里取类型，其余一切从类型上取。于是**模型要调用的那个名字，就挨着它将要填写的那些字段**，改名不可能让两者对不上——而 `switch call.Name` 配上每个分支里的 `ai.UnmarshalArgs[T]`，恰恰是允许对不上的写法。
+
+handler 保持为普通函数而不是方法，这样它可以闭包捕获索引、数据库、客户端——**这些东西都不该出现在一个由模型填写的结构体里**。
 
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，而**它在每个应用里都一模一样**：
 

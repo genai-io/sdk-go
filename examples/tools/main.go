@@ -45,18 +45,29 @@ import (
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
 
-// Each Args type is both a tool's schema and the struct its arguments decode
-// into. The tags are what the model reads: a field name alone does not say
-// that "city" means one of a fixed few, and enum does.
-type (
-	PopulationArgs struct {
-		City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
-		Year int    `json:"year" description:"census year" enum:"2000|2010|2020"`
+// A type per tool, carrying everything the model is told about it: the
+// arguments as fields, what each one means as tags, and the name and purpose
+// as its Tool method. The tags matter — a field name alone does not say that
+// "city" means one of a fixed few, and enum does.
+type Population struct {
+	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
+	Year int    `json:"year" description:"census year" enum:"2000|2010|2020"`
+}
+
+func (Population) Tool() ai.ToolInfo {
+	return ai.ToolInfo{
+		Name:        "population",
+		Description: "Population of a city in millions, for one census year.",
 	}
-	AreaArgs struct {
-		City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
-	}
-)
+}
+
+type Area struct {
+	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
+}
+
+func (Area) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "area", Description: "Area of a city in square kilometres."}
+}
 
 // The whole of the tools' world, so the example needs no network beyond the
 // model itself and always gives the same answer.
@@ -72,13 +83,13 @@ var (
 	}
 )
 
-func population(_ context.Context, args PopulationArgs) (string, error) {
+func population(_ context.Context, args Population) (string, error) {
 	millions := census[args.City][args.Year]
 	fmt.Printf("  \033[2m→ population(%s, %d) = %.1fM\033[0m\n", args.City, args.Year, millions)
 	return fmt.Sprintf("%.1f million", millions), nil
 }
 
-func area(_ context.Context, args AreaArgs) (string, error) {
+func area(_ context.Context, args Area) (string, error) {
 	km2 := areaKm2[args.City]
 	fmt.Printf("  \033[2m→ area(%s) = %d km²\033[0m\n", args.City, km2)
 	return fmt.Sprintf("%d square kilometres", km2), nil
@@ -104,13 +115,10 @@ func run(ref, question string) error {
 		return err
 	}
 
-	// A tool is its name, what it is for, and the function that answers it.
-	// The argument type is never written here — it comes from each function's
-	// own parameter, which is the only place it appears.
-	tools := []ai.Tool{
-		ai.Handle("population", "Population of a city in millions, for one census year.", population),
-		ai.Handle("area", "Area of a city in square kilometres.", area),
-	}
+	// Nothing about a tool is repeated here. The name, the purpose, the
+	// arguments and their descriptions are all on the type; the type comes
+	// from the function's own parameter.
+	tools := []ai.Tool{ai.Handle(population), ai.Handle(area)}
 
 	// Run is the loop: complete, answer whatever the model asked for, repeat
 	// until it stops asking. history is the whole conversation, so a follow-up

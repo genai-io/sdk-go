@@ -119,18 +119,13 @@ func run(ref, question string) error {
 		return err
 	}
 
-	// One line per tool, and everything about it is on its own type. What is
-	// passed here is the tool's dependencies; the model fills in the rest.
-	tools := []ai.Tool{
-		ai.ToolOf(Population{census: census}),
-		ai.ToolOf(Area{km2: areaKm2}),
-	}
-
 	// Run is the loop: complete, answer whatever the model asked for, repeat
-	// until it stops asking. history is the whole conversation, so a follow-up
-	// question continues from it.
+	// until it stops asking. What is passed to ai.Tools is each tool's
+	// dependencies; the model fills in the rest. history is the whole
+	// conversation, so a follow-up question continues from it.
 	response, history, err := client.Run(context.Background(),
-		[]ai.Message{ai.UserMessage(question)}, ai.WithTools(tools...))
+		[]ai.Message{ai.UserMessage(question)},
+		ai.Tools(Population{census: census}, Area{km2: areaKm2}))
 	if err != nil {
 		return err
 	}

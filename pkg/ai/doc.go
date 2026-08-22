@@ -74,8 +74,8 @@
 // fields and are never described to the model. Run holds the conversation to
 // the end:
 //
-//	tools := []ai.Tool{ai.ToolOf(Search{index: idx})}
-//	response, history, err := client.Run(ctx, messages, ai.WithTools(tools...))
+//	response, history, err := client.Run(ctx, messages,
+//		ai.Tools(Search{index: idx}, Fetch{store: db}))
 //
 // Write the loop with Complete and RunTools instead when the turns are your
 // business — to stream, to stop on a condition, to bill each one.

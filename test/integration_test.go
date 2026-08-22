@@ -882,11 +882,8 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 // function that receives it, and RunTools dispatches on the name — so the two
 // cannot disagree.
 func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
-	tools := []ai.Tool{
-		ai.ToolOf(Area{}),
-		ai.ToolOf(Census{}),
-		{Name: "unhandled", Description: "offered without a handler"},
-	}
+	tools := append(ai.Tools(Area{}, Census{}),
+		ai.Tool{Name: "unhandled", Description: "offered without a handler"})
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
 		{ID: "1", Name: "census", Input: `{"year":2010}`},
@@ -951,11 +948,10 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 
 	var ran []string
 	ranBy := &ran
-	tools := []ai.Tool{ai.ToolOf(Area{seen: ranBy})}
 
 	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
 	response, history, err := client.Run(context.Background(),
-		[]ai.Message{ai.UserMessage("how big is Delhi?")}, ai.WithTools(tools...))
+		[]ai.Message{ai.UserMessage("how big is Delhi?")}, ai.Tools(Area{seen: ranBy}))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

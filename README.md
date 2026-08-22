@@ -217,12 +217,18 @@ func (Search) Description() string { return "Search the knowledge base." }
 func (s Search) Run(ctx context.Context) (string, error) {
 	return s.index.Query(ctx, s.Query, s.Limit)
 }
-
-tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
 ```
 
-The value you hand `ToolOf` is the tool's dependencies. Each call runs against a
-copy of it with the model's arguments decoded over the top, so what the model
+That is the whole definition. Running a conversation with it is one call:
+
+```go
+response, history, err := client.Run(ctx,
+	[]ai.Message{ai.UserMessage(question)},
+	ai.Tools(Search{index: idx}, Fetch{store: db}))
+```
+
+The values you hand `ai.Tools` are each tool's dependencies. Each call runs
+against a copy of one with the model's arguments decoded over the top, so what the model
 sends fills the exported fields and everything unexported stays as you set it —
 the same split `encoding/json` already draws, and the same one the schema draws,
 since an unexported field is never described to the model. A copy per call, so
@@ -245,16 +251,17 @@ ai.Tool{
 }
 ```
 
-`ToolOf` fills those two in from a Go type, which is what you want when you
-have one. Either way the arguments are checked against `Parameters` before
-`Run` sees them.
+`ai.Tools` fills those two in from your Go types, and `ai.ToolOf` does one at a
+time. Either way the arguments are checked against `Parameters` before `Run`
+sees them.
 
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and it is the same loop in every application:
 
 ```go
 response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)}, ai.WithTools(tools...))
+	[]ai.Message{ai.UserMessage(question)},
+	ai.Tools(Search{index: idx}, Fetch{store: db}))
 
 fmt.Println(response.Text())
 ```
@@ -264,7 +271,7 @@ a follow-up continues from it:
 
 ```go
 response, history, err = client.Run(ctx,
-	append(history, ai.UserMessage(next)), ai.WithTools(tools...))
+	append(history, ai.UserMessage(next)), tools)
 ```
 
 `Run` checks each call's arguments against that tool's own schema before

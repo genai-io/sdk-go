@@ -242,8 +242,11 @@ var marshalsAs = map[reflect.Type]map[string]any{
 // moment the tool or schema is constructed rather than mid-conversation, and
 // the alternative is worse: a schema the endpoint rejects, or one that silently
 // permits anything.
-func For[T any]() map[string]any {
-	t := reflect.TypeFor[T]()
+func For[T any]() map[string]any { return ForType(reflect.TypeFor[T]()) }
+
+// ForType is For for a type only known at run time, which is what a set of
+// tools written as different Go types arrives as.
+func ForType(t reflect.Type) map[string]any {
 	return schemaForType(t, map[reflect.Type]bool{}, t.String())
 }
 

@@ -146,24 +146,43 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 // A copy per call, so two calls in one turn cannot see each other's arguments.
 // T must be a struct rather than a pointer to one, for that reason: a pointer
 // would be shared.
-func ToolOf[T ToolRunner](prototype T) Tool {
-	if kind := reflect.TypeFor[T]().Kind(); kind != reflect.Struct {
-		panic(fmt.Sprintf("ai: ToolOf needs a struct, not %s: a copy per call is what "+
-			"keeps two calls in one turn from sharing arguments", kind))
+func ToolOf[T ToolRunner](prototype T) Tool { return toolOf(prototype) }
+
+// toolOf is ToolOf without the type parameter, so a set of tools written as
+// different Go types can be converted as one.
+func toolOf(prototype ToolRunner) Tool {
+	t := reflect.TypeOf(prototype)
+	if t == nil || t.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("ai: a tool must be a struct, not %v: a copy per call is what "+
+			"keeps two calls in one turn from sharing arguments", t))
 	}
 	tool := Tool{
-		Name:        toolName(reflect.TypeFor[T]()),
+		Name:        toolName(t),
 		Description: prototype.Description(),
-		Parameters:  jsonschema.For[T](),
+		Parameters:  jsonschema.ForType(t),
 	}
 	tool.Run = func(ctx context.Context, arguments string) (string, error) {
-		args := prototype // the dependencies; the model fills in the rest
-		if err := decodeArgs(arguments, &args); err != nil {
+		// A fresh copy of the prototype: the dependencies come from it, the
+		// model fills in the rest, and two calls cannot see each other.
+		args := reflect.New(t)
+		args.Elem().Set(reflect.ValueOf(prototype))
+		if err := decodeArgs(arguments, args.Interface()); err != nil {
 			return "", fmt.Errorf("arguments for %s: %w", tool.Name, err)
 		}
-		return args.Run(ctx)
+		return args.Elem().Interface().(ToolRunner).Run(ctx)
 	}
 	return tool
+}
+
+// Tools converts the tools you wrote into the definitions a model is sent.
+//
+//	client.Run(ctx, messages, ai.Tools(Search{index: idx}, Fetch{store: db}))
+func Tools(runners ...ToolRunner) []Tool {
+	out := make([]Tool, len(runners))
+	for i, runner := range runners {
+		out[i] = toolOf(runner)
+	}
+	return out
 }
 
 // RunTools answers every call in a turn, in order, and returns the results as
@@ -242,27 +261,27 @@ const maxToolTurns = 32
 // The loop it replaces is the same in every application — complete, run the
 // calls, append the results, repeat — so it is written here once:
 //
-//	response, history, err := client.Run(ctx, messages, ai.WithTools(tools...))
+//	response, history, err := client.Run(ctx, messages,
+//		ai.Tools(Search{index: idx}, Fetch{store: db}))
+//
 //	fmt.Println(response.Text())
 //
 // It returns the final response, and the whole conversation including every
 // turn it added, so the next question continues from where this one finished:
 //
-//	response, history, err = client.Run(ctx, append(history, ai.UserMessage(next)), ai.WithTools(tools...))
+//	response, history, err = client.Run(ctx, append(history, ai.UserMessage(next)), tools)
 //
-// Tools come from WithTools like any other setting, and a tool built with
-// ToolFor rather than Handle has nothing to run — Run says so in the result
-// rather than guessing.
+// Tools are a parameter rather than an option because a Run without them is a
+// Complete. A Tool with no Run — one defined but not implemented — is reported
+// in the result rather than guessed at.
 //
 // Write the loop yourself when the turns are your business: to stream text as
 // it arrives, to stop on a condition, to log or bill each turn, or to decide
 // per-turn whether to continue. Run stops when the model stops asking, when
 // ctx is done, or after maxToolTurns, which is a runaway guard rather than a
 // budget — cost control is Middleware's job.
-func (c *Client) Run(ctx context.Context, messages []Message, opts ...Option) (*Response, []Message, error) {
-	// The tools are resolved the same way the request resolves them, so what
-	// Run dispatches to is exactly what the model was offered.
-	tools := newRequest(c.model, nil, c.defaults, opts).Tools
+func (c *Client) Run(ctx context.Context, messages []Message, tools []Tool, opts ...Option) (*Response, []Message, error) {
+	opts = append([]Option{WithTools(tools...)}, opts...)
 
 	history := slices.Clone(messages)
 	for turn := 1; turn <= maxToolTurns; turn++ {

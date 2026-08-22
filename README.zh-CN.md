@@ -186,11 +186,17 @@ func (Search) Description() string { return "搜索知识库。" }
 func (s Search) Run(ctx context.Context) (string, error) {
 	return s.index.Query(ctx, s.Query, s.Limit)
 }
-
-tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
 ```
 
-交给 `ToolOf` 的那个值就是**这个工具的依赖**。每次调用都跑在它的一个副本上，模型的参数解码覆盖在上面——**模型发来的东西填导出字段，未导出的保持你设定的样子**。这跟 `encoding/json` 本来就画的那条线是同一条，也跟 schema 画的那条线是同一条：**未导出字段从来不会被描述给模型**。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
+这就是全部定义。用它跑一段对话是一次调用：
+
+```go
+response, history, err := client.Run(ctx,
+	[]ai.Message{ai.UserMessage(question)},
+	ai.Tools(Search{index: idx}, Fetch{store: db}))
+```
+
+交给 `ai.Tools` 的那些值就是**各个工具的依赖**。每次调用都跑在它的一个副本上，模型的参数解码覆盖在上面——**模型发来的东西填导出字段，未导出的保持你设定的样子**。这跟 `encoding/json` 本来就画的那条线是同一条，也跟 schema 画的那条线是同一条：**未导出字段从来不会被描述给模型**。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
 
 关于这个工具的任何东西**都没有写第二遍，也不在别处**：模型要调用的那个名字，挨着它将要填写的字段，也挨着读取这些字段的代码。
 
@@ -205,13 +211,14 @@ ai.Tool{
 }
 ```
 
-`ToolOf` 就是从一个 Go 类型把这两样填好——有类型的时候用它。两条路都一样：参数在 `Run` 看到它们之前，先按 `Parameters` 校验过。
+`ai.Tools` 就是从你的 Go 类型把这两样填好，`ai.ToolOf` 是一次一个。两条路都一样：参数在 `Run` 看到它们之前，先按 `Parameters` 校验过。
 
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，而**它在每个应用里都一模一样**：
 
 ```go
 response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)}, ai.WithTools(tools...))
+	[]ai.Message{ai.UserMessage(question)},
+	ai.Tools(Search{index: idx}, Fetch{store: db}))
 
 fmt.Println(response.Text())
 ```
@@ -220,7 +227,7 @@ fmt.Println(response.Text())
 
 ```go
 response, history, err = client.Run(ctx,
-	append(history, ai.UserMessage(next)), ai.WithTools(tools...))
+	append(history, ai.UserMessage(next)), tools)
 ```
 
 `Run` 在执行任何东西**之前**，先拿那个工具自己的 schema 校验参数——**这样模型的错误会以"它能改对的形式"回到它那里**，而不是变成你的工具拿着一个缺失字段做出的任何事。它遇到的任何问题都不会作为 error 返回——未知的工具名、参数不对、工具自己失败了——因为这些都不值得让一整段对话结束。每一个都作为 `IsError` 的结果回到模型那里，它看得到，也能据此重试：

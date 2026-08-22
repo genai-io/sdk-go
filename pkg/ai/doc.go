@@ -75,7 +75,7 @@
 // the end:
 //
 //	response, history, err := client.Run(ctx, messages,
-//		ai.Tools(Search{index: idx}, Fetch{store: db}))
+//		ai.Tools(Search{}, Fetch{}))
 //
 // Write the loop with Complete and RunTools instead when the turns are your
 // business — to stream, to stop on a condition, to bill each one.

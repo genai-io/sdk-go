@@ -121,35 +121,39 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 // ToolOf builds a runnable tool from a value of a type that is one.
 //
 //	type Search struct {
-//		Query string `json:"query"`
-//		Limit int    `json:"limit,omitempty"`
+//		Query string `json:"query" description:"what to look for, in plain words"`
+//		Limit int    `json:"limit,omitempty" description:"how many passages" maximum:"10"`
 //
-//		index *Index // unexported: yours, not the model's
+//		db *sql.DB // unexported: yours, not the model's
 //	}
 //
 //	func (Search) Schema() ai.Tool {
 //		return ai.Tool{
 //			Name:        "search",
-//			Description: "Search the knowledge base.",
+//			Description: "Search the documentation and return matching passages.",
 //			Parameters:  jsonschema.For[Search](),
 //		}
 //	}
 //
 //	func (s Search) Run(ctx context.Context) (string, error) {
-//		return s.index.Query(ctx, s.Query, s.Limit)
+//		return query(ctx, s.db, s.Query, s.Limit)
 //	}
 //
-//	tools := ai.Tools(Search{index: idx}, Fetch{store: db})
+//	tools := ai.Tools(Search{db: pool}, Fetch{})
 //
-// Parameters is an ordinary JSON Schema object. Derive it from the type with
-// jsonschema.For, or write it out — the model gets whatever is there, and
+// Parameters is an ordinary JSON Schema object, and every word in it is prompt
+// text — describe each parameter, and say so with enum when a field has a
+// fixed set of answers. Derive it from the type with jsonschema.For, which
+// keeps it from drifting away from the fields it describes, or write it out
+// when the wording is worth tuning. The model gets whatever is there, and
 // arguments are checked against it either way.
 //
-// The value you pass is the tool's dependencies. Each call runs against a copy
-// of it with the model's arguments decoded over the top, so what the model
-// sends fills the exported fields and everything unexported stays as you set
-// it — the same split encoding/json already draws, and the same one the schema
-// draws, since an unexported field is never described to the model.
+// The value you pass is the tool's dependencies, and a tool that needs none is
+// passed empty. Each call runs against a copy of it with the model's arguments
+// decoded over the top, so what the model sends fills the exported fields and
+// everything unexported stays as you set it — the same split encoding/json
+// already draws, and the same one the schema draws, since an unexported field
+// is never described to the model.
 //
 // A copy per call, so two calls in one turn cannot see each other's arguments.
 // T must be a struct rather than a pointer to one, for that reason: a pointer
@@ -184,7 +188,7 @@ func toolOf(prototype ToolRunner) Tool {
 
 // Tools converts the tools you wrote into the definitions a model is sent.
 //
-//	client.Run(ctx, messages, ai.Tools(Search{index: idx}, Fetch{store: db}))
+//	client.Run(ctx, messages, ai.Tools(Search{}, Fetch{}))
 func Tools(runners ...ToolRunner) []Tool {
 	out := make([]Tool, len(runners))
 	for i, runner := range runners {
@@ -270,7 +274,7 @@ const maxToolTurns = 32
 // calls, append the results, repeat — so it is written here once:
 //
 //	response, history, err := client.Run(ctx, messages,
-//		ai.Tools(Search{index: idx}, Fetch{store: db}))
+//		ai.Tools(Search{}, Fetch{}))
 //
 //	fmt.Println(response.Text())
 //

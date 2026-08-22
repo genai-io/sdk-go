@@ -4,8 +4,8 @@
 // continues — so the loop is yours to write, and the rules that make it work
 // are the ones this file exists to show:
 //
-//   - The schema comes from the Go type the arguments decode into, so the
-//     shape the model is told about cannot drift from the shape you parse.
+//   - Describe every parameter. The schema is prompt text, and a model given
+//     nothing but a field name is left guessing what to put in it.
 //   - Check the arguments before running anything. A model's mistake handed
 //     back as a tool result is something it can correct; the same mistake run
 //     is whatever your tool does with a missing field.
@@ -15,12 +15,16 @@
 //     The first carries the model's thinking and reasoning state forward; the
 //     second silently drops it and a reasoning model starts over each turn.
 //
-// A tool here is one Go type. Its fields are the arguments, its tags say what
-// each one means, and its Tool and Run methods say what it is called and what
-// it does — so the string the model calls sits next to the fields it will fill
-// in, and next to the code that reads them. Nothing has to be kept in step by
-// hand, which a switch on call.Name with a matching UnmarshalArgs in each arm
-// quietly requires.
+// A tool here is one Go type saying two things and keeping them apart: Schema
+// is what the model is told, Run is what happens when it calls. So the string
+// the model calls sits next to the fields it will fill in, and next to the code
+// that reads them. Nothing has to be kept in step by hand, which a switch on
+// call.Name with a matching UnmarshalArgs in each arm quietly requires.
+//
+// The two tools below write their schema the two available ways — one by hand,
+// one derived from the type with jsonschema.For — because that choice is real
+// and worth seeing. Both describe every parameter and both pin the cities to an
+// enum, which is why the wrong city below comes back as a correctable mistake.
 //
 // Client.Run does the middle two rules for you, and answers a bad call rather
 // than ending the conversation over it.
@@ -49,10 +53,6 @@ import (
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
 
-// A type per tool, saying two things and keeping them apart: Schema is what
-// the model is told, Run is what happens. The two below write their schema the
-// two available ways — one by hand, one derived from the type — to show that
-// the choice is yours and visible either way.
 type Population struct {
 	City string `json:"city"`
 	Year int    `json:"year"`

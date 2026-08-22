@@ -175,22 +175,22 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ```go
 type Search struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
-
-	index *Index // 未导出：你的东西，模型永远看不到
+	Query string `json:"query" description:"要找什么，用大白话"`
+	Limit int    `json:"limit,omitempty" description:"最多返回几段" maximum:"10"`
 }
 
+// 告诉模型的。
 func (Search) Schema() ai.Tool {
 	return ai.Tool{
 		Name:        "search",
-		Description: "搜索知识库。",
+		Description: "搜索文档，返回匹配的段落。",
 		Parameters:  jsonschema.For[Search](),
 	}
 }
 
+// 模型调用时发生的。
 func (s Search) Run(ctx context.Context) (string, error) {
-	return s.index.Query(ctx, s.Query, s.Limit)
+	return docs.Search(ctx, s.Query, s.Limit)
 }
 ```
 
@@ -199,12 +199,30 @@ func (s Search) Run(ctx context.Context) (string, error) {
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{index: idx}, Fetch{store: db}))
+	ai.Tools(Search{}, Fetch{}))
 ```
 
-`Parameters` 就是一个普通的 JSON Schema 对象。`jsonschema.For` 从类型推导一份——这样它不会跟它所描述的那些字段漂移；措辞值得手工调的时候就直接写出来。两条路一样：**模型拿到的就是那里写着的东西**，而参数在 `Run` 看到它们之前先按它校验过。
+### 模型实际收到的东西
 
-交给 `ai.Tools` 的那些值是**各个工具的依赖**。每次调用跑在其中一个的副本上，模型的参数解码覆盖在上面——**模型发来的填导出字段，未导出的保持你设定的样子**。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
+`Parameters` 就是一个普通的 JSON Schema 对象，**里面每一个字都是 prompt 文本**。`jsonschema.For` 从类型推导一份，所以它不会跟它所描述的那些字段漂移——**标签的 key 就是它要设的那个 JSON Schema 关键字**，没有另一套语法要学：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string", "description": "要找什么，用大白话"},
+    "limit": {"type": ["integer", "null"], "description": "最多返回几段", "maximum": 10}
+  },
+  "required": ["query", "limit"],
+  "additionalProperties": false
+}
+```
+
+**每个参数都写上描述。**不写也能跑，但模型就只能从字段名去猜这个参数是什么；答案只有固定几种的字段更该直接说出来——`enum:"a|b|c"`——而不是指望它。措辞值得一个字一个字调的时候，就直接把 schema 写出来。两条路一样：**模型拿到的就是那里写着的东西**，而参数在 `Run` 看到它们之前先按它校验过。
+
+`omitempty` 才是"可选"的开关：`limit` 以 `["integer","null"]` 发出去、可以回 null，`query` 不行。不管可选与否，所有字段都进 `required`、对象都是封闭的——因为各家的 strict 模式就是这么要求的。
+
+工具需要你自己的东西（数据库连接、HTTP client）时，放进**未导出字段**再交出去：`ai.Tools(Search{db: pool})`。每次调用跑在这个值的一个副本上，模型的参数解码覆盖在上面——**模型发来的填导出字段，未导出的保持你设定的样子**。未导出就是彻底未导出：不会被描述给模型，也不可能被它填。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
 
 这里没有任何东西"是 Tool 但又不是 Tool"：`Schema` 返回的就是发给模型的那个 `ai.Tool`，所以一个到运行时才知道形状的工具，就是**直接写出那个值并给它设上 `Run`**：
 
@@ -222,7 +240,7 @@ ai.Tool{
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{index: idx}, Fetch{store: db}))
+	ai.Tools(Search{}, Fetch{}))
 
 fmt.Println(response.Text())
 ```

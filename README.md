@@ -205,22 +205,22 @@ the model is told, verbatim. `Run` is what happens when it calls.
 
 ```go
 type Search struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
-
-	index *Index // unexported: yours, never the model's
+	Query string `json:"query" description:"what to look for, in plain words"`
+	Limit int    `json:"limit,omitempty" description:"how many passages to return" maximum:"10"`
 }
 
+// What the model is told.
 func (Search) Schema() ai.Tool {
 	return ai.Tool{
 		Name:        "search",
-		Description: "Search the knowledge base.",
+		Description: "Search the documentation and return matching passages.",
 		Parameters:  jsonschema.For[Search](),
 	}
 }
 
+// What happens when it calls.
 func (s Search) Run(ctx context.Context) (string, error) {
-	return s.index.Query(ctx, s.Query, s.Limit)
+	return docs.Search(ctx, s.Query, s.Limit)
 }
 ```
 
@@ -229,20 +229,47 @@ Running a conversation with it is one call:
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{index: idx}, Fetch{store: db}))
+	ai.Tools(Search{}, Fetch{}))
 ```
 
-`Parameters` is an ordinary JSON Schema object. `jsonschema.For` derives one
-from the type, which keeps it from drifting away from the fields it describes;
-write it out instead when the wording is worth tuning by hand. Either way the
-model gets exactly what is there, and the arguments are checked against it
-before `Run` sees them.
+### What the model is actually sent
 
-The values you hand `ai.Tools` are each tool's dependencies. Each call runs
-against a copy of one, with the model's arguments decoded over the top — so
-what the model sends fills the exported fields, and everything unexported stays
-as you set it. A copy per call, so two calls in one turn cannot see each
-other's arguments.
+`Parameters` is an ordinary JSON Schema object, and every word in it is prompt
+text. `jsonschema.For` derives one from the type, so it cannot drift away from
+the fields it describes — the tag key is the JSON Schema keyword it sets, so
+there is no grammar to learn:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string", "description": "what to look for, in plain words"},
+    "limit": {"type": ["integer", "null"], "description": "how many passages to return", "maximum": 10}
+  },
+  "required": ["query", "limit"],
+  "additionalProperties": false
+}
+```
+
+Describe every parameter. A field with no `description` still works, but the
+model is left inferring the argument from the name alone, and the one with a
+fixed set of answers should say so — `enum:"a|b|c"` — rather than hope. Write
+the schema out by hand instead when the wording is worth tuning word by word;
+the model gets exactly what is there either way, and the arguments are checked
+against it before `Run` sees them.
+
+`omitempty` is what makes a field optional: `limit` is sent as
+`["integer","null"]` and may come back null, while `query` cannot. Everything
+is in `required` and the object is closed regardless, because that is what a
+provider's strict mode demands.
+
+A tool that needs something of yours — a database handle, an HTTP client —
+puts it in an unexported field and hands it over: `ai.Tools(Search{db: pool})`.
+Each call runs against a copy of that value with the model's arguments decoded
+over the top, so what the model sends fills the exported fields and everything
+unexported stays as you set it. Unexported means unexported all the way: never
+described to the model, never fillable by it. A copy per call, so two calls in
+one turn cannot see each other's arguments.
 
 Nothing here is a Tool without being one: `Schema` returns the same `ai.Tool`
 the model is sent, so a tool whose shape is not known until run time is that
@@ -263,7 +290,7 @@ continues. `Run` is that loop, and it is the same loop in every application:
 ```go
 response, history, err := client.Run(ctx,
 	[]ai.Message{ai.UserMessage(question)},
-	ai.Tools(Search{index: idx}, Fetch{store: db}))
+	ai.Tools(Search{}, Fetch{}))
 
 fmt.Println(response.Text())
 ```

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -127,16 +128,22 @@ func (t Tool) ValidateArgs(input string) error {
 // the model's error and, sometimes, the caller's own tag typo.
 func UnmarshalArgs[T any](call ToolCall) (T, error) {
 	var out T
-	trimmed := bytes.TrimSpace([]byte(call.Input))
-	if len(trimmed) == 0 {
-		return out, nil
-	}
-	dec := json.NewDecoder(bytes.NewReader(trimmed))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&out); err != nil {
+	if err := decodeArgs(call.Input, &out); err != nil {
 		return out, fmt.Errorf("arguments for %s: %w", call.Name, err)
 	}
 	return out, nil
+}
+
+// decodeArgs writes a model's arguments over whatever the target already
+// holds, so a field the model did not send keeps the value it was given.
+func decodeArgs(arguments string, into any) error {
+	trimmed := bytes.TrimSpace([]byte(arguments))
+	if len(trimmed) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	return dec.Decode(into)
 }
 
 // FindTool returns the tool with the given name.
@@ -169,34 +176,59 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 // structured output: the name, the type and the code that runs it are written
 // once, together.
 
-// Handle builds a tool that knows how to run itself.
+// ToolRunner is a tool that is one Go type: its fields are the arguments, its
+// tags say what each one means, and its two methods say what it is called and
+// what it does.
+type ToolRunner interface {
+	ToolDescriber
+	// Run answers one call. The receiver is this tool's own value with the
+	// model's arguments filled in.
+	Run(ctx context.Context) (string, error)
+}
+
+// ToolOf builds a tool from a value of the type that implements it.
 //
-// Everything is taken from the argument type — its fields become the schema,
-// its Tool method gives the name and the purpose — and the type itself is
-// taken from run's own parameter. So nothing about the tool is repeated at the
-// call site, and nothing can disagree:
+// Everything is in one declaration — the arguments, what they mean, the name
+// the model calls, and the code that answers:
 //
-//	func search(ctx context.Context, args Search) (string, error) {
-//		return index.Query(ctx, args.Query, args.Limit)
+//	type Search struct {
+//		Query string `json:"query" description:"what to look for"`
+//		Limit int    `json:"limit,omitempty" description:"how many" maximum:"20"`
+//
+//		index *Index // unexported: yours, not the model's
 //	}
 //
-//	tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
+//	func (Search) Tool() ai.ToolInfo {
+//		return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
+//	}
 //
-// run stays an ordinary function rather than a method on the type, so it can
-// close over whatever it needs — an index, a database, a client — none of
-// which belongs in a struct the model fills in.
+//	func (s Search) Run(ctx context.Context) (string, error) {
+//		return s.index.Query(ctx, s.Query, s.Limit)
+//	}
 //
-// RunTools is what dispatches to it. A tool built with ToolFor instead is
-// offered to the model exactly the same way; it simply has nothing to run, and
-// RunTools says so rather than guessing.
-func Handle[T ToolDescriber](run func(context.Context, T) (string, error)) Tool {
+//	tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
+//
+// The value you pass is the tool's dependencies. Each call runs against a copy
+// of it with the model's arguments decoded over the top, so what the model
+// sends fills the exported fields and everything unexported stays as you set
+// it — the same split encoding/json already draws, and the same one the schema
+// draws, since an unexported field is never described to the model.
+//
+// A copy per call, so two calls in one turn cannot see each other's arguments.
+// T must be a struct rather than a pointer to one, for that reason: a pointer
+// would be shared.
+func ToolOf[T ToolRunner](prototype T) Tool {
+	if kind := reflect.TypeFor[T]().Kind(); kind != reflect.Struct {
+		panic(fmt.Sprintf("ai: ToolOf needs a struct, not %s: a copy per call is what "+
+			"keeps two calls in one turn from sharing arguments", kind))
+	}
 	tool := ToolFor[T]()
 	tool.run = func(ctx context.Context, arguments string) (string, error) {
-		args, err := UnmarshalArgs[T](ToolCall{Name: tool.Name, Input: arguments})
-		if err != nil {
-			return "", err
+		args := prototype // the dependencies; the model fills in the rest
+		if err := decodeArgs(arguments, &args); err != nil {
+			return "", fmt.Errorf("arguments for %s: %w", tool.Name, err)
 		}
-		return run(ctx, args)
+		return args.Run(ctx)
 	}
 	return tool
 }

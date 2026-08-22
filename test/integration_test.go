@@ -882,12 +882,8 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 // cannot disagree.
 func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 	tools := []ai.Tool{
-		ai.Handle(func(_ context.Context, a AreaArgs) (string, error) {
-			return "area of " + a.City, nil
-		}),
-		ai.Handle(func(_ context.Context, a CensusArgs) (string, error) {
-			return fmt.Sprintf("census %d", a.Year), nil
-		}),
+		ai.ToolOf(AreaArgs{}),
+		ai.ToolOf(CensusArgs{}),
 		ai.ToolFor[UnhandledArgs](),
 	}
 
@@ -953,10 +949,8 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var ran []string
-	tools := []ai.Tool{ai.Handle(func(_ context.Context, a AreaArgs) (string, error) {
-		ran = append(ran, a.City)
-		return "1484 km²", nil
-	})}
+	ranBy := &ran
+	tools := []ai.Tool{ai.ToolOf(AreaArgs{seen: ranBy})}
 
 	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
 	response, history, err := client.Run(context.Background(),
@@ -1003,6 +997,8 @@ type (
 	}
 	AreaArgs struct {
 		City string `json:"city" enum:"Tokyo|Delhi"`
+
+		seen *[]string // unexported: never described to the model
 	}
 	CensusArgs struct {
 		Year int `json:"year" minimum:"2000" maximum:"2020"`
@@ -1023,4 +1019,56 @@ func (CensusArgs) Tool() ai.ToolInfo {
 }
 func (UnhandledArgs) Tool() ai.ToolInfo {
 	return ai.ToolInfo{Name: "unhandled", Description: "offered without a handler"}
+}
+
+func (a AreaArgs) Run(context.Context) (string, error) {
+	if a.seen != nil {
+		*a.seen = append(*a.seen, a.City)
+	}
+	return "area of " + a.City, nil
+}
+
+func (c CensusArgs) Run(context.Context) (string, error) {
+	return fmt.Sprintf("census %d", c.Year), nil
+}
+
+// The value handed to ToolOf is the tool's dependencies, and each call runs
+// against a copy of it: what the model sends fills the exported fields, what
+// you set stays, and two calls in one turn cannot see each other's arguments.
+func TestToolOfCopiesItsPrototypePerCall(t *testing.T) {
+	tools := []ai.Tool{ai.ToolOf(Recorder{log: &[]string{}, prefix: "dep"})}
+
+	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
+		{ID: "1", Name: "recorder", Input: `{"note":"first"}`},
+		{ID: "2", Name: "recorder", Input: `{"note":"second"}`},
+	})
+
+	// The unexported dependency reached both calls...
+	for i, want := range []string{"dep:first", "dep:second"} {
+		if results[i].Content != want {
+			t.Errorf("result %d = %q, want %q", i, results[i].Content, want)
+		}
+	}
+	// ...and neither call saw the other's arguments.
+	if results[0].Content == results[1].Content {
+		t.Error("the two calls shared a value")
+	}
+}
+
+type Recorder struct {
+	Note string `json:"note" description:"anything"`
+
+	log    *[]string
+	prefix string
+}
+
+func (Recorder) Tool() ai.ToolInfo {
+	return ai.ToolInfo{Name: "recorder", Description: "records a note"}
+}
+
+func (r Recorder) Run(context.Context) (string, error) {
+	if r.prefix == "" {
+		return "", fmt.Errorf("the prototype's dependency did not survive the copy")
+	}
+	return r.prefix + ":" + r.Note, nil
 }

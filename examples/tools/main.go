@@ -15,12 +15,15 @@
 //     The first carries the model's thinking and reasoning state forward; the
 //     second silently drops it and a reasoning model starts over each turn.
 //
-// ai.Handle and ai.RunTools do the middle two, and close a join that a
-// hand-written dispatch leaves open. With more than one tool, only call.Name
-// says which was meant, so a switch on it has to remember which argument type
-// goes with which string — rename one and it still compiles. Handle takes the
-// type from the function that receives it, so the name, the type and the code
-// are written once, together.
+// A tool here is one Go type. Its fields are the arguments, its tags say what
+// each one means, and its Tool and Run methods say what it is called and what
+// it does — so the string the model calls sits next to the fields it will fill
+// in, and next to the code that reads them. Nothing has to be kept in step by
+// hand, which a switch on call.Name with a matching UnmarshalArgs in each arm
+// quietly requires.
+//
+// Client.Run does the middle two rules for you, and answers a bad call rather
+// than ending the conversation over it.
 //
 // The question below needs both tools and several lookups, so the loop really
 // does go round more than once.
@@ -52,6 +55,8 @@ import (
 type Population struct {
 	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
 	Year int    `json:"year" description:"census year" enum:"2000|2010|2020"`
+
+	census map[string]map[int]float64 // unexported: ours, never the model's
 }
 
 func (Population) Tool() ai.ToolInfo {
@@ -61,16 +66,31 @@ func (Population) Tool() ai.ToolInfo {
 	}
 }
 
+func (p Population) Run(context.Context) (string, error) {
+	millions := p.census[p.City][p.Year]
+	fmt.Printf("  \033[2m→ population(%s, %d) = %.1fM\033[0m\n", p.City, p.Year, millions)
+	return fmt.Sprintf("%.1f million", millions), nil
+}
+
 type Area struct {
 	City string `json:"city" description:"the city to look up" enum:"Tokyo|Delhi|Shanghai|São Paulo"`
+
+	km2 map[string]int
 }
 
 func (Area) Tool() ai.ToolInfo {
 	return ai.ToolInfo{Name: "area", Description: "Area of a city in square kilometres."}
 }
 
+func (a Area) Run(context.Context) (string, error) {
+	km2 := a.km2[a.City]
+	fmt.Printf("  \033[2m→ area(%s) = %d km²\033[0m\n", a.City, km2)
+	return fmt.Sprintf("%d square kilometres", km2), nil
+}
+
 // The whole of the tools' world, so the example needs no network beyond the
-// model itself and always gives the same answer.
+// model itself and always gives the same answer. In a real program these would
+// be a database handle or an HTTP client, handed to the tool the same way.
 var (
 	census = map[string]map[int]float64{
 		"Tokyo":     {2000: 34.5, 2010: 36.9, 2020: 37.4},
@@ -82,18 +102,6 @@ var (
 		"Tokyo": 2194, "Delhi": 1484, "Shanghai": 6341, "São Paulo": 1521,
 	}
 )
-
-func population(_ context.Context, args Population) (string, error) {
-	millions := census[args.City][args.Year]
-	fmt.Printf("  \033[2m→ population(%s, %d) = %.1fM\033[0m\n", args.City, args.Year, millions)
-	return fmt.Sprintf("%.1f million", millions), nil
-}
-
-func area(_ context.Context, args Area) (string, error) {
-	km2 := areaKm2[args.City]
-	fmt.Printf("  \033[2m→ area(%s) = %d km²\033[0m\n", args.City, km2)
-	return fmt.Sprintf("%d square kilometres", km2), nil
-}
 
 func main() {
 	model := flag.String("model", "openai/gpt-4.1", "model reference, vendor/id")
@@ -115,10 +123,12 @@ func run(ref, question string) error {
 		return err
 	}
 
-	// Nothing about a tool is repeated here. The name, the purpose, the
-	// arguments and their descriptions are all on the type; the type comes
-	// from the function's own parameter.
-	tools := []ai.Tool{ai.Handle(population), ai.Handle(area)}
+	// One line per tool, and everything about it is on its own type. What is
+	// passed here is the tool's dependencies; the model fills in the rest.
+	tools := []ai.Tool{
+		ai.ToolOf(Population{census: census}),
+		ai.ToolOf(Area{km2: areaKm2}),
+	}
 
 	// Run is the loop: complete, answer whatever the model asked for, repeat
 	// until it stops asking. history is the whole conversation, so a follow-up

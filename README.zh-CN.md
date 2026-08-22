@@ -171,28 +171,30 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 ## 工具调用
 
-一个工具是**一个 Go 类型加一个 Go 函数**。类型承载模型被告知的一切——参数、每个参数的含义、工具自己的名字和用途——函数负责回答它：
+一个工具就是**一个 Go 类型**。它的字段是参数，标签说明每个参数的含义，两个方法说明它叫什么、做什么：
 
 ```go
 type Search struct {
 	Query string `json:"query" description:"要找什么"`
 	Limit int    `json:"limit,omitempty" description:"要几条结果" maximum:"20"`
+
+	index *Index // 未导出：你的东西，模型永远看不到
 }
 
 func (Search) Tool() ai.ToolInfo {
 	return ai.ToolInfo{Name: "search", Description: "搜索知识库。"}
 }
 
-func search(ctx context.Context, args Search) (string, error) {
-	return index.Query(ctx, args.Query, args.Limit)
+func (s Search) Run(ctx context.Context) (string, error) {
+	return s.index.Query(ctx, s.Query, s.Limit)
 }
 
-tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
+tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
 ```
 
-**注册处什么都不重复**：`ai.Handle` 从 `search` 自己的参数里取类型，其余一切从类型上取。于是**模型要调用的那个名字，就挨着它将要填写的那些字段**，改名不可能让两者对不上——而 `switch call.Name` 配上每个分支里的 `ai.UnmarshalArgs[T]`，恰恰是允许对不上的写法。
+交给 `ToolOf` 的那个值就是**这个工具的依赖**。每次调用都跑在它的一个副本上，模型的参数解码覆盖在上面——**模型发来的东西填导出字段，未导出的保持你设定的样子**。这跟 `encoding/json` 本来就画的那条线是同一条，也跟 schema 画的那条线是同一条：**未导出字段从来不会被描述给模型**。每次调用一个副本，所以同一轮里的两个调用看不见彼此的参数。
 
-handler 保持为普通函数而不是方法，这样它可以闭包捕获索引、数据库、客户端——**这些东西都不该出现在一个由模型填写的结构体里**。
+关于这个工具的任何东西**都没有写第二遍，也不在别处**：模型要调用的那个名字，挨着它将要填写的字段，也挨着读取这些字段的代码。
 
 模型不会执行你的工具：它请求你执行、你回答、它继续。`Run` 就是这个循环，而**它在每个应用里都一模一样**：
 

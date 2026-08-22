@@ -200,36 +200,38 @@ called.
 
 ## Tool use
 
-A tool is a Go type and a Go function. The type carries everything the model is
-told — the arguments, what each one means, the tool's own name and purpose —
-and the function is what answers it:
+A tool is one Go type. Its fields are the arguments, its tags say what each one
+means, and its two methods say what it is called and what it does:
 
 ```go
 type Search struct {
 	Query string `json:"query" description:"what to look for"`
 	Limit int    `json:"limit,omitempty" description:"how many results" maximum:"20"`
+
+	index *Index // unexported: yours, never the model's
 }
 
 func (Search) Tool() ai.ToolInfo {
 	return ai.ToolInfo{Name: "search", Description: "Search the knowledge base."}
 }
 
-func search(ctx context.Context, args Search) (string, error) {
-	return index.Query(ctx, args.Query, args.Limit)
+func (s Search) Run(ctx context.Context) (string, error) {
+	return s.index.Query(ctx, s.Query, s.Limit)
 }
 
-tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
+tools := []ai.Tool{ai.ToolOf(Search{index: idx}), ai.ToolOf(Fetch{store: db})}
 ```
 
-Nothing is repeated at the registration site: `ai.Handle` takes the type from
-`search`'s own parameter, and everything else from the type. So the name the
-model calls sits next to the fields it will fill in, and a rename cannot leave
-them disagreeing — which is what a `switch call.Name` with a matching
-`ai.UnmarshalArgs[T]` in each arm quietly allows.
+The value you hand `ToolOf` is the tool's dependencies. Each call runs against a
+copy of it with the model's arguments decoded over the top, so what the model
+sends fills the exported fields and everything unexported stays as you set it —
+the same split `encoding/json` already draws, and the same one the schema draws,
+since an unexported field is never described to the model. A copy per call, so
+two calls in one turn cannot see each other's arguments.
 
-The handler stays an ordinary function rather than a method, so it can close
-over an index, a database, a client — none of which belongs in a struct the
-model fills in.
+Nothing about the tool is written twice, and nothing about it is anywhere else:
+the name the model calls sits next to the fields it will fill in, and next to
+the code that reads them.
 
 The model does not run your tools: it asks you to, you answer, and it
 continues. `Run` is that loop, and it is the same loop in every application:

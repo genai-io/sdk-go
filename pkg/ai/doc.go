@@ -68,12 +68,13 @@
 //
 // # Tools
 //
-// A tool is a Go type and a Go function. The type carries everything the model
-// is told — the arguments, their descriptions, and the tool's own name and
-// purpose through a Tool method — and the function answers it. Nothing is
-// repeated at the registration site, and Run holds the conversation to the end:
+// A tool is one Go type: its fields are the arguments, its tags say what each
+// one means, and its Tool and Run methods say what it is called and what it
+// does. The value handed to ToolOf is its dependencies, which live in
+// unexported fields and are never described to the model. Run holds the
+// conversation to the end:
 //
-//	tools := []ai.Tool{ai.Handle(search), ai.Handle(fetch)}
+//	tools := []ai.Tool{ai.ToolOf(Search{index: idx})}
 //	response, history, err := client.Run(ctx, messages, ai.WithTools(tools...))
 //
 // Write the loop with Complete and RunTools instead when the turns are your

@@ -205,6 +205,20 @@ messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
 }))
 ```
 
+## 描述字段
+
+`jsonschema` 标签就是这个字段的描述，**模型会读它**。字段名对模型来说往往比对你更含糊——`name` 可能是显示名也可能是法定姓名，`age` 可能是岁数也可能是出生日期——这里就是你消除歧义的地方。
+
+有两种看起来对、其实不对的写法。它们都会在构造时**响亮地失败并告诉你怎么改**，而不是把一份模型用不了的 schema 发出去：
+
+```go
+jsonschema:"要找什么"              // 正确：整个标签内容就是描述文本
+jsonschema:"description=要找什么"  // panic：那是另一个库的语法
+description:"要找什么"             // panic：Go 会静默丢掉这个键
+```
+
+键之所以是 `jsonschema` 而不是更直白的 `description`，是因为**生态里其他 schema 库用的都是它**，所以那才是人们会条件反射打出来的键。之所以选择"检查"而不是"改名"，恰恰是因为 **Go 对不认识的标签键一声不吭**——键写错的代价是描述被静默丢掉，比值写错糟得多。
+
 ## 结构化输出
 
 ```go
@@ -216,7 +230,7 @@ type Person struct {
 person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
 
-`jsonschema` 标签就是这个字段的描述，**模型会读它**——整个标签内容就是描述文本，**没有 `description=` 前缀**。字段名对模型来说往往比对你更含糊：`name` 可能是显示名也可能是法定姓名，`age` 可能是岁数也可能是出生日期。
+字段描述的写法跟工具那节完全一样，见上。
 
 `CompleteAs` 从 `Person` 推导 schema、约束生成、再把答案解码回来——**这个类型只写一次**。想给模型一段关于这个形状的说明，或者想约束成一个 Go 类型表达不了的形状，再加 `ai.WithSchema`。
 

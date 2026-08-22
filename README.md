@@ -235,6 +235,26 @@ messages = append(messages, ai.ToolResultsMessage(ai.ToolResult{
 }))
 ```
 
+## Describing fields
+
+The `jsonschema` tag is a field's description, and the model reads it. Field
+names are often ambiguous to a model in ways they are not to you — `name` could
+be a display name or a legal one, `age` could be years or a date of birth — so
+this is where you disambiguate.
+
+Two spellings look right and are not. Both fail loudly at construction, naming
+the fix, rather than shipping a schema the model cannot use:
+
+```go
+jsonschema:"what to look for"              // correct: the whole tag is the text
+jsonschema:"description=what to look for"  // panics: another library's grammar
+description:"what to look for"             // panics: Go would drop this silently
+```
+
+The key is `jsonschema` because that is what the ecosystem's other schema
+libraries use, so it is the one people reach for. It is checked rather than
+renamed precisely because Go ignores an unrecognised tag key without a word.
+
 ## Structured outputs
 
 ```go
@@ -246,10 +266,7 @@ type Person struct {
 person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
 
-The `jsonschema` tag is the field's description, and the model reads it — the
-whole tag is the text, with no `description=` prefix. Field names alone are
-often ambiguous to a model in ways they are not to you: `name` could be a
-display name or a legal one, `age` could be years or a birth date.
+Field descriptions work exactly as they do for a tool, above.
 
 `CompleteAs` derives the schema from `Person`, constrains generation to it and
 decodes the answer — so the type is named once. Add `ai.WithSchema` to give the

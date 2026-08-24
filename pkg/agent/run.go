@@ -61,8 +61,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		// A turn reports how it went on TurnEnd, in a form that says more than
 		// an error does, so it hands nothing back here. The only failure that
 		// ends a run is the context ending.
-		//
-		a.exchange(ctx, batch)
+		a.turn(ctx, batch)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -95,24 +94,8 @@ func (a *Agent) Turn(ctx context.Context, in ...ai.Message) (TurnEnd, error) {
 	defer a.running.Store(false)
 
 	a.alive = ctx.Done()
-	out := a.exchange(ctx, in)
+	out := a.turn(ctx, in)
 	return out, out.Err
-}
-
-// exchange runs one turn under a context of its own, so Interrupt can end it
-// without ending whatever is driving. Both drivers go through here rather than
-// deriving it themselves, because the two must not come to disagree about what
-// Interrupt reaches.
-func (a *Agent) exchange(ctx context.Context, in []ai.Message) TurnEnd {
-	turnCtx, stopTurn := context.WithCancel(ctx)
-	defer stopTurn()
-
-	a.mu.Lock()
-	a.stopTurn = stopTurn
-	a.mu.Unlock()
-
-	a.turnCount.Add(1)
-	return a.turn(turnCtx, in)
 }
 
 // emit hands one event to the reader. What happens when the reader is behind

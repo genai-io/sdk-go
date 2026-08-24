@@ -15,10 +15,6 @@ import (
 // GitHub token for a Copilot API token that lives about half an hour. The
 // GitHub token is what gets stored; the short-lived one is minted per session
 // and renewed underneath the caller.
-//
-// The client identifier and endpoints below are GitHub Copilot's published
-// public client, taken from the Copilot editor integrations rather than from
-// a specification.
 const copilotClientID = "Iv1.b507a08c87ecfe98"
 
 // copilotEndpoints is a struct rather than four constants so a test can point

@@ -6,9 +6,6 @@ import (
 )
 
 // What a caller gets when a credential cannot be resolved.
-//
-// Each one names the thing to do next — set this variable, run this sign-in —
-// because the alternative is an opaque 401 from the provider on first use.
 
 // NotSignedInError reports a vendor that needs an interactive sign-in and has
 // no stored credential.
@@ -35,11 +32,6 @@ func (e *MissingKeyError) Error() string {
 }
 
 // MissingEndpointError reports a vendor whose endpoint variable is not set.
-//
-// It is separate from MissingKeyError because the fix is different and the
-// failure it prevents is quieter: a vendor with no default host would
-// otherwise fall back to the protocol owner's, sending a tenant's credential
-// to somebody else's server.
 type MissingEndpointError struct {
 	Vendor string
 	EnvVar string

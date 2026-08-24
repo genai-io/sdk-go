@@ -85,10 +85,6 @@ func toolChoice(req *ai.Request) *sdk.ChatCompletionToolChoiceOptionUnionParam {
 }
 
 // applyReasoning writes the endpoint's reasoning switch into the request.
-//
-// The rung supplies the value; this only decides which field it goes in. That
-// split is why DeepSeek works: "on" is a reasoning_effort string and "off" is
-// a thinking object — two different fields, which no single value could carry.
 func (d *Driver) applyReasoning(params *sdk.ChatCompletionNewParams, level ai.ReasoningLevel) {
 	if d.compat.Thinking == ai.ThinkingNone || level.Effort == ai.EffortDefault {
 		return
@@ -166,11 +162,6 @@ func (d *Driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessagePar
 func (d *Driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
 	// A text-only turn takes the simple string form, which every
 	// implementation accepts; the array form is only needed for images.
-	//
-	// An image bound for a text-only endpoint is not dropped here. Model.
-	// Validate refuses that request before it is sent, and a caller reaching
-	// the driver directly is better served by the endpoint's own rejection
-	// than by an answer about a picture the model never saw.
 	if !msg.Content.HasImages() {
 		return sdk.UserMessage(msg.Content.Text())
 	}

@@ -8,11 +8,6 @@ import (
 )
 
 // Client turns a Driver into a usable model handle.
-//
-// It owns everything that is the same for every protocol: applying per-client
-// and per-model defaults to a request, and accumulating the driver's deltas
-// into a Response. A Client is safe for concurrent use; it holds no per-call
-// state.
 type Client struct {
 	driver   Driver
 	model    Model
@@ -22,10 +17,6 @@ type Client struct {
 // NewClientWithDriver wraps a Driver and the Model it was configured for. Any
 // options given here become this client's defaults, which a per-call option
 // overrides.
-//
-// Use it when you already hold a Driver — one you built yourself, or one
-// returned by Wrap. NewClient is the same thing starting from a Config, with the
-// registry finding the driver, and is what most callers want.
 func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
 	return &Client{driver: d, model: cloneModel(m), defaults: slices.Clone(defaults)}
 }
@@ -35,15 +26,10 @@ func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
 // model for its lifetime, and this hands back a description of that binding,
 // not a handle on it.
 //
-// The copy is not ceremony: Model carries slices and maps, so returning it
-// directly would let one caller's edit reach into what every other caller
-// reads. What to do instead depends on what you meant:
-//
 //	client.Complete(ctx, msgs, ai.WithEffort(ai.EffortHigh)) // change a setting for a call
 //	other := ai.NewClientWithDriver(driver, tweaked)                         // talk to a different model
 func (c *Client) Model() Model { return cloneModel(c.model) }
 
-// Driver returns the underlying driver.
 func (c *Client) Driver() Driver { return c.driver }
 
 // ContextWindow returns the model's maximum input tokens, or 0 when unknown.
@@ -74,14 +60,6 @@ func (c *Client) Models(ctx context.Context) ([]Model, error) {
 }
 
 // Stream runs one inference call and yields events as they arrive.
-//
-// The iterator ends after EventDone, or immediately after yielding a non-nil
-// error. Abandoning it (break, return) cancels the underlying request on the
-// next driver send. Every event but EventDone is a view of work in progress;
-// EventDone carries the aggregated Response, which is also what Complete
-// returns.
-//
-// Passing no options runs on the client's and model's defaults alone.
 func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		resp := &Response{Model: c.model.ID}
@@ -158,12 +136,6 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 
 // Complete runs one inference call and returns the aggregated response,
 // discarding the intermediate events.
-//
-// On failure it returns a non-nil error *and* a non-nil response carrying
-// everything that arrived first: the text already streamed and the tokens
-// already billed. Check the error as usual; read the response when you want to
-// show the partial answer or account for the spend. Its StopReason is
-// StopError or StopAborted, and Response.Err is the same error.
 func (c *Client) Complete(ctx context.Context, messages []Message, opts ...Option) (*Response, error) {
 	return Collect(c.Stream(ctx, messages, opts...))
 }
@@ -171,9 +143,6 @@ func (c *Client) Complete(ctx context.Context, messages []Message, opts ...Optio
 // Collect drains an event stream and returns its final Response. It is what
 // Complete is built from, exposed so a caller who already holds a stream can
 // aggregate it without re-running the request.
-//
-// Like Complete, it returns both a response and an error when the turn failed
-// partway.
 func Collect(events iter.Seq2[Event, error]) (*Response, error) {
 	var resp *Response
 	var failure error
@@ -201,11 +170,6 @@ func Collect(events iter.Seq2[Event, error]) (*Response, error) {
 // prepare builds the request for one call, repairs the conversation and
 // validates it. Counting and generation both go through it, so a prompt cannot
 // be measured differently from how it is sent.
-//
-// The caller's messages slice is never written to: history repair returns new
-// slices rather than editing the old ones, so the conversation the caller
-// still holds is left exactly as it was. The ordinary Go contract covers the
-// rest — do not mutate what you passed while the call is in flight.
 func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option) (*Request, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -217,7 +181,8 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 	// History repair is semantic preparation, not wire translation. Doing it
 	// once here makes exact counting, estimated counting, middleware and
 	// generation observe the same conversation.
-	req.Messages = RepairHistory(req.Messages)
+	req.Messages = Repair(req.Messages)
+
 	if err := c.model.validate(req); err != nil {
 		return nil, err
 	}
@@ -225,40 +190,14 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 }
 
 // Handler runs one model call: the seam every middleware wraps.
-//
-// It is the same shape as Driver.Stream, so a driver is already a Handler
-// and a middleware chain collapses back to one.
 type Handler func(ctx context.Context, req *Request) iter.Seq2[Delta, error]
 
 // Middleware wraps a Handler.
-//
-// This is where retry, caching, request logging and cost metering belong, and
-// they belong to the caller: only the application knows the budget for a turn,
-// what may be cached, and what must not be logged.
-//
-// One rule is not the application's to discover. A retry may only replay a
-// call that failed *before producing any delta* — once output has reached the
-// caller the answer has begun, and resending would either duplicate the text
-// already shown or silently discard it. Check IsRetryable and RetryAfter, and
-// give up once anything has streamed.
-//
-// Middleware runs outermost-first: the first one given sees the request first
-// and the deltas last.
 type Middleware func(Handler) Handler
 
 // Wrap returns a Driver that runs mw around d, outermost first.
 //
 //	client := ai.NewClientWithDriver(ai.Wrap(driver, retry, costMeter), model)
-//
-// Middleware decorates the driver rather than the client because that is what
-// it actually is: Handler and Driver.Stream are the same shape, so a wrapped
-// driver is still a Driver. This is the shape net/http uses for the same job —
-// a RoundTripper wrapping a RoundTripper — and it buys what a client setting
-// would not: the decorated driver composes, so one can be built once and
-// handed to several clients, or passed anywhere an undecorated one goes.
-//
-// It also keeps the composition visible where the client is built, rather than
-// as a flag whose effect a reader has to go looking for.
 func Wrap(d Driver, mw ...Middleware) Driver {
 	h := Handler(d.Stream)
 	for i := len(mw) - 1; i >= 0; i-- {

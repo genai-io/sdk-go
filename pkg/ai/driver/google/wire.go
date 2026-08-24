@@ -1,18 +1,6 @@
 package google
 
 // The Gemini generateContent wire format.
-//
-// These types are transcribed from google.golang.org/genai's own struct tags,
-// which are generated from the API definition — not from the public REST
-// reference, which does not document every field this driver sends
-// (parametersJsonSchema and responseJsonSchema among them). Transcribing the
-// generated tags rather than re-deriving them is the point: a misspelled field
-// is not rejected by Gemini, it is ignored, so reasoning or a schema would
-// quietly stop being applied with nothing to notice.
-//
-// Only the fields this driver uses are here. The rest of the protocol is
-// large, and carrying fields nothing sets would be carrying a maintenance
-// burden for no behaviour.
 
 type content struct {
 	Role  string  `json:"role,omitempty"`
@@ -48,9 +36,6 @@ type functionResponse struct {
 }
 
 // generateRequest is the body of :generateContent and :streamGenerateContent.
-//
-// systemInstruction, tools and toolConfig are siblings of contents, not
-// members of generationConfig — only the generation parameters live in there.
 type generateRequest struct {
 	Contents          []*content        `json:"contents,omitempty"`
 	SystemInstruction *content          `json:"systemInstruction,omitempty"`

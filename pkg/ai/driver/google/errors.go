@@ -12,10 +12,6 @@ import (
 )
 
 // Classifying this protocol's failures into ai.Error kinds.
-//
-// A driver is the only place the mapping is reliable, because it is the only
-// place the SDK's own typed errors and the HTTP response are both in hand.
-// Everything above the driver reads Kind and nothing else.
 
 // readAPIError turns a failed response into the driver's own error, keeping
 // the response so a 429's Retry-After is honoured.

@@ -10,26 +10,8 @@ import (
 )
 
 // Asking a model for a shape, and the JSON Schema machinery behind it.
-//
-// Two different things are called a schema here, and they are worth keeping
-// apart. A Schema is this SDK's request: a name, a description the model
-// reads, and the shape itself. The shape is a JSON Schema document — an
-// ordinary map — built and checked by the second half of this file.
-//
-// Building one from a Go type, and checking a value against one, live in
-// ai/jsonschema. That package targets what the providers accept rather than JSON
-// Schema in general, which is a different and stricter target.
-//
-// Reading the answer back is in response.go.
 
 // Schema constrains an answer to a JSON shape.
-//
-// Without it, getting structured data out of a model means asking for JSON in
-// the prompt and scraping the reply — which fails in a long tail of ways that
-// all look like the model misbehaving: a markdown fence, a "Sure, here you
-// go!" preamble, a trailing paragraph of commentary, a truncated object. Every
-// protocol here can constrain generation properly, so none of that is
-// necessary.
 type Schema struct {
 	// Name identifies the shape. Some protocols require one, and it is what
 	// appears in an error when the answer does not match.
@@ -54,18 +36,11 @@ type Schema struct {
 // named after T; description is prompt text the model reads, and may be empty
 // when the type name already says what the shape is for.
 //
-// Per-field constraints come from an ai struct tag, and the model reads them.
-// Field names alone are often ambiguous to it in ways they are not to you, and
-// a field with a fixed set of answers should say so rather than hope:
-//
 //	type Order struct {
 //		Name     string `json:"name" description:"full name, family name last"`
 //		Priority string `json:"priority" enum:"low|medium|high"`
 //		Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
 //	}
-//
-// A tag key is the JSON Schema keyword it sets; see ai/jsonschema for the full
-// list and what it refuses.
 func SchemaOf[T any](description string) *Schema {
 	return &Schema{
 		Name:        reflect.TypeFor[T]().Name(),
@@ -77,21 +52,10 @@ func SchemaOf[T any](description string) *Schema {
 
 // CompleteAs asks for an answer shaped like T and decodes it into one.
 //
-// It is the whole round trip in a single call — derive the schema from T,
-// constrain generation to it, unmarshal the answer — and T is named once.
-// Spelling SchemaOf and Parse separately lets them disagree:
-//
 //	ai.Parse[Company](client.Complete(ctx, msgs,
 //		ai.WithSchema(ai.SchemaOf[Person]("…"))))   // compiles, fails at runtime
 //
-// This cannot:
-//
 //	company, err := ai.CompleteAs[Company](ctx, client, messages)
-//
-// It is a function rather than a method because Go has no generic methods.
-// Pass WithSchema to describe the shape to the model, or to constrain to one T
-// does not capture exactly; options apply in order, so a caller's schema wins
-// over the derived one.
 func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts ...Option) (T, error) {
 	withDerived := append([]Option{WithSchema(SchemaOf[T](""))}, opts...)
 	return Parse[T](c.Complete(ctx, messages, withDerived...))
@@ -99,10 +63,6 @@ func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts 
 
 // DefinitionMap returns an independent JSON-object representation of the
 // schema, or nil when Definition cannot be represented as a JSON object.
-//
-// Definition may be a map or a typed Go value. Keeping the conversion here
-// gives every driver the same behavior and prevents one protocol from silently
-// dropping a schema another protocol accepts.
 func (s *Schema) DefinitionMap() map[string]any {
 	if s == nil {
 		return nil
@@ -112,10 +72,6 @@ func (s *Schema) DefinitionMap() map[string]any {
 
 // WireName is the identifier to send for a protocol that requires a schema to
 // be named. It is the schema's own Name, or "response" when it states none.
-//
-// Every protocol that demands a name gets the same one from here, so a schema
-// that moves between providers keeps its identity — and a driver does not each
-// invent its own fallback.
 func (s *Schema) WireName() string {
 	if s == nil || s.Name == "" {
 		return "response"

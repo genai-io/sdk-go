@@ -9,7 +9,6 @@ type MemoryStore struct {
 	m  map[string]Credential
 }
 
-// NewMemoryStore returns an empty store.
 func NewMemoryStore() *MemoryStore { return &MemoryStore{m: map[string]Credential{}} }
 
 // Load returns the credential held for a vendor.
@@ -21,11 +20,6 @@ func (s *MemoryStore) Load(vendor string) (Credential, bool, error) {
 }
 
 // Save keeps a credential for the life of the process.
-//
-// It rejects a credential with no vendor exactly as FileStore does. An
-// implementation that accepted what another refuses is not a store the caller
-// can swap — and a test passing against this one would fail in production
-// against that one.
 func (s *MemoryStore) Save(c Credential) error {
 	if c.Vendor == "" {
 		return errNoVendor()

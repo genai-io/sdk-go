@@ -52,9 +52,6 @@ const (
 func IsUnsupported(err error) bool { return IsKind(err, KindUnsupported) }
 
 // Error is a provider failure, classified.
-//
-// Drivers construct these from their SDK's typed errors, which is the only
-// place the mapping is reliable; everything above the driver reads Kind.
 type Error struct {
 	// Driver is the wire protocol that produced the error.
 	Driver string
@@ -136,11 +133,6 @@ func RetryAfter(err error) time.Duration {
 // contextExceededSignatures are the ways providers say "this prompt exceeds
 // the context window". Matching is on message text because no provider
 // distinguishes it from other 400s with a machine-readable code.
-//
-// This is the whole safety net for a model whose window could not be sized in
-// advance: without a known limit a caller cannot compact proactively, so a
-// phrasing missing here means the turn fails and keeps failing instead of
-// compacting and retrying. Add a vendor's wording when adding the vendor.
 var contextExceededSignatures = []string{
 	"prompt is too long",                // Anthropic
 	"prompt_too_long",                   // Anthropic error type
@@ -155,13 +147,6 @@ var contextExceededSignatures = []string{
 
 // notContextExceededSignatures are messages that match a context-exceeded
 // signature but mean something else entirely.
-//
-// The one that matters is throttling: AWS Bedrock formats a rate limit as
-// "ThrottlingException: Too many tokens, please wait before trying again.",
-// which matches "too many tokens" above. Classifying that as a context
-// overflow tells the caller to compact a prompt that was never too long, and
-// suppresses the retry that would have worked — the failure is silent in both
-// directions, which is why the exclusion is checked first.
 var notContextExceededSignatures = []string{
 	"rate limit",
 	"too many requests",
@@ -256,17 +241,6 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 
 // Classify assembles an *Error from what a driver has to hand. It applies the
 // checks in the order that keeps each from masking the next:
-//
-//  1. cancellation, which must never be reported as a retryable transport
-//     failure;
-//  2. the message text, because an overflowed context window arrives as an
-//     ordinary 400 and would otherwise be filed as a fatal bad request;
-//  3. the HTTP status, the most reliable signal when there is one;
-//  4. the transport, for errors that never reached a response.
-//
-// status may be 0 and resp may be nil. If err is already an *Error it is
-// returned unchanged, so a driver can classify precisely at the point it knows
-// most and pass the result up untouched.
 func Classify(driver string, status int, resp *http.Response, code, message string, err error) *Error {
 	var typed *Error
 	if errors.As(err, &typed) {
@@ -298,11 +272,6 @@ func Classify(driver string, status int, resp *http.Response, code, message stri
 }
 
 // StreamError is Classify for an error that terminated a stream.
-//
-// Streaming transports routinely lose their typed error at the SDK boundary,
-// so an otherwise unclassifiable terminal error is treated as a network
-// failure and becomes retryable. Errors that did classify keep their
-// conservative category.
 func StreamError(driver string, status int, resp *http.Response, code, message string, err error) *Error {
 	out := Classify(driver, status, resp, code, message, err)
 	if out.Kind == KindUnknown {

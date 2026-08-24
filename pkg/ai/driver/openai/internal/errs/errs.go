@@ -1,14 +1,4 @@
 // Package errs reads a failure out of the OpenAI Go SDK.
-//
-// The chat and responses drivers implement two different protocols, but they
-// share one vendor SDK and therefore one error shape.
-// Reading it lives here rather than in both drivers, where two copies would
-// drift the first time the SDK moved a field — and drift in error
-// classification is silent: a rate limit that stops being recognised simply
-// stops being retried.
-//
-// It is internal to ai/driver/openai, so the compiler — not a convention —
-// keeps the Anthropic and Gemini drivers away from the OpenAI SDK's types.
 package errs
 
 import (

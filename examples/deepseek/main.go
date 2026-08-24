@@ -1,17 +1,9 @@
 // Command deepseek shows the one thing about DeepSeek that will cost you money
 // if you do not know it: it reasons unless told not to.
 //
-// On most vendors, leaving Effort unset means no reasoning. On DeepSeek it
-// means reasoning stays on and you are billed for the tokens. Turning it off
-// is not "omit the field" either — the endpoint wants a different field
-// entirely:
-//
 //	Effort unset       → reasoning_effort: "high"        (on, and billed)
 //	Effort EffortOff   → thinking: {"type":"disabled"}   (off)
 //	Effort EffortHigh  → reasoning_effort: "high"        (on)
-//
-// None of that is in this file. It is one row in ai/catalog/vendors.go, and
-// the caller writes the same normalized rung they would write for Claude.
 //
 //	export DEEPSEEK_API_KEY=...
 //	go run ./examples/deepseek "What is 17 * 23?"

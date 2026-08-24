@@ -9,9 +9,6 @@ import (
 )
 
 // Reading a key-based vendor's settings out of the environment.
-//
-// Which variables those are is catalog data, not code: a vendor entry names
-// them, and everything here simply reads what it names.
 
 // Key returns the first non-empty value among a vendor's credential
 // variables, and the name of the variable it came from.

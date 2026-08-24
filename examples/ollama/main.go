@@ -1,10 +1,5 @@
 // Command ollama talks to a model running on your own machine.
 //
-// It is the case with no credential at all: Ollama serves an OpenAI-compatible
-// API on localhost, so the same driver that reaches DeepSeek and Qwen reaches
-// it. What differs is one row in the catalog — no key variable, and a base URL
-// that people paste as a bare host and port.
-//
 //	ollama serve
 //	ollama pull llama4
 //	go run ./examples/ollama

@@ -14,14 +14,6 @@ import (
 
 // Provider is one configured endpoint: the models it serves, the credential to
 // reach it with, and the protocol that talks to it.
-//
-// Reading its model list is synchronous and cannot fail — it returns what is
-// known now, which before the first Refresh is the static baseline it was
-// built with. Fetching is a separate, explicit verb. That split is what lets a
-// model picker render immediately and refresh behind the user, instead of
-// blocking on a round trip that a dead endpoint can hang.
-//
-// A Provider is safe for concurrent use.
 type Provider struct {
 	cfg Config
 
@@ -91,13 +83,6 @@ func (p *Provider) API() ai.API { return p.cfg.API }
 // Models returns what is known now: the static baseline with the last fetched
 // listing merged over it. It never blocks and never fails — before the first
 // successful Refresh it is the baseline alone.
-//
-// The merge is field by field, not entry by entry. A listing carries what the
-// endpoint publishes, which for most OpenAI-compatible vendors is an ID and
-// nothing else; replacing a baseline entry wholesale would discard its
-// pricing, its reasoning ladder and its protocol quirks, and a model stripped
-// of its quirks stops working. So the endpoint wins on every field it stated,
-// and the baseline fills the rest.
 func (p *Provider) Models() []ai.Model {
 	p.mu.RLock()
 	listing := cloneAll(p.listing)
@@ -142,8 +127,6 @@ func (p *Provider) Model(id string) (ai.Model, bool) {
 // Refresh fetches the live model list and merges it in. A failure leaves the
 // previous list untouched, so an endpoint that went down keeps serving what it
 // last knew.
-//
-// A provider with no way to list — no Fetch and no protocol — is a no-op.
 func (p *Provider) Refresh(ctx context.Context) error {
 	fetch := p.cfg.Fetch
 	if fetch == nil {
@@ -163,12 +146,6 @@ func (p *Provider) Refresh(ctx context.Context) error {
 }
 
 // defaultFetch opens a client for the provider's protocol and asks it.
-//
-// The driver needs a model to be constructed with, and listing does not depend
-// on which one, so a placeholder stands in when the provider has no baseline
-// to borrow from. Client.Models is what answers, rather than the driver
-// directly, so a protocol with no listing endpoint reports it the same way
-// here as it does to any other caller.
 func defaultFetch(ctx context.Context, p *Provider) ([]ai.Model, error) {
 	probe := ai.Model{ID: "-", API: p.cfg.API}
 	if len(p.cfg.Models) > 0 {
@@ -219,18 +196,6 @@ func (p *Provider) decorate(m ai.Model) ai.Model {
 }
 
 // MergeListing layers a live model listing over a known baseline entry.
-//
-// The listing wins on every field it stated; everything it left zero comes
-// from the baseline. That asymmetry is the whole rule: an endpoint is
-// authoritative about which models exist and about any figure it reported,
-// while a baseline knows the pricing, the reasoning ladder and the protocol
-// quirks that no listing publishes — and a model stripped of its quirks stops
-// working.
-//
-// Provider uses it to merge a refresh over its static models. It is exported
-// because a caller reconciling a listing against the catalog itself needs the
-// same rule, and two copies of it would let one path keep a field the other
-// dropped.
 func MergeListing(base, live ai.Model) ai.Model {
 	out := base.Clone()
 	live = live.Clone()

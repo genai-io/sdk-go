@@ -7,20 +7,6 @@ import (
 )
 
 // Request validation: everything caught before the network.
-//
-// The point is to fail with a sentence a caller can act on — "deepseek-v4-pro
-// does not accept images" — instead of an opaque provider rejection, or worse,
-// a silently degraded answer. Sending an image to a text-only endpoint used to
-// mean the image was dropped and the model answered about something it had
-// never seen; that is the failure this replaces.
-//
-// The checks are in three layers, applied in this order:
-//
-//  1. structure — the tagged-union invariants a Block must satisfy, and the
-//     protocol invariants a block replay must satisfy;
-//  2. settings — values that are malformed on their own terms, or that
-//     contradict the conversation they were sent with;
-//  3. capability — what this particular model declares it cannot do.
 
 // Validate checks a call against what the model can actually do, before it
 // reaches the network. It takes the same arguments as Complete, so a caller

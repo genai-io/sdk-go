@@ -9,12 +9,6 @@ import (
 )
 
 // Transport injects a vendor's current token into every request.
-//
-// A RoundTripper rather than a fixed header because Copilot's token lasts
-// about half an hour — well inside a long session — so it cannot be resolved
-// once at start-up. It overwrites any Authorization the driver set, which is
-// how a driver that insists on a placeholder key still ends up sending a real
-// one.
 type Transport struct {
 	base   http.RoundTripper
 	source *tokenSource

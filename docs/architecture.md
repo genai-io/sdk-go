@@ -263,7 +263,7 @@ may be cached and what must not be logged.
 
 It does no compaction. Deciding a conversation is too long, summarizing it or
 dropping the oldest turns are the application's calls, with knowledge this
-package does not have. What it does do is *repair*: `RepairHistory` removes
+package does not have. What it does do is *repair*: `Repair` removes
 only what the protocol itself would reject — an unanswered tool call left by a
 Ctrl-C, invalid UTF-8 from a conversation that passed through a JavaScript
 runtime. Repair is not policy.
@@ -287,7 +287,7 @@ Between `client.Complete(ctx, messages, opts...)` and bytes on the wire:
         |  +---------------------- Client.prepare ------------------------+
         +--| newRequest         model defaults -> client -> call, in order |
         |  | validateStructure  the tagged-union invariants a Block holds  |
-        |  | RepairHistory      pair tool calls, replace invalid UTF-8     |
+        |  | Repair      pair tool calls, replace invalid UTF-8     |
         |  | validate           settings, then what this model cannot do   |
         |  +--------------------------------------------------------------+
         v

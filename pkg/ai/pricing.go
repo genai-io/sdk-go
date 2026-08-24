@@ -1,20 +1,6 @@
 package ai
 
 // Pricing is a published rate card, per million tokens.
-//
-// A zero field means the rate is unknown or not charged, not that it is free of
-// consequence — Cost simply contributes nothing for it.
-//
-// CacheWrite and CacheRead are two different events, not two halves of one:
-// writing a prefix into the provider's cache costs more than ordinary input
-// (Anthropic bills 1.25x for a short entry, twice for a long one), and reading
-// it back costs a small fraction. Both are input tokens — output is never
-// cached — which is why they are named for what happened rather than for which
-// side of the call they sat on.
-//
-// Currency is carried rather than assumed: several vendors publish in CNY, and
-// silently summing those with USD figures would produce a number that looks
-// authoritative and is meaningless.
 type Pricing struct {
 	Currency   string  `json:"currency,omitempty"`
 	Input      float64 `json:"input,omitempty"`
@@ -56,16 +42,6 @@ type Cost struct {
 }
 
 // Cost prices a usage record, applying the highest matching tier.
-//
-// It reports zero when no rates are known, which callers should render as
-// "unknown" rather than as free.
-//
-// It is an estimate, and one vendor's card can be conditional in ways a rate
-// card cannot express — DeepSeek bills half price outside two windows of the
-// day, and several vendors publish a different card per region. A Pricing that
-// carries such a condition says so in the Note of the catalog vendor it came
-// from; read it before showing a figure to anyone as authoritative. The number
-// here is what the published card says, not an invoice.
 func (p Pricing) Cost(u Usage) Cost {
 	const perMillion = 1_000_000.0
 

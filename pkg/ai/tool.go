@@ -25,35 +25,17 @@ type Tool struct {
 	// it sent. ToolFunc fills it in from a Go type, which is what most callers
 	// want; set it directly for a tool whose shape is not known until run time
 	// — one loaded from configuration, or proxied from somewhere else.
-	//
-	// It is skipped by encoding/json: what a Tool marshals to is what the
-	// model is told, which never includes anything executable.
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
 // ParameterSchema returns an independent JSON-object representation of the
 // tool's parameters. A nil result means that Parameters was omitted or is not
 // representable as a JSON object.
-//
-// It is the one way to read a tool's schema. Drivers, validation and argument
-// checking all go through it, so a schema that one of them accepts cannot be
-// silently dropped by another — and the copy means none of them can corrupt
-// the caller's definition.
 func (t Tool) ParameterSchema() map[string]any {
 	return jsonSchemaObject(t.Parameters)
 }
 
 // ValidateArgs checks a tool call's arguments against the tool's own schema.
-//
-// A model produces those arguments, so they are model output and wrong
-// sometimes: a missing required field, a string where a number belongs, an
-// invented property, a value outside its enum. Running the tool anyway turns a
-// mistake the model could have corrected into whatever the tool does with
-// nonsense — a deletion with an empty path, a query with a null filter.
-// Checking first turns it back into a tool error the model sees and retries.
-//
-// A tool that declares no schema is not checked, because there is nothing to
-// check against.
 func (t Tool) ValidateArgs(input string) error {
 	schema := t.ParameterSchema()
 	if len(schema) == 0 {
@@ -111,22 +93,6 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 //		})
 //
 //	client.Run(ctx, messages, []ai.Tool{search, fetch})
-//
-// The name and the description are what the model reads about the tool; T is
-// what it may send. T is named once, so the schema that goes out and the
-// struct the arguments arrive in are the same declaration and cannot come to
-// describe different things.
-//
-// Every word of that declaration is prompt text: describe each parameter, and
-// use enum where a field has a fixed set of answers. Arguments are checked
-// against the schema before the function is called.
-//
-// Dependencies are whatever the function closes over. That is the ordinary Go
-// answer, it needs nothing from this package, and it keeps them off T where
-// they could never be described to the model.
-//
-// The result is an ordinary Tool. Assign to its Parameters afterwards to send
-// a hand-written schema in place of the derived one.
 func ToolFunc[T any](name, description string, run func(ctx context.Context, arguments T) (string, error)) Tool {
 	var zero T
 	t := reflect.TypeOf(zero)
@@ -157,16 +123,6 @@ func ToolFunc[T any](name, description string, run func(ctx context.Context, arg
 //	messages = append(messages, response.Message())
 //	messages = append(messages, ai.ToolResultsMessage(
 //		ai.RunTools(ctx, tools, response.ToolCalls())...))
-//
-// Nothing here returns an error, because none of what can go wrong is the
-// caller's to handle: a mistake in the arguments, an unknown tool name, a tool
-// that failed. Every one of those comes back as a result marked IsError, which
-// the model sees and can act on. Failing the turn instead would throw away a
-// conversation over something the model could have fixed by trying again.
-//
-// Arguments are checked against the tool's own schema before it runs, so a
-// model's mistake stays a mistake the model can correct rather than becoming
-// whatever the tool does with a missing field.
 func RunTools(ctx context.Context, tools []Tool, calls []ToolCall) []ToolResult {
 	out := make([]ToolResult, 0, len(calls))
 	for _, call := range calls {
@@ -224,28 +180,12 @@ const maxToolTurns = 32
 
 // Run holds a conversation to the end, answering tool calls as they arrive.
 //
-// The loop it replaces is the same in every application — complete, run the
-// calls, append the results, repeat — so it is written here once:
-//
 //	response, history, err := client.Run(ctx, messages,
 //		[]ai.Tool{search, fetch})
 //
 //	fmt.Println(response.Text())
 //
-// It returns the final response, and the whole conversation including every
-// turn it added, so the next question continues from where this one finished:
-//
 //	response, history, err = client.Run(ctx, append(history, ai.UserMessage(next)), tools)
-//
-// Tools are a parameter rather than an option because a Run without them is a
-// Complete. A Tool with no Run — one defined but not implemented — is reported
-// in the result rather than guessed at.
-//
-// Write the loop yourself when the turns are your business: to stream text as
-// it arrives, to stop on a condition, to log or bill each turn, or to decide
-// per-turn whether to continue. Run stops when the model stops asking, when
-// ctx is done, or after maxToolTurns, which is a runaway guard rather than a
-// budget — cost control is Middleware's job.
 func (c *Client) Run(ctx context.Context, messages []Message, tools []Tool, opts ...Option) (*Response, []Message, error) {
 	opts = append([]Option{WithTools(tools...)}, opts...)
 

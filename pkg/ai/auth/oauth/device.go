@@ -49,13 +49,6 @@ func (r deviceCodeResponse) verificationURI() string {
 
 // Device runs the device authorization grant: ask for a code, show it to the
 // person, then poll until they have finished in a browser.
-//
-// It is the flow for a machine that cannot receive a redirect — a terminal
-// over SSH, a container, a headless build — which is most of where a CLI runs.
-//
-// Polling honours the interval the provider asks for and the slow_down it may
-// send mid-flight, because polling faster than permitted is how a provider
-// starts refusing the attempt altogether.
 func Device(ctx context.Context, cfg Config, endpoints DeviceEndpoints, ui Interaction) (Token, error) {
 	code, err := requestDeviceCode(ctx, cfg, endpoints.Code)
 	if err != nil {

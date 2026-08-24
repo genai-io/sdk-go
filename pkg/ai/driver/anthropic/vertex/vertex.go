@@ -1,23 +1,6 @@
 // Package vertex serves Claude models through Google Cloud Vertex AI.
 //
-// It is a deployment of the Anthropic Messages protocol, not a protocol of its
-// own, which is why it sits under package anthropic and wraps it: everything
-// downstream of building the HTTP client is that package's code, unchanged.
-// What differs is authentication (Google Application Default Credentials
-// rather than an API key), the endpoint (a regional Vertex host), and the
-// model ID form (`claude-opus-4-5@20251101`).
-//
-// It is nonetheless a separate package, because its Google Cloud auth
-// dependency is heavy — see ai/driver/all — and must land only in a build
-// that asks for it. Importing anthropic does not import this. Import it for
-// its side effect:
-//
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/anthropic/vertex"
-//
-// Credentials come from the ambient environment the way every Google Cloud
-// client resolves them — `gcloud auth application-default login`, a service
-// account key at GOOGLE_APPLICATION_CREDENTIALS, or the metadata server on a
-// GCP instance. There is no API key to pass; ai.Config.APIKey is ignored.
 package vertex
 
 import (

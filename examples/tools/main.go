@@ -1,36 +1,5 @@
 // Command tools runs a tool-calling loop, which is four rules and a for loop.
 //
-// The model does not run your tools. It asks you to, you answer, and it
-// continues — so the loop is yours to write, and the rules that make it work
-// are the ones this file exists to show:
-//
-//   - Say what every parameter means. The schema is prompt text, and a model
-//     given nothing but a field name is left guessing what to put in it.
-//   - Check the arguments before running anything. A model's mistake handed
-//     back as a tool result is something it can correct; the same mistake run
-//     is whatever your tool does with a missing field.
-//   - Answer every call in the turn that immediately follows. Every protocol
-//     here rejects a conversation where one is left hanging.
-//   - Append response.Message(), not ai.AssistantMessage(response.Text()).
-//     The first carries the model's thinking and reasoning state forward; the
-//     second silently drops it and a reasoning model starts over each turn.
-//
-// A tool here is a name, a sentence, and a function. The function says which
-// struct its arguments arrive in, and the schema the model is sent is derived
-// from that same struct — so nothing has to be kept in step by hand, which a
-// switch on call.Name with a matching UnmarshalArgs in each arm quietly
-// requires.
-//
-// Both tools below pin their cities to an enum, which is why the wrong city
-// comes back as a mistake the model can correct rather than as a lookup that
-// silently returns zero.
-//
-// Client.Run does the middle two rules for you, and answers a bad call rather
-// than ending the conversation over it.
-//
-// The question below needs both tools and several lookups, so the loop really
-// does go round more than once.
-//
 //	export OPENAI_API_KEY=...
 //	go run ./examples/tools
 //

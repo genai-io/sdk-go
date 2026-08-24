@@ -14,21 +14,9 @@ import (
 
 // The protocol seam: what a driver is.
 //
-// A driver is one wire protocol and nothing else. Everything a caller also
-// needs — aggregating deltas into a Response, applying defaults, repairing
-// history, validating, retrying, discovering credentials — belongs to Client
-// and is written once for every protocol instead of once per driver. Keeping
-// that line is what makes a new protocol a small, self-contained package.
-//
-// Implementing one is three decisions:
-//
 //	Driver        required — translate a Request, send it, stream Deltas back
 //	ModelLister   optional — the endpoint can list the models it serves
 //	TokenCounter  optional — the endpoint can size a prompt without running it
-//
-// The optional two are found by type assertion, so adding one later is a
-// source-compatible change and leaving one out is never an error: Client.Models
-// reports KindUnsupported, and Client.CountTokens falls back to EstimateTokens.
 
 // Driver is one wire protocol, as a black box.
 type Driver interface {
@@ -38,25 +26,6 @@ type Driver interface {
 	Name() string
 
 	// Stream performs one inference call.
-	//
-	// Streaming is the only shape a driver implements. Client.Complete is
-	// built by draining this, not by a second code path, so there is one way
-	// a request reaches an endpoint and one way its output comes back.
-	//
-	// It shares a name with Client.Stream because it is the same operation one
-	// layer down; what differs is granularity. A driver yields raw Deltas as
-	// its protocol produces them, and the Client assembles those into the
-	// ordered block lifecycle its own Stream yields.
-	//
-	// It does nothing until the returned iterator is consumed, and stops when
-	// the iterator is abandoned or ctx is canceled.
-	//
-	// req is borrowed, not owned: the Client has already resolved its options,
-	// repaired its history and validated the result, and it reads req again
-	// after the call returns. A driver must not modify or retain it.
-	//
-	// An error ends the iterator and must be its last element. Make it an
-	// *Error so IsAuth, IsRetryable and the rest can classify what happened.
 	Stream(ctx context.Context, req *Request) iter.Seq2[Delta, error]
 }
 
@@ -80,9 +49,6 @@ type TokenCounter interface {
 // text and thinking blocks carry incremental Text/Signature fragments; image,
 // tool and opaque reasoning blocks are complete values. EndBlock closes the
 // current textual block after applying Block.
-//
-// Usage and StopReason are replacing rather than additive: the last non-zero
-// value wins.
 type Delta struct {
 	Block    Block
 	EndBlock bool
@@ -94,11 +60,6 @@ type Delta struct {
 }
 
 // Config is everything a driver needs to reach an endpoint.
-//
-// Nothing here is discovered: no environment variable is read, no credential
-// file is opened. A caller supplies the key it wants used, which is what makes
-// the SDK safe in a server handling several tenants. Package ai/auth is the
-// opt-in helper that fills a Config from the environment.
 type Config struct {
 	// Model is the model to talk to; its API selects the driver.
 	Model Model
@@ -121,17 +82,11 @@ type Config struct {
 	// that driver's value — VertexConfig for a model served through Vertex AI. It
 	// is the Config-level counterpart to Request.ProtocolOptions: the latter varies per
 	// request, this one is fixed for the endpoint.
-	//
-	// Read it with ProtocolConfigAs. A wrong concrete type is rejected rather than
-	// silently losing construction settings.
 	ProtocolConfig ProtocolConfig
 }
 
 // MergedHeaders returns the headers to send: the model's, then the Config's
 // over them, so a Config header of the same name wins.
-//
-// Every driver needs this same precedence, and four copies of it is four
-// chances for one protocol to resolve a header differently from the rest.
 func (c Config) MergedHeaders() map[string]string {
 	if len(c.Model.Headers) == 0 && len(c.Headers) == 0 {
 		return nil
@@ -144,9 +99,6 @@ func (c Config) MergedHeaders() map[string]string {
 
 // URL returns the base URL to use: the Config override if set, otherwise the
 // model's, otherwise "" for the driver's default.
-//
-// It is not called Endpoint because that word already names a whole configured
-// host in package ai/endpoint, and one word cannot mean both.
 func (c Config) URL() string {
 	if c.BaseURL != "" {
 		return c.BaseURL
@@ -155,10 +107,6 @@ func (c Config) URL() string {
 }
 
 // The driver registry: how a Model's protocol is turned into a Driver.
-//
-// It is the database/sql pattern. A driver package registers itself from init,
-// so a blank import is what makes a protocol reachable, and a program that
-// talks to one provider does not link the other vendors' SDKs.
 
 // driverPath is where the bundled drivers live. It appears only in the error a
 // caller gets when none is linked in, which is the one moment they need to know
@@ -256,10 +204,6 @@ func (e *UnregisteredAPIError) Error() string {
 
 // ProtocolConfig is one driver's protocol-specific construction settings — the
 // Config-level counterpart to ProtocolOptions.
-//
-// ai.VertexConfig is the only one this module defines, and it lives in package
-// ai rather than beside its driver so a caller can fill it in without pulling
-// in Google Cloud auth.
 type ProtocolConfig interface {
 	// ProtocolConfig marks this type as one driver's construction settings. A
 	// no-op, as ProtocolOptions.ProtocolOptions is.

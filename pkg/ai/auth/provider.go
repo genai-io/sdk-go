@@ -8,9 +8,6 @@ import (
 
 // Provider builds a live provider for a catalog vendor, with its credential
 // and base URL resolved from the environment.
-//
-// It fails when the vendor needs a key and none of its variables are set,
-// rather than handing back a provider that will 401 on first use.
 func Provider(vendorID string) (*provider.Provider, error) {
 	v, ok := catalog.Find(vendorID)
 	if !ok {
@@ -40,10 +37,6 @@ func Provider(vendorID string) (*provider.Provider, error) {
 
 // Providers builds a live provider for every vendor with a usable credential, in
 // catalog display order.
-//
-// Vendors with no credential are skipped rather than reported: this is the
-// "what can I actually use right now" question, and a missing key is the
-// normal answer for most of the catalog.
 func Providers() *provider.Set {
 	out := provider.NewSet()
 	for _, v := range Available() {

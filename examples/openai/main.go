@@ -1,10 +1,6 @@
 // Command openai shows what the Responses protocol offers that Chat
 // Completions does not: a reasoning model's own working, carried across turns.
 //
-// Drop it and the model re-reasons from scratch every turn. Carry it and it
-// resumes — which is the difference between a multi-step conversation that
-// gets cheaper and one that does not.
-//
 //	export OPENAI_API_KEY=...
 //	go run ./examples/openai
 package main
@@ -58,9 +54,6 @@ func run(ref string) error {
 		// This is the whole point of the example. resp.Message() carries every
 		// block the model produced — including the opaque reasoning items you
 		// cannot read — so appending it is what lets the next turn resume.
-		//
-		// Appending ai.AssistantMessage(resp.Text()) instead would look identical and
-		// silently throw the reasoning away.
 		history = append(history, resp.Message())
 
 		if items := resp.ReasoningItems(); len(items) > 0 {

@@ -7,6 +7,16 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API may change between minor releases.
 Each such change is listed under **Changed** with what to write instead.
 
+## [Unreleased]
+
+### Changed
+
+- **`ai.RepairHistory` is now `ai.Repair`.** The old name introduced a word the
+  package does not otherwise use: there is no history type here, only
+  `[]Message` and `Request.Messages`. `Repair` is unchanged in behaviour — it
+  still pairs tool calls with their results and replaces invalid UTF-8, and
+  still removes only what a protocol would reject. Write `ai.Repair(msgs)`.
+
 ## [0.1.2] - 2026-08-22
 
 ### Fixed

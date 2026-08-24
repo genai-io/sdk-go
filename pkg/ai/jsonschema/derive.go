@@ -10,25 +10,6 @@ import (
 )
 
 // Deriving a JSON Schema from a Go type.
-//
-// The target is not "a valid JSON Schema". It is a schema the providers accept
-// and the Go type round-trips through. Those pull in different directions and
-// the second one is what a general-purpose generator gets wrong:
-//
-//   - Every field goes in required, including the optional ones, because
-//     OpenAI's strict mode demands it. Optionality is expressed the way strict
-//     mode expresses it — the type becomes a ["T","null"] union — not by
-//     leaving the field out.
-//   - Nothing is described by a boolean schema. `true` means "anything here",
-//     which strict mode rejects outright, so a field it would apply to is an
-//     error at construction rather than a rejection from the endpoint.
-//   - A type that marshals to something other than its fields is described by
-//     what it marshals to. time.Time is a string, not an object with unexported
-//     fields, or the schema rejects the JSON its own Go type produces.
-//
-// The tag is ai, not jsonschema, because it is aimed at a model: it carries
-// what a model needs to fill a field in — a description, the values it may
-// choose from, the range it must stay inside.
 
 // The tag key is the JSON Schema keyword it sets.
 //
@@ -37,14 +18,6 @@ import (
 //		Priority string `json:"priority" enum:"low|medium|high"`
 //		Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
 //	}
-//
-// There is no grammar to learn and nothing to quote: Go's own struct-tag
-// convention does the splitting, so a description containing a comma is just a
-// description containing a comma. Enum members are pipe-separated, since a tag
-// value is a string and a JSON array is not.
-//
-// The keywords are the intersection the providers document as supported, so a
-// tag cannot produce a schema an endpoint refuses.
 
 // keywords maps a tag key to how its value is written on the wire.
 var keywords = map[string]struct{ numeric bool }{
@@ -88,12 +61,6 @@ func applyTags(field reflect.StructField, schema map[string]any, t reflect.Type,
 }
 
 // rejectNearMisses catches a keyword that was misspelled or pluralised.
-//
-// Go ignores an unrecognised struct tag key without a word, which for this
-// package's keys means a field silently loses the one thing it was annotated
-// with — the description the model was supposed to read, or the enum that was
-// supposed to constrain it. A key one edit away from a real one is a typo, not
-// another tool's tag, so it is safe to refuse and worth refusing.
 func rejectNearMisses(field reflect.StructField, where string) {
 	for _, key := range tagKeys(string(field.Tag)) {
 		if _, known := keywords[key]; known || key == "json" {
@@ -232,16 +199,6 @@ var marshalsAs = map[reflect.Type]map[string]any{
 }
 
 // deriveSchema builds a JSON Schema from a Go type.
-//
-// Field names, optionality and nesting follow encoding/json: a json tag names
-// the property, "-" omits it, and an embedded struct's fields are promoted into
-// the parent. Constraints come from the ai tag.
-//
-// A type that cannot be described panics, the way a bad pattern panics in
-// regexp.MustCompile. It is a mistake in the caller's own type, it surfaces the
-// moment the tool or schema is constructed rather than mid-conversation, and
-// the alternative is worse: a schema the endpoint rejects, or one that silently
-// permits anything.
 func For[T any]() map[string]any { return ForType(reflect.TypeFor[T]()) }
 
 // ForType is For for a type only known at run time, which is what a set of

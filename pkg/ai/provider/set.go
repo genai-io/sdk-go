@@ -10,10 +10,6 @@ import (
 )
 
 // Set is a set of providers, keyed by ID.
-//
-// It is a plain collection: reads are synchronous, Refresh fans out and
-// reports per-provider failures rather than returning one error, because a
-// single dead endpoint must not empty the list.
 type Set struct {
 	mu sync.RWMutex
 	m  map[string]*Provider
@@ -100,10 +96,6 @@ type RefreshResult struct {
 func (r RefreshResult) OK() bool { return len(r.Errors) == 0 }
 
 // Refresh fetches every provider's listing concurrently.
-//
-// It does not return an error: one provider being down must not fail the whole
-// call, and each provider keeps whatever it last knew. Read RefreshResult to
-// see which ones failed.
 func (s *Set) Refresh(ctx context.Context) RefreshResult {
 	providers := s.All()
 	errs := make([]error, len(providers))

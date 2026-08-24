@@ -1,10 +1,5 @@
 // Command gemini talks to Google's Gemini models, with an image.
 //
-// This driver speaks the REST API directly rather than through
-// google.golang.org/genai — that SDK also serves Vertex AI, so it carries gRPC,
-// protobuf and Google's cloud credential stack. Reaching Gemini with an API key
-// costs 19 external packages here instead of around 190.
-//
 //	export GEMINI_API_KEY=...
 //	go run ./examples/gemini path/to/picture.png
 package main

@@ -8,12 +8,6 @@ import (
 
 // Request is one model invocation: the conversation, the tools it may call,
 // and the settings it runs under.
-//
-// Callers do not build one. Complete and Stream take the messages directly and
-// assemble the rest from Options, so the conversation stays an ordinary
-// []Message that can be sent to any model without rewriting it. A Request
-// exists because a Driver has to receive the whole call as one value; it is
-// also what Middleware inspects and what EstimateTokens measures.
 type Request struct {
 	// System is separate from Messages because protocols place it outside
 	// ordinary turns.
@@ -56,25 +50,13 @@ type Request struct {
 	// own value — anthropic.Options, responses.Options. It is the escape hatch for
 	// what the fields above deliberately do not model, so needing one thing a
 	// protocol offers does not mean writing a whole driver.
-	//
-	// A driver reads it with ProtocolOptionsAs. An absent value yields that driver's
-	// zero value; the wrong concrete type fails the request instead of
-	// silently dropping a setting when the caller swaps protocols.
 	ProtocolOptions ProtocolOptions
 }
 
 // Option sets one field of a Request.
 //
-// The same option means "default" when given to New and "override" when given
-// to a call, so a knob is spelled one way wherever it is set:
-//
 //	client := ai.NewClientWithDriver(driver, model, ai.WithEffort(ai.EffortHigh))
 //	resp, err := client.Complete(ctx, messages, ai.WithEffort(ai.EffortLow))
-//
-// Applying an option is what marks a field as set. That is why there is no
-// presence wrapper around the fields: an explicit zero is expressed by passing
-// it — WithTemperature(0) is deterministic sampling, WithMaxTokens(0) takes
-// the cap off the wire — and omitting the option is what inherits.
 type Option func(*Request)
 
 // WithSystem sets the system prompt.
@@ -169,14 +151,6 @@ func newRequest(m Model, messages []Message, layers ...[]Option) *Request {
 }
 
 // ToolChoice constrains tool use for one turn.
-//
-// It has four states, which is what every protocol here expresses: let the
-// model decide, forbid tools, require some tool, or require one named tool.
-//
-// They are one value rather than a mode beside a name, because a mode beside a
-// name can say "no tools" and "this tool" at once. Somebody then has to decide
-// which wins, and every driver has to decide the same way. One value has
-// nothing to decide.
 type ToolChoice struct {
 	// Unexported, so the four states stay the only four. Fields a caller could
 	// set independently are exactly what this type exists to rule out.
@@ -225,24 +199,6 @@ func (c ToolChoice) String() string {
 }
 
 // Effort is a reasoning rung, named the same way whichever vendor serves it.
-//
-// Every vendor spells the setting differently — a token budget, a level
-// string, a boolean enable flag, sometimes two fields at once — and a caller
-// should not have to know which. The mapping is data, not code: each Model
-// carries its own ordered ReasoningLevel ladder saying what its endpoint wants
-// for each rung, so the same request runs unchanged against Claude, GPT,
-// Gemini or Qwen, and no driver contains an effort table.
-//
-// The constants below are the portable vocabulary — write these and any model
-// will do something sensible, because Model.ResolveLevel snaps a rung the
-// model lacks onto one it has. They are not a closed set: a Model may declare
-// a rung of its own name, from a live listing or from hand-built data, and
-// asking for that name by exact match sends it. What is rejected is a name
-// that is neither portable nor in this model's ladder, which is a typo rather
-// than an intention.
-//
-// The portable ladder matches pi-ai's, so the ecosystem has one vocabulary
-// rather than two.
 type Effort string
 
 const (
@@ -284,11 +240,6 @@ func effortRank(e Effort) (int, bool) {
 }
 
 // CacheRetention is how long a provider should hold a prompt cache entry.
-//
-// Providers spell this differently and price it differently — Anthropic bills
-// a 1-hour write at twice the input rate where a 5-minute write costs 1.25x —
-// so it is a normalized request-level choice rather than something a caller
-// encodes per provider. An endpoint with no prompt cache ignores it.
 type CacheRetention string
 
 const (
@@ -307,15 +258,6 @@ const (
 )
 
 // ProtocolOptions is one driver's protocol-specific request settings.
-//
-// Go has no union type, so this cannot enumerate the drivers that implement
-// it; what it can do is stop Request.ProtocolOptions from being a bare any. The value
-// is whatever that driver defines — anthropic.Options, responses.Options, or a
-// type a driver outside this module declares — and the marker method is what
-// says it is meant to be one.
-//
-// A value of the wrong driver's type is still caught, by ProtocolOptionsAs, at the
-// moment the driver reads it.
 type ProtocolOptions interface {
 	// ProtocolOptions marks this type as one driver's request settings. A no-op:
 	//

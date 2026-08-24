@@ -6,10 +6,6 @@ import (
 )
 
 // What a caller gets when a model reference does not resolve.
-//
-// Both name the fix — qualify the reference with a vendor — because a bare
-// "not found" leaves a caller unable to tell a typo from a model the vendored
-// table has simply not caught up with.
 
 // UnknownModelError reports a bare model ID no vendor lists. Qualify it with a
 // vendor ("deepseek/some-new-model") to use a model the catalog has not caught

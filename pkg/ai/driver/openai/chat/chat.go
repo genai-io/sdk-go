@@ -1,20 +1,11 @@
 // Package chat implements the OpenAI Chat Completions protocol.
 //
-// Chat Completions is the industry's interchange format, so this one driver
-// serves most of the catalog: DeepSeek, Moonshot, Alibaba DashScope, Z.ai,
-// SenseNova, Agnes-AI, GitHub Copilot and a local Ollama all speak it. What
-// separates them is a base URL and a reasoning dialect, both of which arrive
-// as catalog data rather than code. Import it for its side effect:
-//
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/openai/chat"
 //
 // # Where things live
 //
 //	chat.go     construction, Stream and Models
 //	request.go  an ai.Request translated into Chat params
-//
-// Failures are classified by driver/internal/openaierr, shared with the
-// Responses driver: this protocol adds nothing of its own to that.
 package chat
 
 import (

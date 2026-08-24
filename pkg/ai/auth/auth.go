@@ -6,10 +6,6 @@ import (
 )
 
 // Resolving a model reference into something that can talk to a model.
-//
-// Every entry point here answers one question — which vendor is this, and what
-// credential reaches it — and then hands off: to env.go for a key-based vendor,
-// to the credential store for one that signs a person in.
 
 // Available reports the vendors that have a usable credential in the
 // environment, in display order. A vendor needing no credential — a local
@@ -46,10 +42,6 @@ func Available() []catalog.Vendor {
 
 // Config builds an ai.Config for a model reference, filling the credential
 // and endpoint from the environment.
-//
-// It fails when the vendor needs a key and none of its variables are set,
-// rather than sending an empty credential and surfacing the problem later as
-// an opaque 401.
 func Config(ref string) (ai.Config, error) {
 	model, err := catalog.Model(ref)
 	if err != nil {
@@ -112,9 +104,6 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 // endpoint resolved from the environment.
 //
 //	client, err := auth.Client("openai/gpt-4.1")
-//
-// It is the one-line form of Config followed by ai.NewClient, and the driver for the
-// model's protocol must be linked in — see ai/driver/all.
 func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	cfg, err := Config(ref)
 	if err != nil {

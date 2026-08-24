@@ -9,12 +9,6 @@ import (
 )
 
 // API is a wire protocol — the request/response shape an endpoint speaks.
-//
-// This, not the vendor name, is what decides which driver handles a model.
-// Most vendors ship an endpoint that speaks somebody else's protocol
-// (DeepSeek, Moonshot and Ollama speak OpenAI Chat Completions; MiniMax,
-// Xiaomi MiMo and Volcengine speak Anthropic Messages), so a vendor is a row
-// in the catalog and only a protocol needs code.
 type API string
 
 const (
@@ -37,10 +31,6 @@ const (
 
 // VertexConfig is the deployment a Vertex-served model lives in. It is passed
 // as Config.ProtocolConfig to the anthropic/vertex driver.
-//
-// It lives here rather than beside that driver so a caller can fill it in —
-// from the environment, from a settings file — without importing the driver
-// and its Google Cloud auth dependencies.
 type VertexConfig struct {
 	// Project is the GCP project ID serving the model.
 	Project string
@@ -53,10 +43,6 @@ type VertexConfig struct {
 func (VertexConfig) ProtocolConfig() {}
 
 // Modality is a kind of content a model accepts as input.
-//
-// A list rather than a set of booleans: providers keep adding kinds, and a
-// caller checking Accepts(ModalityAudio) against a model that predates audio
-// gets a correct "no" without the model needing a field for it.
 type Modality string
 
 const (
@@ -69,18 +55,6 @@ const (
 
 // ReasoningLevel is one rung of a model's reasoning ladder: what a caller asks
 // for, and what this particular endpoint wants sent for it.
-//
-// Both halves have to be here. A rung that carried only the endpoint's literal
-// ("think+", "high", "enabled") would force every caller to learn each
-// vendor's vocabulary, and the same prompt would stop running across
-// providers — which is the entire point of the normalized ladder. A rung that
-// carried only the normalized Effort would push the mapping back into driver
-// code, which is where it was before.
-//
-// It is a slice on Model rather than a map because the order is meaningful
-// (clamping walks it), because a rung needs more than one value (Anthropic's
-// 4.5 generation wants a token budget where 4.6+ wants an effort string, and
-// one type covers both), and because a slice serializes deterministically.
 type ReasoningLevel struct {
 	// Effort is the normalized rung — the caller's vocabulary.
 	Effort Effort `json:"effort"`
@@ -98,10 +72,6 @@ type ReasoningLevel struct {
 
 // Model is everything the SDK needs to talk to one model: which protocol
 // serves it, where, and what it can do.
-//
-// Values come from the catalog, from a provider's live model listing, or from
-// a caller who wants neither — a hand-built Model with ID, API and BaseURL set
-// is enough to reach any endpoint.
 type Model struct {
 	ID   string `json:"id"`
 	API  API    `json:"api"`
@@ -161,9 +131,6 @@ type Model struct {
 	// GoogleCompat, by value. Read it with CompatOf, which yields the zero
 	// value when the model carries none, so "not stated" and "all defaults"
 	// are the same thing.
-	//
-	// It is `any` rather than a type parameter because a []Model has to hold
-	// models of different protocols; a generic Model[T] could not.
 	Compat any `json:"compat,omitempty"`
 }
 
@@ -213,18 +180,6 @@ func (m Model) DefaultLevel() (ReasoningLevel, bool) {
 }
 
 // ResolveLevel picks the rung to send for a requested effort.
-//
-// An exact rung wins — which is also what carries a rung this package does not
-// name, when the model's own ladder declares it. Otherwise the search runs
-// *upward* first and only falls back downward when nothing above exists:
-// quietly reasoning less than asked is the more surprising failure, so a
-// request for "low" against an off/high endpoint turns reasoning on rather
-// than off. Ordering comes from the portable ladder, so a rung outside it that
-// did not match exactly falls back to the model's default rather than being
-// placed by guesswork.
-//
-// EffortDefault yields the model's default rung, or no rung at all when it
-// states none. A model with no ladder never yields a rung.
 func (m Model) ResolveLevel(want Effort) (ReasoningLevel, bool) {
 	if !m.Reasons() {
 		return ReasoningLevel{}, false
@@ -266,22 +221,9 @@ func (m Model) String() string {
 }
 
 // The JSON codec for Model.
-//
-// A Model has to survive being written to a session file and read back. Compat
-// is an `any`, and the encoding/json default turns it into a map[string]any on
-// the way in — so CompatOf yields the zero value and the model silently loses
-// its protocol dialect. A DeepSeek model reloaded that way stops sending its
-// "reasoning off" field, and reasoning stays on with nothing reporting it.
-//
-// The API field is the discriminator: it already says which protocol the model
-// speaks, so it says which compat type belongs to it. See compat.go.
 
 // modelJSON is Model without the custom marshalling, so the two methods below
 // can delegate the ordinary fields to the standard encoder.
-//
-// It is not named for a wire: nothing sends a Model to a provider. Everywhere
-// else in this package "wire" means the request shape a vendor's API speaks,
-// and this is only how our own Model is written to a file or a cache.
 type modelJSON struct {
 	ID             string            `json:"id"`
 	API            API               `json:"api"`
@@ -322,10 +264,6 @@ func (m Model) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON reads a model back, rebuilding compat as the concrete type its
 // protocol uses.
-//
-// A protocol with no registered decoder is an error rather than a silent
-// downgrade: a model whose quirks were dropped looks fine and misbehaves
-// later, which is the worse of the two outcomes.
 func (m *Model) UnmarshalJSON(data []byte) error {
 	var in modelJSON
 	if err := json.Unmarshal(data, &in); err != nil {
@@ -360,12 +298,6 @@ func (m *Model) UnmarshalJSON(data []byte) error {
 // caller sees.
 
 // Unsupported records what a model cannot do.
-//
-// It is stated as absences rather than capabilities so that its zero value is
-// a fully capable model, which is nearly all of them — an entry says only what
-// is missing. That also means a hand-built Model, or one that arrived from a
-// live listing with nothing but an ID, is assumed capable rather than assumed
-// crippled.
 type Unsupported struct {
 	// Tools means the endpoint rejects tool definitions outright. Common on
 	// small local models and on the older completion-style endpoints.
@@ -386,11 +318,6 @@ type Unsupported struct {
 }
 
 // Stage is where a model sits in its vendor's lifecycle.
-//
-// A retired model is kept in the catalog rather than deleted so that a caller
-// still pointing at one gets told what happened and what to move to. Deleting
-// the entry turns a clear "retired on 2026-02-19, use claude-sonnet-5" into an
-// opaque 404 from the provider.
 type Stage string
 
 const (

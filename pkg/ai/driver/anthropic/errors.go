@@ -11,10 +11,6 @@ import (
 )
 
 // Classifying this protocol's failures into ai.Error kinds.
-//
-// A driver is the only place the mapping is reliable, because it is the only
-// place the SDK's own typed errors and the HTTP response are both in hand.
-// Everything above the driver reads Kind and nothing else.
 
 func (d *Driver) wrap(err error) error {
 	if err == nil {

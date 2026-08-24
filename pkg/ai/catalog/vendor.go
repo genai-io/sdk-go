@@ -10,14 +10,6 @@ import (
 )
 
 // A vendor is a row, not a package.
-//
-// What distinguishes DeepSeek from Moonshot from Ollama is a base URL, an
-// environment variable, a reasoning dialect and a list of models — never Go
-// code, because all three serve the OpenAI Chat Completions protocol that one
-// driver already speaks.
-//
-// An entry states only what differs from its vendor's defaults, and decorate
-// fills in the rest. That is what keeps a table of thirty models readable.
 
 // Vendor is one endpoint of models.
 type Vendor struct {
@@ -45,10 +37,6 @@ type Vendor struct {
 	// RequiresBaseURL marks a vendor that has no usable default endpoint —
 	// one whose host names a tenant's own resource or region, so BaseURLEnv
 	// must actually be set.
-	//
-	// Without it such an entry is a quiet misroute rather than an error: the
-	// endpoint falls back to the protocol owner's host, and an Azure or
-	// Bedrock credential is presented to api.openai.com.
 	RequiresBaseURL bool
 
 	// KeyEnv names the environment variables that conventionally hold the
@@ -87,18 +75,10 @@ type Vendor struct {
 	// limits, sometimes reasoning support. Several vendors encode the context
 	// window in the model ID itself ("kimi-...-128k", "glm-5.2-...") and
 	// publish nothing through their API, which no static table keeps up with.
-	//
-	// It runs on every resolved model, after vendor defaults, and by
-	// convention only fills fields that are still zero.
 	Infer func(ai.Model) ai.Model
 
 	// Verified is when this entry was last checked against the vendor's own
 	// published documentation, as YYYY-MM-DD.
-	//
-	// It is recorded because the failure mode of a vendored catalog is silent:
-	// a stale context window or price reads exactly like a fresh one. A date
-	// lets a caller — or a reviewer — see the age of what they are trusting,
-	// and Stale reports entries that have drifted out of date.
 	Verified string
 
 	// Note records anything a caller has to know before choosing this vendor,
@@ -155,10 +135,6 @@ func (v Vendor) ModelList() []ai.Model {
 // decorate fills in everything a catalog entry inherits from its vendor. An
 // entry only spells out what differs from the vendor's defaults, so a table of
 // thirty models stays readable.
-//
-// Slices and maps are cloned on the way out: the tables are package-level
-// values shared by every caller, and a caller that appended to a returned
-// ladder would corrupt the catalog for everyone else.
 func (v Vendor) decorate(m ai.Model) ai.Model {
 	m.Vendor = v.ID
 	m.API = v.API
@@ -203,11 +179,6 @@ func (v Vendor) decorate(m ai.Model) ai.Model {
 }
 
 // ResolveBaseURL applies an override to a vendor's endpoint.
-//
-// An empty override leaves the vendor default in place. An override is
-// trimmed of its trailing slash and given the vendor's required path suffix if
-// it lacks one, so the bare "http://localhost:11434" people paste for a local
-// Ollama still reaches its OpenAI-compatible API.
 func (v Vendor) ResolveBaseURL(override string) string {
 	override = strings.TrimSpace(override)
 	if override == "" {
@@ -222,11 +193,6 @@ func (v Vendor) ResolveBaseURL(override string) string {
 
 // Provider builds a live provider for this vendor, seeded with its catalog
 // models as the static baseline.
-//
-// The caller supplies the credential and any transport settings; the vendor
-// supplies its identity, protocol, endpoint and models. Fields the caller
-// leaves unset fall back to the vendor's — so passing a zero provider.Config
-// yields an endpoint that can already list and open models, just without a key.
 func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	cfg.ID = v.ID
 	if cfg.Name == "" {

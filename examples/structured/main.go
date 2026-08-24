@@ -3,21 +3,6 @@
 //
 //	meeting, err := ai.CompleteAs[Meeting](ctx, client, messages)
 //
-// The type is named once. That is the point of CompleteAs: the schema sent to
-// the model and the struct the answer decodes into are derived from the same
-// T, so they cannot disagree. Spelling them separately — a schema built from
-// one type, a decode into another — compiles and fails at run time.
-//
-// The struct tags are what the model reads. A field name is often ambiguous to
-// a model in ways it is not to you, and a field with a fixed set of answers
-// should say so rather than hope; the tag key is the JSON Schema keyword it
-// sets, so there is no grammar to learn.
-//
-// The schema is derived to be *accepted*, not merely to be valid — every field
-// required, every object closed, no open schemas — because that is what the
-// providers demand of a strict structured output and a schema they refuse is
-// worth nothing.
-//
 //	export OPENAI_API_KEY=...
 //	go run ./examples/structured
 //

@@ -5,10 +5,6 @@ import (
 )
 
 // The directory itself: one entry per vendor.
-//
-// Adding an OpenAI-compatible endpoint is an entry here and nothing else. The
-// ladders, dialects and shorthands an entry refers to are in presets.go; what
-// an entry means is in vendor.go.
 
 // verified is the date this file's figures were last checked against the
 // vendors' own documentation. Every entry carries its own Verified field so
@@ -446,16 +442,6 @@ var vendors = []Vendor{
 		Note:        "An aggregator: the models it serves and their windows come from its live listing, not from a fixed catalog.",
 	},
 	// ── OpenAI-compatible gateways and single-vendor endpoints ──
-	//
-	// Every entry below is data alone: no new protocol code, because they all
-	// speak Chat Completions. That is the point of splitting protocol from
-	// vendor — reaching a new endpoint is a row.
-	//
-	// The aggregators state no reasoning ladder. They serve models from many
-	// upstreams with different reasoning controls, so one vendor-wide ladder
-	// would be wrong for most of them; a caller who knows their model states
-	// it on the Model. Windows and prices are likewise per-model and come from
-	// the live listing.
 	{
 		ID:          "openrouter",
 		DisplayName: "OpenRouter",
@@ -613,10 +599,6 @@ var vendors = []Vendor{
 
 // CopilotHeaders identify the caller as an editor integration. The Copilot API
 // refuses requests that do not.
-//
-// They live here rather than in auth because both the token exchange and every
-// subsequent request need them, and catalog is the package auth already
-// depends on.
 var CopilotHeaders = map[string]string{
 	"Editor-Version":         "vscode/1.107.0",
 	"Editor-Plugin-Version":  "copilot-chat/0.35.0",

@@ -1,9 +1,5 @@
 // Command quickstart streams one answer from any model the catalog can name.
 //
-// It is the smallest thing that works, and the only example here that is not
-// about one vendor: point -model at anything the catalog carries and the code
-// below does not change.
-//
 //	export OPENAI_API_KEY=...
 //	go run ./examples/quickstart "why is my goroutine leaking?"
 //
@@ -12,8 +8,6 @@
 //
 //	export DEEPSEEK_API_KEY=...
 //	go run ./examples/quickstart -model deepseek/deepseek-v4-pro -effort high "prove it"
-//
-// Nothing but the -model value changes between providers.
 package main
 
 import (

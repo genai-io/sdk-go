@@ -3,18 +3,8 @@ package catalog
 import "github.com/genai-io/sdk-go/pkg/ai"
 
 // The vocabulary a vendor entry is written in.
-//
-// A reasoning ladder, a protocol dialect, a rate card and a model shorthand are
-// each named once here and referred to from vendors.go, so the table stays a
-// table: thirty models a reader can scan, rather than thirty repetitions of the
-// same four literals.
 
 // ─── reasoning ladders ───
-//
-// A ladder is ordered least to most effort, and each rung carries what its
-// endpoint actually wants: Value for a level-taking field, Budget for a
-// token-taking one. Nothing here is translated in driver code — adding a
-// vendor's spelling is adding rungs.
 
 var (
 	// claudeAdaptive is output_config.effort for Claude 4.7 and later, where

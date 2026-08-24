@@ -12,18 +12,9 @@ import (
 )
 
 // The default way to show a person what a sign-in needs from them.
-//
-// A host application that has its own UI supplies its own oauth.Interaction
-// instead; this is what a command-line program gets for free.
 
 // ConsoleInteraction prints the instruction to stderr and tries to open a
 // browser.
-//
-// Stderr, not stdout: a CLI whose output is being piped must not have a
-// sign-in prompt land in the middle of its data. Opening the browser is
-// best-effort — over SSH or in a container there is nothing to open, and the
-// printed URL is then the whole instruction, which is why it is always
-// printed rather than only on failure.
 func ConsoleInteraction() oauth.Interaction {
 	return oauth.InteractionFunc(func(ctx context.Context, p oauth.Prompt) error {
 		if p.UserCode != "" {

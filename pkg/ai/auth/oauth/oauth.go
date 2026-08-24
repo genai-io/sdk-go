@@ -2,10 +2,6 @@
 // authenticate a person rather than a service: the device authorization grant
 // (RFC 8628) and the authorization code grant with PKCE (RFC 7636).
 //
-// Nothing here knows about any provider. The endpoints, client identifiers and
-// scopes are arguments, so the same two flows serve GitHub Copilot, a ChatGPT
-// subscription, and anything else that speaks the specifications.
-//
 // # Where things live
 //
 //	oauth.go   what both grants share: tokens, config, errors, refresh
@@ -67,10 +63,6 @@ type Prompt struct {
 }
 
 // Interaction shows a Prompt to whoever is signing in.
-//
-// It is an interface because the SDK does not know where that person is
-// looking: a terminal, a TUI that must not have its frame written over, a web
-// UI relaying the code to a browser tab.
 type Interaction interface {
 	Prompt(ctx context.Context, p Prompt) error
 }
@@ -152,10 +144,6 @@ func (r tokenResponse) token() Token {
 }
 
 // postForm sends a form-encoded request and decodes the reply.
-//
-// It asks for JSON explicitly because several providers — GitHub among them —
-// answer a form-encoded body by default, and the two shapes are not
-// interchangeable.
 func postForm(ctx context.Context, client *http.Client, endpoint string, form url.Values) (tokenResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {

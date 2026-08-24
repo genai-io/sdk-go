@@ -9,24 +9,6 @@ import (
 )
 
 // Checking a decoded value against a schema.
-//
-// This is not a JSON Schema conformance engine and does not try to be. It
-// exists for one job: a model produced these arguments, so they are model
-// output and wrong sometimes, and the mistake should come back as something
-// the model can correct rather than as whatever the tool does with nonsense.
-//
-// The mistakes a model actually makes are a short list — a missing field, a
-// string where a number belongs, an invented property, a value outside the set
-// it was given — and every one of them is checked here. What is deliberately
-// absent is the long tail a model never trips over and a schema derived by this
-// package never contains: $ref, allOf/oneOf, patternProperties, dependencies.
-// A schema using those is checked as far as this understands it and passes the
-// rest, which is the honest failure: it lets a valid call through rather than
-// blocking one it cannot judge.
-//
-// Every message names the property by the path the caller wrote it at, because
-// "mode must be one of on, off" is actionable where "validating /properties/
-// mode: enum" is not.
 
 // validateAgainst checks a decoded JSON value against a schema. An empty
 // schema constrains nothing, which is what a tool declaring no parameters

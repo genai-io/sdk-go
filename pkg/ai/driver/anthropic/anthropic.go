@@ -1,10 +1,5 @@
 // Package anthropic implements the Anthropic Messages protocol.
 //
-// It backs every vendor whose endpoint speaks that protocol — Anthropic
-// itself, MiniMax, Xiaomi MiMo and Volcengine Ark — which differ only in base
-// URL, credential and how the key is presented. Import it for its side effect
-// to make ai.NewClient handle ai.APIAnthropicMessages:
-//
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/anthropic"
 //
 // # Where things live
@@ -57,12 +52,6 @@ func New(cfg ai.Config) (ai.Driver, error) {
 
 // ClientOptions builds the SDK options a Config asks for: endpoint,
 // credential, transport and headers.
-//
-// It is exported for the sake of a driver that speaks this protocol over a
-// different transport — Vertex AI authenticates with Google credentials rather
-// than an API key, but everything downstream of client construction is
-// identical. Such a driver builds its own client from these options plus its
-// own, then hands it to NewWithClient.
 func ClientOptions(cfg ai.Config) []option.RequestOption {
 	opts := []option.RequestOption{
 		// Retries belong to the caller, which alone knows the budget for the
@@ -91,11 +80,6 @@ func ClientOptions(cfg ai.Config) []option.RequestOption {
 }
 
 // NewWithClient builds a driver over an already-constructed SDK client.
-//
-// Everything this driver does after construction — message conversion,
-// thinking configuration, streaming, error classification — is the same
-// whatever produced the client, so a transport that the Config cannot express
-// supplies its own client rather than forking the driver.
 func NewWithClient(client sdk.Client, cfg ai.Config) (ai.Driver, error) {
 	if cfg.Model.ID == "" {
 		return nil, fmt.Errorf("%s: model ID is required", Name)

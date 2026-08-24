@@ -1,15 +1,5 @@
 // Package responses implements the OpenAI Responses protocol.
 //
-// Responses is OpenAI's current API and the only one that round-trips a
-// reasoning model's internal state, so it is what the openai vendor uses. The
-// older Chat Completions protocol is the sibling package chat, and is what the
-// rest of the industry implements.
-//
-// The vendor SDK's own responses package is imported here as wire, since this
-// package carries that name: those identifiers are the protocol's wire types.
-//
-// Import this one for its side effect:
-//
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/openai/responses"
 //
 // # Where things live

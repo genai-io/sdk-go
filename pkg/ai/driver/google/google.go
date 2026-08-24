@@ -1,22 +1,6 @@
 // Package google implements the Google Gemini generateContent protocol.
 //
-// Import it for its side effect to make ai.NewClient handle ai.APIGoogleGenAI:
-//
 //	import _ "github.com/genai-io/sdk-go/pkg/ai/driver/google"
-//
-// It speaks the REST API directly rather than through google.golang.org/genai.
-// That SDK also serves Vertex AI, so it carries gRPC, protobuf, OpenTelemetry
-// and Google's cloud credential stack — around 170 packages a program reaches
-// for Gemini with an API key never uses. The wire format it encodes is
-// transcribed in wire.go.
-//
-// This is the Gemini protocol, not "Google's models". Claude served through
-// Google Cloud Vertex AI is a deployment of the Anthropic Messages protocol
-// and lives in ai/driver/anthropic/vertex — its wire format, its SDK and its
-// conversion code are Anthropic's, and only the host and the credentials are
-// Google's. Keeping it out of here is also what lets this package cost 19
-// packages instead of 271: it speaks REST with an API key and links no Google
-// credential stack at all.
 //
 // # Where things live
 //

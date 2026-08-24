@@ -9,12 +9,6 @@ import (
 )
 
 // FileStore keeps credentials in one JSON file.
-//
-// This is the only thing in this SDK that writes to disk, and it writes
-// secrets, so it does so carefully: the directory is created 0700, the file
-// 0600, and a save is written to a temporary file and renamed, so an
-// interrupted write cannot leave a truncated file where working credentials
-// were.
 type FileStore struct {
 	path string
 	mu   sync.Mutex

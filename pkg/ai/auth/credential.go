@@ -27,10 +27,6 @@ func (c Credential) Expired() bool {
 }
 
 // Store keeps credentials between runs.
-//
-// It is an interface because where a credential belongs is the host
-// application's decision, not this package's: a CLI wants a file, a server
-// wants its own secret manager, and a test wants neither.
 type Store interface {
 	// Load returns the credential kept for a vendor. The second result is
 	// false when there is none, which is not an error — nobody has signed in
@@ -52,11 +48,6 @@ type Store interface {
 
 // DefaultStore is where Login, Config, and Endpoint keep credentials when
 // they are not handed a store.
-//
-// A package-level variable because the choice belongs to the application and
-// has to hold for calls that take no options — ai.Config resolution among
-// them. Set it once at start-up. Nil means a file under the user's config
-// directory, which is what a CLI wants and what a server should override.
 var DefaultStore Store
 
 func resolveStore(s Store) (Store, error) {

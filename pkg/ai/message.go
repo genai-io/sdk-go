@@ -20,39 +20,21 @@ const (
 )
 
 // BlockType identifies the semantic kind of one content block.
-//
-// Content is deliberately a tagged sequence instead of a Message with parallel
-// text, image, thinking and tool slices. The sequence preserves the order the
-// model produced and must later receive back.
 type BlockType string
 
 const (
 	// BlockText is ordinary prose, in Block.Text. Either role.
-	//
-	// It is what you wrote and what the model answered; Response.Text joins
-	// every one of them in order.
 	BlockText BlockType = "text"
 
 	// BlockImage is an inline picture, in Block.Image. User turns only.
-	//
-	// Send one to a model whose Input lists ModalityImage; sending one to a
-	// text-only model is refused before the request leaves, rather than being
-	// dropped so the model answers about something it never saw.
 	BlockImage BlockType = "image"
 
 	// BlockThinking is reasoning you are allowed to read, in Block.Text, with
 	// its provider signature in Block.Signature. Assistant turns only.
-	//
-	// Show it or hide it as you like — but replay it unchanged in the history
-	// of the next turn. Anthropic rejects a thinking block whose signature is
-	// missing, because the signature is what proves the text was not edited.
 	BlockThinking BlockType = "thinking"
 
 	// BlockToolCall is the model asking you to run something, in
 	// Block.ToolCall. Assistant turns only.
-	//
-	// Every call must be answered by a BlockToolResult in the turn that
-	// follows, or the next request is rejected — see RepairHistory.
 	BlockToolCall BlockType = "tool_call"
 
 	// BlockToolResult is your answer to one call, in Block.ToolResult. User
@@ -61,19 +43,10 @@ const (
 
 	// BlockReasoning is reasoning state you cannot read, in Block.Reasoning.
 	// Assistant turns only, and only on the OpenAI Responses protocol.
-	//
-	// It is the model's own working, encrypted. Carry it forward untouched and
-	// a reasoning model resumes where it left off; drop it and the model
-	// re-reasons from scratch on every turn.
 	BlockReasoning BlockType = "reasoning"
 )
 
 // Block is the primitive carried by messages, responses and stream events.
-//
-// It is a tagged union: Type says which one field below is meaningful, and the
-// rest must be zero. A block carrying a payload that does not match its Type is
-// refused before the request leaves — quietly sending the wrong one would mean
-// the model answered about something you did not send.
 //
 //	Type              carried in         produced by
 //	BlockText         Text               either
@@ -82,9 +55,6 @@ const (
 //	BlockToolCall     ToolCall           the model
 //	BlockToolResult   ToolResult         you
 //	BlockReasoning    Reasoning          the model
-//
-// Use the constructors — TextBlock, ImageBlock and the rest — rather than
-// filling this in by hand.
 type Block struct {
 	// Type says which field below carries this block's payload.
 	Type BlockType `json:"type"`
@@ -101,18 +71,11 @@ type Block struct {
 }
 
 // Content is one turn's blocks, in the order they were produced.
-//
-// The order is the point. A model that thought, then called a tool, then
-// explained itself produced three blocks in that sequence, and the next
-// request has to carry them back the same way. Parallel fields — a Text here,
-// a ToolCalls slice there — would lose it, and no protocol accepts a
-// conversation whose order was reconstructed by guesswork.
 type Content []Block
 
 // TextBlock returns an answer or user-text block.
 func TextBlock(text string) Block { return Block{Type: BlockText, Text: text} }
 
-// ImageBlock returns an inline-image block.
 func ImageBlock(image Image) Block { return Block{Type: BlockImage, Image: &image} }
 
 // ThinkingBlock returns human-readable reasoning and its optional opaque
@@ -329,19 +292,12 @@ type ReasoningItem struct {
 }
 
 // Message is one turn of the conversation: who spoke, and what they produced.
-//
-// Build one with UserMessage, AssistantMessage or ToolResultsMessage rather
-// than by hand, and append Response.Message to your history to carry a model's
-// turn — including its thinking and reasoning state — into the next request.
 type Message struct {
 	Role    Role    `json:"role"`
 	Content Content `json:"content,omitempty"`
 }
 
 // UserMessage returns a user turn: text, then any images.
-//
-// For content in an order this does not produce — text, image, more text —
-// write the message out: Message{Role: RoleUser, Content: Content{…}}.
 func UserMessage(text string, images ...Image) Message {
 	content := TextContent(text)
 	for _, image := range images {

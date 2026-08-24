@@ -30,16 +30,6 @@ type CodeEndpoints struct {
 }
 
 // Code runs the authorization code grant with PKCE.
-//
-// PKCE exists because a public client has no secret: without it, anyone who
-// intercepts the redirect can exchange the code themselves. The verifier is
-// generated here, only its hash travels to the authorization endpoint, and the
-// verifier itself is sent only on the exchange — so an intercepted code is
-// useless.
-//
-// The redirect must be a loopback address; this opens a listener on its port,
-// waits for the provider to send the person back, and shuts it down. A caller
-// on a machine with no browser should use Device instead.
 func Code(ctx context.Context, cfg Config, endpoints CodeEndpoints, ui Interaction) (Token, error) {
 	verifier, challenge, err := pkcePair()
 	if err != nil {
@@ -94,8 +84,6 @@ func Code(ctx context.Context, cfg Config, endpoints CodeEndpoints, ui Interacti
 // AuthorizeURL builds the page a person is sent to, for a caller driving the
 // redirect itself — a web application that already has a callback route, and
 // does not want this package opening a listener.
-//
-// The verifier it returns must be kept and handed to Exchange.
 func AuthorizeURL(cfg Config, endpoints CodeEndpoints, state string) (authorize, verifier string, err error) {
 	verifier, challenge, err := pkcePair()
 	if err != nil {
@@ -148,10 +136,6 @@ type callbackResult struct {
 }
 
 // callbackHandler receives the person back from the provider.
-//
-// The state is compared in constant time and a mismatch is refused: without
-// that check, a third party can complete somebody else's sign-in by sending
-// them a crafted callback.
 func callbackHandler(path, state string, results chan<- callbackResult) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if path != "" && r.URL.Path != path {

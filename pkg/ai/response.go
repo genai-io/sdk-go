@@ -20,15 +20,6 @@ const (
 )
 
 // Usage is the token accounting for one call.
-//
-// Input is fresh prompt tokens only. The cached prefix is carried separately,
-// split by what happened to it: CacheWrite is a prefix the provider stored this
-// call, CacheRead is one it recognised from a previous one. They are priced
-// very differently — a write costs more than fresh input, a read a small
-// fraction of it — so summing them into a single figure would make a cached
-// conversation impossible to account for. TotalInput adds all three.
-//
-// Reasoning tokens are part of Output, not additional to it.
 type Usage struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
@@ -61,9 +52,6 @@ func (u *Usage) Add(other Usage) {
 // report usage in pieces — Anthropic sends input tokens at message_start and
 // output tokens at message_delta — so a whole-struct replace would erase the
 // half that arrived first.
-//
-// This is how a stream accumulates usage; Add is how a caller accumulates
-// whole calls.
 func mergeUsage(dst *Usage, src Usage) {
 	if src.Input > 0 {
 		dst.Input = src.Input
@@ -144,20 +132,8 @@ func (r *Response) Message() Message {
 }
 
 // Decoding an answer into a Go value.
-//
-// This lives with Response rather than with Schema because it is a Response
-// operation and works with no Schema at all. A natively constrained answer is
-// bare JSON and needs none of the leniency below; an answer from a model that
-// cannot constrain output — where the shape was asked for in the prompt
-// instead — arrives fenced, prefaced with prose, or both. A caller holding a
-// Response should not have to know which path produced it, so the tolerance
-// lives here, once, rather than in every caller.
 
 // Unmarshal decodes the answer into v.
-//
-// It tolerates what a model actually returns rather than only what it should:
-// a bare JSON value, one wrapped in a markdown fence, or one preceded by
-// prose.
 func (r *Response) Unmarshal(v any) error {
 	if r == nil {
 		return fmt.Errorf("ai: no response to decode")
@@ -186,11 +162,6 @@ func Parse[T any](resp *Response, err error) (T, error) {
 }
 
 // ExtractJSON finds the JSON value in a model's answer.
-//
-// It tries the whole string first, since a constrained answer is exactly that.
-// Failing which it strips a markdown fence, and failing that it scans for the
-// first balanced object or array — tracking string literals and escapes, so a
-// brace inside a quoted value does not end the scan early.
 func ExtractJSON(s string) (string, bool) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {

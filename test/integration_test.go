@@ -445,7 +445,7 @@ func TestRepairReplacesBrokenTextWithoutRewritingTheCallers(t *testing.T) {
 		ai.ToolResultsMessage(ai.ToolResult{ToolCallID: "1", ToolName: "t", Content: broken}),
 	}
 
-	repaired := ai.RepairHistory(history)
+	repaired := ai.Repair(history)
 	if len(repaired) != 3 {
 		t.Fatalf("repaired history has %d messages, want 3; the checks below would pass vacuously", len(repaired))
 	}

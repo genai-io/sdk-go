@@ -6,38 +6,10 @@ import (
 )
 
 // History repair: making a real conversation acceptable to every protocol.
-//
-// A conversation that a program actually accumulated is not always one a
-// provider will take. Two things go wrong, both outside the caller's control,
-// and every protocol here rejects both:
-//
-//   - A tool call with no answer. The user hits Ctrl-C while the model is
-//     emitting a tool call, or a restored session was compacted between the
-//     call and its result. The history now ends on an unanswered call, and the
-//     next request comes back 400.
-//   - Invalid UTF-8. A conversation that passed through a JavaScript runtime,
-//     or a session file written by one, can carry half a UTF-16 surrogate pair.
-//     Go keeps it in a string without complaint; some providers reject the
-//     request and others answer in mojibake.
-//
-// Repairing both here, once, is what keeps four drivers from each carrying
-// their own version of it — and what keeps the failure from being four
-// different failures. Client.prepare runs RepairHistory before validation and
-// before counting, so exact counting, estimated counting, middleware and
-// generation all observe the same conversation that goes on the wire.
-//
-// This is repair, not policy. It removes only what the protocol itself would
-// reject. Deciding that a conversation is too long, summarizing it, dropping
-// the oldest turns — those are the application's calls to make, with knowledge
-// this package does not have, and none of them happen here.
 
-// RepairHistory returns a conversation every protocol will accept: tool calls
-// and their results paired, invalid UTF-8 replaced.
-//
-// It never writes to msgs or to anything msgs points at — the caller's history
-// is theirs, and a session that silently lost a turn to an SDK is a bug nobody
-// can find.
-func RepairHistory(msgs []Message) []Message {
+// Repair returns a conversation every protocol will accept: tool calls and
+// their results paired, invalid UTF-8 replaced.
+func Repair(msgs []Message) []Message {
 	out := repairToolPairing(msgs)
 	for i := range out {
 		out[i] = repairEncoding(out[i])
@@ -46,11 +18,6 @@ func RepairHistory(msgs []Message) []Message {
 }
 
 // repairToolPairing enforces tool-call/tool-result pairing.
-//
-// The rule is strict adjacency — for an assistant message, only the run of
-// tool-result messages directly after it counts. A call with no matching
-// result is stripped, a result matching no kept call is dropped, and a message
-// left carrying nothing at all is removed.
 func repairToolPairing(msgs []Message) []Message {
 	out := make([]Message, 0, len(msgs))
 
@@ -118,10 +85,6 @@ func repairToolPairing(msgs []Message) []Message {
 // isEmptyMessage reports whether a message would send nothing at all. Several
 // OpenAI-compatible endpoints reject such a message outright rather than
 // ignoring it.
-//
-// An assistant message is empty unless it carries text or tool calls:
-// reasoning content alone does not satisfy Chat Completions validation, which
-// DeepSeek rejects with "content or tool_calls must be set".
 func isEmptyMessage(m Message) bool {
 	for _, block := range m.Content {
 		switch block.Type {
@@ -180,11 +143,6 @@ func sanitizeContent(c Content) (Content, bool) {
 
 // sanitizeBlock returns the block with its text made valid, and whether
 // anything had to change.
-//
-// It decides before it allocates. Cloning first and comparing afterwards costs
-// a block copy for every block in the conversation, on every request, to
-// discover that a conversation which is already valid — nearly all of them —
-// needed nothing.
 func sanitizeBlock(block Block) (Block, bool) {
 	switch block.Type {
 	case BlockText, BlockThinking:
@@ -223,15 +181,6 @@ func sanitizeBlock(block Block) (Block, bool) {
 }
 
 // sanitizeText replaces invalid UTF-8 with the replacement character.
-//
-// The case that matters is a lone UTF-16 surrogate: a conversation that passed
-// through a JavaScript runtime, or a session file written by one, can carry
-// half a surrogate pair encoded as three bytes that are not valid UTF-8. Go
-// tolerates it in a string, some providers reject the request outright, and
-// others return mojibake — so it is cleaned on the way out rather than left to
-// fail differently on each endpoint.
-//
-// Text that is already valid is returned unchanged and unallocated.
 func sanitizeText(s string) string {
 	if utf8.ValidString(s) {
 		return s

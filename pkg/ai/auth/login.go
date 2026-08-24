@@ -14,10 +14,6 @@ import (
 // key to paste, only a subscription and a browser. Without an interactive
 // sign-in those vendors are unreachable, which is why their catalog entries
 // used to say "supply the exchanged token yourself".
-//
-// The two grants live in package oauth and know nothing about any provider.
-// What is provider-specific — the endpoints, the client identifiers, and in
-// Copilot's case a second exchange for a short-lived API token — is here.
 
 // flow is one vendor's interactive sign-in.
 type flow struct {
@@ -26,12 +22,6 @@ type flow struct {
 	// login runs the grant and returns what should be stored.
 	login func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error)
 	// token returns the value to present on a request, renewing as needed.
-	//
-	// The three results are deliberately separate. present is what goes in the
-	// header; expires is that value's own lifetime, which for Copilot is half
-	// an hour while the credential behind it never expires; updated is what
-	// should be persisted, which changes only when a refresh rotated
-	// something.
 	token func(ctx context.Context, client *http.Client, c Credential) (present string, expires time.Time, updated Credential, err error)
 }
 
@@ -63,9 +53,6 @@ type LoginOptions struct {
 }
 
 // Login runs a vendor's interactive sign-in and stores the result.
-//
-// It blocks until the person finishes in a browser, or the context ends. The
-// returned credential is also saved, so the next run does not sign in again.
 func Login(ctx context.Context, vendorID string, opts LoginOptions) (Credential, error) {
 	f, ok := flows[vendorID]
 	if !ok {

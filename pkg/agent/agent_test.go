@@ -1712,3 +1712,31 @@ func TestAnInterruptedTurnStillClosesWhatItOpened(t *testing.T) {
 		t.Errorf("%d messages announced, %d in the conversation — the stream and the agent disagree", added, got)
 	}
 }
+
+// A model that ran out of output room did not finish answering, and saying
+// end_turn would tell a caller the reply is whole when it is cut off.
+func TestATruncatedAnswerSaysSo(t *testing.T) {
+	cut := []ai.Delta{
+		{Block: ai.TextBlock("the first half of a sentence that")},
+		{EndBlock: true},
+		{StopReason: ai.StopMaxTokens},
+	}
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{cut}})
+
+	events, err := collect(t, a, ai.UserMessage("write me an essay"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+
+	last := events[len(events)-1].(agent.TurnEnd)
+	if last.StopReason != agent.StopMaxTokens {
+		t.Errorf("stop reason = %q, want max_tokens", last.StopReason)
+	}
+
+	// What did arrive is still the conversation's: a truncated answer is an
+	// answer to continue from, not one to throw away.
+	msgs := a.Messages()
+	if got := msgs[len(msgs)-1].Text(); !strings.Contains(got, "first half") {
+		t.Errorf("the partial answer did not enter the conversation: %q", got)
+	}
+}

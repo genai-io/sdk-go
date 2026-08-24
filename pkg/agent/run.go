@@ -24,7 +24,8 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		return ErrBusy
 	}
 
-	a.emit(ctx, RunStart{})
+	a.alive = ctx.Done()
+	a.emit(RunStart{})
 
 	// Whichever way the loop below leaves, it leaves the same way: one last
 	// event, then the channel closed so a reader ranging over it stops.
@@ -56,14 +57,14 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		//
 		// Each turn gets a context of its own so Interrupt can end one without
 		// ending the run.
-		work, stop := context.WithCancel(ctx)
+		turnCtx, stopTurn := context.WithCancel(ctx)
 		a.mu.Lock()
-		a.interrupt = stop
+		a.stopTurn = stopTurn
 		a.mu.Unlock()
 
 		a.turnCount.Add(1)
-		a.turn(ctx, work, batch)
-		stop()
+		a.turn(turnCtx, batch)
+		stopTurn()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -72,7 +73,7 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 
 // emit hands one event to the reader. What happens when the reader is behind
 // depends on the event, and this is the only place that decides.
-func (a *Agent) emit(ctx context.Context, e Event) {
+func (a *Agent) emit(e Event) {
 	switch e.(type) {
 	case MessageUpdate, ToolUpdate:
 		select {
@@ -82,7 +83,7 @@ func (a *Agent) emit(ctx context.Context, e Event) {
 	default:
 		select {
 		case a.out <- e:
-		case <-ctx.Done():
+		case <-a.alive:
 		}
 	}
 }
@@ -90,12 +91,12 @@ func (a *Agent) emit(ctx context.Context, e Event) {
 // add puts a message into the conversation and reports it, in that order: by
 // the time a reader sees MessageAdded, Messages already holds it. The other
 // order hands a handler news of a message and a conversation without it.
-func (a *Agent) add(ctx context.Context, msg ai.Message) {
+func (a *Agent) add(msg ai.Message) {
 	a.mu.Lock()
 	a.messages = append(a.messages, msg)
 	a.mu.Unlock()
 
-	a.emit(ctx, MessageAdded{Message: msg})
+	a.emit(MessageAdded{Message: msg})
 }
 
 // drain takes everything already queued, without waiting for more.

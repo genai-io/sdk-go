@@ -74,10 +74,11 @@ Five ways a turn can end, and every exit names one:
 | `StopReason` | |
 | --- | --- |
 | `end_turn` | the model answered without asking for a tool |
+| `max_tokens` | the model ran out of output room mid-answer — the reply is not whole |
 | `max_steps` | the step budget ran out with the model still working |
 | `terminated` | every tool in a batch asked the loop to stop |
 | `error` | a model call failed past its retry budget, or a hook refused |
-| `canceled` | the context ended mid-exchange |
+| `canceled` | the context ended mid-exchange, or `Interrupt` was called |
 
 ### Ending one early
 

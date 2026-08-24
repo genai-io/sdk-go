@@ -79,6 +79,19 @@ Five ways a turn can end, and every exit names one:
 | `error` | a model call failed past its retry budget, or a hook refused |
 | `canceled` | the context ended mid-exchange |
 
+### Ending one early
+
+A stream that says nothing is the one failure that looks like work, so an
+agent bounds it: `WithStreamTimeout(first, idle)` caps how long the endpoint
+may take to say anything and how long it may pause once it has started, on by
+default at five minutes and one minute. Running out is reported as a network
+failure — because it is one — and retried like any other.
+
+`Interrupt()` ends the exchange in flight and leaves the run alive: the turn
+stops with `StopCanceled` and the agent goes back to waiting on `In`. That is
+what a user pressing escape asks for. Cancelling `Run`'s own context is the
+other thing, and ends everything.
+
 ## Events
 
 Everything the agent does arrives on `Out()` as one of eleven types. Two things

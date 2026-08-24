@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
@@ -30,6 +32,17 @@ type Agent struct {
 	maxSteps    int
 	maxAttempts int
 
+	// firstChunk and idle bound how long a stream may say nothing. Zero
+	// disables either one.
+	firstChunk time.Duration
+	idle       time.Duration
+
+	inBuf  int
+	outBuf int
+
+	// interrupt cancels the turn in flight. Nil between turns.
+	interrupt context.CancelFunc
+
 	// turnCount is how many exchanges this agent has held. It counts the ones
 	// it actually ran, so a restored conversation starts again at zero — what
 	// came back from storage was someone else's counting.
@@ -44,12 +57,17 @@ type Agent struct {
 }
 
 const (
-	// inputBuffer is how many messages may wait before a sender blocks.
-	inputBuffer = 64
-	// eventBuffer is how far ahead of a reader the agent may get. Past it the
-	// loop waits, which is the right thing to do: an event a session needed is
-	// worse to lose than a paint is to delay.
-	eventBuffer = 256
+	// defaultInputBuffer is how many messages may wait before a sender blocks.
+	defaultInputBuffer = 64
+	// defaultEventBuffer is how far ahead of a reader the agent may get. Past
+	// it the loop waits, which is the right thing to do: an event a session
+	// needed is worse to lose than a paint is to delay.
+	defaultEventBuffer = 256
+
+	// A stream that says nothing is the one failure that looks like work.
+	// These bound it; WithStreamTimeout replaces them.
+	defaultFirstChunk = 5 * time.Minute
+	defaultIdle       = time.Minute
 )
 
 // Option sets one thing an agent does not need in order to exist. New's
@@ -98,6 +116,33 @@ func WithMessages(msgs []ai.Message) Option {
 // WithMaxSteps caps model calls per exchange. Zero means no cap.
 func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
 
+// WithStreamTimeout bounds how long a model stream may say nothing: first is
+// how long the endpoint has to say anything at all, idle how long it may pause
+// once it has started. Either at zero turns that half off.
+//
+// A stalled stream is the one failure that looks like work, so this is on by
+// default — five minutes and one minute. A model that reasons silently for
+// longer than idle needs a longer one, or none.
+//
+// Running out is reported as a network failure, because it is one, and is
+// retried like any other.
+func WithStreamTimeout(first, idle time.Duration) Option {
+	return func(a *Agent) { a.firstChunk, a.idle = first, idle }
+}
+
+// WithBuffers sizes the two channels: how many messages may wait on In before
+// a sender blocks, and how far ahead of a reader Out may get.
+func WithBuffers(in, out int) Option {
+	return func(a *Agent) {
+		if in > 0 {
+			a.inBuf = in
+		}
+		if out > 0 {
+			a.outBuf = out
+		}
+	}
+}
+
 // WithMaxAttempts caps attempts per model call when a stream fails retryably.
 func WithMaxAttempts(n int) Option {
 	return func(a *Agent) {
@@ -118,14 +163,18 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 	a := &Agent{
 		client:      client,
 		maxAttempts: 3,
-		in:          make(chan ai.Message, inputBuffer),
-		out:         make(chan Event, eventBuffer),
+		firstChunk:  defaultFirstChunk,
+		idle:        defaultIdle,
+		inBuf:       defaultInputBuffer,
+		outBuf:      defaultEventBuffer,
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(a)
 		}
 	}
+	a.in = make(chan ai.Message, a.inBuf)
+	a.out = make(chan Event, a.outBuf)
 	return a, nil
 }
 
@@ -235,4 +284,20 @@ func (a *Agent) toolNamed(name string) (Tool, bool) {
 		}
 	}
 	return nil, false
+}
+
+// Interrupt ends the turn in flight without ending the run: the exchange stops
+// with StopCanceled, and the agent goes back to waiting on In.
+//
+// This is what a user pressing escape asks for. Cancelling Run's own context
+// is the other thing — it ends everything. Between turns there is nothing to
+// interrupt and this does nothing; watch TurnEnd to know it landed.
+func (a *Agent) Interrupt() {
+	a.mu.Lock()
+	cancel := a.interrupt
+	a.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 }

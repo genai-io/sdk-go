@@ -241,7 +241,7 @@ for e := range a.Out() {
 | **hook 是征询，事件是通知** | `PreInfer` / `PostInfer` 分列模型调用两侧，`PreTool` / `PostTool` 分列工具两侧。一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。 |
 | **一个工具面对两个受众** | `Content` 给模型，`Details` 给你的界面——为人排版的东西，不必此后每一轮都为它付费。 |
 
-一批工具调用默认并发执行，除非某个工具声明自己不能；重试、取消、步数预算各自以一个说明原因的 stop reason 结束一个 turn。
+一批工具调用默认并发执行，除非某个工具声明自己不能。可重试的流失败会重试，**静默的流有时限、超时也重试**，而 `Interrupt()` 结束正在进行的交换却让 run 活着——每一种都以一个说明原因的 stop reason 结束一个 turn。
 
 会话是这条事件流的**消费者**，不住在 agent 内部：在你自己的循环里 `rec.Handle(e)` 记录发生了什么，`session.Open` 再把它折回成一段可以续上的对话。
 

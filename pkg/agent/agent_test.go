@@ -277,7 +277,7 @@ func TestToolEndCarriesTheToolsOwnResult(t *testing.T) {
 	}
 }
 
-// The claim that let San's OnStreamReset be deleted: a retry is two spans with
+// The claim that lets a retry need no event of its own: it is two spans with
 // nothing appended between them, and that absence is the signal.
 func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 	a := newAgent(t, &scripted{
@@ -1528,5 +1528,145 @@ func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
 	}
 	if started != ended {
 		t.Errorf("%d spans opened, %d closed — a span must not be half reported", started, ended)
+	}
+}
+
+// stalling is an endpoint that says nothing until its context ends, which is
+// the failure a stream watchdog exists for: it looks exactly like work.
+type stalling struct {
+	mu      sync.Mutex
+	started chan struct{}
+	calls   int
+	// after is how many calls stall before one answers.
+	after int
+}
+
+func (d *stalling) Name() string { return "stalling" }
+
+func (d *stalling) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+	d.mu.Lock()
+	n := d.calls
+	d.calls++
+	d.mu.Unlock()
+
+	return func(yield func(ai.Delta, error) bool) {
+		if n >= d.after {
+			for _, delta := range text("answered at last") {
+				if !yield(delta, nil) {
+					return
+				}
+			}
+			return
+		}
+		if d.started != nil && n == 0 {
+			close(d.started)
+		}
+		<-ctx.Done()
+		yield(ai.Delta{}, ctx.Err())
+	}
+}
+
+// A stream that goes quiet is a transient failure, so the attempt that hit it
+// is retried rather than failing the turn.
+func TestAStalledStreamIsRetried(t *testing.T) {
+	a := newAgent(t, &stalling{after: 1},
+		agent.WithStreamTimeout(20*time.Millisecond, 20*time.Millisecond))
+
+	events, err := collect(t, a, ai.UserMessage("go"))
+	if err != nil {
+		t.Fatalf("the stall was not recovered from: %v", err)
+	}
+
+	if n := steps(events); n != 1 {
+		t.Errorf("steps = %d, want 1 — a retry is not a second step", n)
+	}
+	var attempts []int
+	for _, e := range events {
+		if v, ok := e.(agent.MessageStart); ok {
+			attempts = append(attempts, v.Attempt)
+		}
+	}
+	if want := []int{1, 2}; !slices.Equal(attempts, want) {
+		t.Errorf("attempts = %v, want %v", attempts, want)
+	}
+
+	last := events[len(events)-1].(agent.TurnEnd)
+	if last.StopReason != agent.StopEndTurn {
+		t.Errorf("stop reason = %q, want the retry to have carried the turn", last.StopReason)
+	}
+}
+
+// A watchdog nobody asked for does not fire: zero means no limit, and a slow
+// endpoint is not an error.
+func TestNoStreamTimeoutMeansNoWatchdog(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("fine")}},
+		agent.WithStreamTimeout(0, 0))
+
+	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+}
+
+// Interrupt ends the exchange in flight and leaves the run alive, which is
+// what a user pressing escape asks for. Cancelling Run's context is the other
+// thing, and ends everything.
+func TestInterruptEndsTheTurnAndNotTheRun(t *testing.T) {
+	driver := &stalling{after: 1, started: make(chan struct{})}
+	a := newAgent(t, driver, agent.WithStreamTimeout(0, 0))
+
+	go func() {
+		a.In() <- ai.UserMessage("first")
+		<-driver.started
+		a.Interrupt()
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background()) }()
+
+	var turns []agent.TurnEnd
+	go func() {
+		// The run keeps going, so a second exchange has to be able to land.
+		for range time.Tick(time.Millisecond) {
+			if len(a.Messages()) > 0 {
+				break
+			}
+		}
+		a.In() <- ai.UserMessage("second")
+	}()
+
+	for e := range a.Out() {
+		if v, ok := e.(agent.TurnEnd); ok {
+			turns = append(turns, v)
+			if len(turns) == 2 {
+				close(a.In())
+			}
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Interrupt ended the run: %v", err)
+	}
+
+	if len(turns) != 2 {
+		t.Fatalf("saw %d turns, want 2 — the run stopped at the interrupt", len(turns))
+	}
+	if turns[0].StopReason != agent.StopCanceled {
+		t.Errorf("first turn = %q, want canceled", turns[0].StopReason)
+	}
+	if turns[1].StopReason != agent.StopEndTurn {
+		t.Errorf("second turn = %q, want the run to have carried on", turns[1].StopReason)
+	}
+}
+
+// Interrupt between turns has nothing to end, and must not poison the next one.
+func TestInterruptBetweenTurnsIsANoOp(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("fine")}})
+	a.Interrupt()
+
+	events, err := collect(t, a, ai.UserMessage("go"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	if last := events[len(events)-1].(agent.TurnEnd); last.StopReason != agent.StopEndTurn {
+		t.Errorf("stop reason = %q, want end_turn", last.StopReason)
 	}
 }

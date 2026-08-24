@@ -277,9 +277,10 @@ Four ideas carry the design:
 | **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
 | **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
 
-A batch of tool calls runs concurrently unless a tool declares it cannot, and
-retries, cancellation and the step budget each end a turn with a stop reason
-that says which.
+A batch of tool calls runs concurrently unless a tool declares it cannot. A
+retryable stream failure is retried, a stream that goes silent is bounded and
+retried, and `Interrupt()` ends the exchange in flight while leaving the run
+alive — each ending a turn with a stop reason that says which.
 
 Sessions consume that event stream rather than living inside the agent:
 `rec.Handle(e)` in your own loop records what happened, and `session.Open`

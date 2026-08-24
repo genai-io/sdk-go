@@ -60,12 +60,12 @@
 // because the event that closes each span carries the complete value.
 // Everything else waits.
 //
-// Three words are used precisely, because pi and San disagree about them. A
-// *turn* is an exchange: someone said something, and the loop runs until the
-// model stops asking for tools. An *inference* is one model call, of which a
-// turn may hold several — it has no event of its own, because a model call is
-// how one message gets made. A *run* is the loop's working life across many
-// turns.
+// Three words are used precisely, because agent frameworks disagree about
+// them. A *turn* is an exchange: someone said something, and the loop runs
+// until the model stops asking for tools. An *inference* is one model call, of
+// which a turn may hold several — it has no event of its own, because a model
+// call is how one message gets made. A *run* is the loop's working life across
+// many turns.
 //
 // # A retry needs no event of its own
 //
@@ -102,7 +102,7 @@
 // registry other subsystems mutate, deciding what to do when a queue is full —
 // each is something an application does, and each would have forced this
 // package to invent an answer that only fits one application. Keeping them out
-// is what stops it from growing a second, worse copy of San.
+// is what stops it from growing a second, worse copy of its caller.
 //
 // Persisting what happened, and restoring it, is agent/session.
 package agent

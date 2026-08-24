@@ -57,8 +57,21 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 		// A turn reports how it went on TurnEnd, in a form that says more than
 		// an error does, so it hands nothing back here. The only failure that
 		// ends a run is the context ending.
+		//
+		// Each turn gets a context of its own so Interrupt can end one without
+		// ending the run.
+		work, stop := context.WithCancel(ctx)
+		a.mu.Lock()
+		a.interrupt = stop
+		a.mu.Unlock()
+
 		a.turnCount.Add(1)
-		a.turn(ctx, batch)
+		a.turn(ctx, work, batch)
+
+		a.mu.Lock()
+		a.interrupt = nil
+		a.mu.Unlock()
+		stop()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

@@ -352,6 +352,7 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 		}
 
 		msg := resp.Message()
+		out.Message = msg
 		a.add(msg)
 
 		calls := msg.ToolCalls()

@@ -1740,3 +1740,45 @@ func TestATruncatedAnswerSaysSo(t *testing.T) {
 		t.Errorf("the partial answer did not enter the conversation: %q", got)
 	}
 }
+
+// The model's last message is on TurnEnd because the obvious way to find it is
+// wrong: when a turn stops on a terminating tool, the conversation's last
+// message is the tool results, not the model's.
+func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
+	stop := agent.ToolFunc("finish", "Finish the task.",
+		func(_ context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+			return agent.Result{Content: ai.TextContent("done"), Terminate: true}, nil
+		})
+
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
+		{
+			{Block: ai.TextBlock("wrapping up")},
+			{EndBlock: true},
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "finish", Input: `{}`})},
+			{StopReason: ai.StopToolUse},
+		},
+	}}, agent.WithTools(stop))
+
+	events, err := collect(t, a, ai.UserMessage("go"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+
+	last := events[len(events)-1].(agent.TurnEnd)
+	if last.StopReason != agent.StopTerminated {
+		t.Fatalf("stop reason = %q, want terminated", last.StopReason)
+	}
+	if got := last.Message.Text(); got != "wrapping up" {
+		t.Errorf("TurnEnd.Message = %q, want the model's", got)
+	}
+	if last.Message.Role != ai.RoleAssistant {
+		t.Errorf("TurnEnd.Message role = %q, want assistant", last.Message.Role)
+	}
+
+	// And this is the trap the field exists to avoid: reaching for the
+	// conversation's last message would have got the tool results.
+	msgs := a.Messages()
+	if got := msgs[len(msgs)-1].Role; got != ai.RoleUser {
+		t.Errorf("the conversation ends on %q — the trap this field avoids has moved", got)
+	}
+}

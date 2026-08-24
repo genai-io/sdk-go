@@ -107,7 +107,13 @@ func (TurnStart) event() {}
 // nowhere else, and Usage, which everyone wants and has one right way to add
 // up. A failed turn still reports both.
 type TurnEnd struct {
-	Turn       int
+	Turn int
+	// Message is the last message the model produced this turn, zero if it
+	// produced none. It is here because the obvious way to find it is wrong:
+	// the conversation's last message is a batch of tool results when the turn
+	// stopped on terminated or max_steps, and only the loop knows which one
+	// was the model's.
+	Message    ai.Message
 	Usage      ai.Usage
 	StopReason StopReason
 	Err        error

@@ -5,7 +5,9 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/genai-io/sdk-go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-一个用于大模型推理的 Go 客户端库，在 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 和 Google Gemini 四种协议之上提供**同一套带类型的 API**。
+一个大模型的 Go SDK，分两个包：在 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 和 Google Gemini 四种协议之上提供**同一套带类型的 API**，以及一个跑在它外面那圈循环的 agent 运行时。
+
+**`pkg/ai` —— 一次模型调用**
 
 - **一套 API，五种协议** —— 不管哪家服务，拿到的都是同样的类型。
 - **流式** —— 文本、thinking、工具调用、图片共用一套 start/delta/end 生命周期。
@@ -15,10 +17,19 @@
 - **模型目录** —— 27 家厂商、55 个模型；端点、限额、价格都是数据。
 - **不会顺手读凭证** —— `pkg/ai` 不读任何环境变量、不读任何文件。
 
+**`pkg/agent` —— 外面那圈循环**
+
+- **reason 与 act** —— 问模型、跑它要的工具、再问一次。
+- **一切皆事件** —— 一个 channel 上 11 种类型，而对话就是其中一种的折叠。
+- **四种 hook** —— 拦下一次工具调用、改写发出去的东西、抹掉返回来的东西。
+- **并行工具** —— 一批默认并发，除非某个工具说它不能。
+- **会话** —— 记录 agent 做过什么，再从中恢复对话。
+
 [安装](#安装) ·
 [快速开始](#快速开始) ·
 [流式](#流式) ·
 [工具调用](#工具调用) ·
+[Agent](#agent) ·
 [结构化输出](#结构化输出) ·
 [请求选项](#请求选项) ·
 [消息与内容](#消息与内容) ·
@@ -196,6 +207,46 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 
 轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），用 `Complete` 加 `RunTools` 自己写这个循环。
 
+## Agent
+
+`pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环：问模型、跑它要的工具、再问一次，直到模型不再要东西、直接作答。
+
+一个 agent 就是**一个循环加两个 channel**——消息进来，事件出去。`Run` 是唯一的驱动入口，所以**不会有事件流报告不到的事情发生**。
+
+```go
+a, err := agent.New(client,
+    agent.WithSystem("You are a careful assistant."),
+    agent.WithTools(readFile, listDir),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+go a.Run(ctx)
+
+a.In() <- ai.UserMessage("main.go 是做什么的?")
+close(a.In())
+
+for e := range a.Out() {
+    render(e)
+}
+```
+
+四个想法撑起整个设计：
+
+| | |
+| --- | --- |
+| **一切皆事件** | 一个 channel 上 11 种类型。一条消息和一次工具调用各自有开始、流式、结束；run 和 turn 在外面标出边界。集合是封闭的，消费者可以确信这就是全部。 |
+| **对话是一次折叠** | 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份。会话要存的只有这些，恢复要读的也只有这些。 |
+| **hook 是征询，事件是通知** | `PreInfer` / `PostInfer` 分列模型调用两侧，`PreTool` / `PostTool` 分列工具两侧。一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。 |
+| **一个工具面对两个受众** | `Content` 给模型，`Details` 给你的界面——为人排版的东西，不必此后每一轮都为它付费。 |
+
+一批工具调用默认并发执行，除非某个工具声明自己不能；重试、取消、步数预算各自以一个说明原因的 stop reason 结束一个 turn。
+
+会话是这条事件流的**消费者**，不住在 agent 内部：在你自己的循环里 `rec.Handle(e)` 记录发生了什么，`session.Open` 再把它折回成一段可以续上的对话。
+
+事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)。
+
 ## 结构化输出
 
 ```go
@@ -301,6 +352,7 @@ client, err := ai.NewClient(ai.Config{
 | [API 参考](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | 每个类型和函数，设计理由就写在它管辖的代码旁边 |
 | [构造客户端](docs/clients.zh-CN.md) | 从模型引用到 `ai.Client` 的一条链，以及在哪里停下（[English](docs/clients.md)） |
 | [架构](docs/architecture.zh-CN.md) | 各部分如何拼合，一个请求要经过什么（[English](docs/architecture.md)） |
+| [Agent SDK](docs/agent.zh-CN.md) | 结构、事件契约、hook、工具与会话（[English](docs/agent.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
 | [更新日志](CHANGELOG.md) | 每个版本改了什么 |
 | [`examples/`](examples) | 可运行的程序，每家厂商一个，外加工具调用和结构化输出 |

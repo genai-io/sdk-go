@@ -5,9 +5,11 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/genai-io/sdk-go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-A Go client library for large language model inference, providing one typed API
-over the Anthropic Messages, OpenAI Chat Completions, OpenAI Responses and
-Google Gemini protocols.
+A Go SDK for large language models, in two packages: one typed API over the
+Anthropic Messages, OpenAI Chat Completions, OpenAI Responses and Google Gemini
+protocols, and an agent runtime that runs the loop around it.
+
+**`pkg/ai` — one model call**
 
 - **One API, five protocols** — the same types whichever provider serves the request.
 - **Streaming** — text, thinking, tool calls and images on one start/delta/end lifecycle.
@@ -17,10 +19,19 @@ Google Gemini protocols.
 - **A model catalog** — 27 vendors, 55 models; endpoints, limits and pricing as data.
 - **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
 
+**`pkg/agent` — the loop around it**
+
+- **Reason and act** — call the model, run the tools it asks for, call it again.
+- **Everything as events** — eleven types on one channel, and the conversation is the fold of one of them.
+- **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
+- **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
+- **Sessions** — record what an agent did, restore the conversation from it.
+
 [Installation](#installation) ·
 [Quickstart](#quickstart) ·
 [Streaming](#streaming) ·
 [Tool use](#tool-use) ·
+[Agents](#agents) ·
 [Structured outputs](#structured-outputs) ·
 [Request options](#request-options) ·
 [Messages](#messages-and-content) ·
@@ -228,6 +239,55 @@ Write the turn loop yourself with `Complete` and `RunTools` when the turns are
 your business — to stream as it arrives, to stop on a condition, to bill each
 one.
 
+## Agents
+
+`pkg/ai` makes one model call. `pkg/agent` runs the loop around it: call the
+model, run the tools it asks for, call it again, until the model answers
+without asking for anything more.
+
+An agent is **a loop and two channels** — messages in, events out. `Run` is the
+only way to drive it, so nothing can happen that the event stream does not
+report.
+
+```go
+a, err := agent.New(client,
+    agent.WithSystem("You are a careful assistant."),
+    agent.WithTools(readFile, listDir),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+go a.Run(ctx)
+
+a.In() <- ai.UserMessage("what does main.go do?")
+close(a.In())
+
+for e := range a.Out() {
+    render(e)
+}
+```
+
+Four ideas carry the design:
+
+| | |
+| --- | --- |
+| **Everything is an event** | Eleven types on one channel. A message and a tool call each start, stream and end; run and turn bracket the work around them. The set is closed, so a consumer knows the list is all there is. |
+| **The conversation is a fold** | Replay `MessageAdded` in order and you have exactly what the agent holds. That is all a session stores, and all a restore reads. |
+| **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
+| **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
+
+A batch of tool calls runs concurrently unless a tool declares it cannot, and
+retries, cancellation and the step budget each end a turn with a stop reason
+that says which.
+
+Sessions consume that event stream rather than living inside the agent:
+`rec.Handle(e)` in your own loop records what happened, and `session.Open`
+folds it back into a conversation to resume from.
+
+See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
+rules, tools and sessions.
+
 ## Structured outputs
 
 ```go
@@ -350,14 +410,28 @@ somebody else's protocol, so adding one is a data change.
 
 ## Documentation
 
+**The client** — `pkg/ai`, one model call
+
 | | |
 | --- | --- |
 | [API reference](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | Every type and function, with the rationale beside the code it governs |
 | [Constructing a client](docs/clients.md) | One chain from a model reference to an `ai.Client`, and where to stop on it ([中文](docs/clients.zh-CN.md)) |
 | [Architecture](docs/architecture.md) | How the pieces fit and what a request passes through ([中文](docs/architecture.zh-CN.md)) |
+
+**The agent** — `pkg/agent`, the loop around it
+
+| | |
+| --- | --- |
+| [API reference](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/agent) | The agent, its events, its hooks and its tools |
+| [The Agent SDK](docs/agent.md) | Structure, the event contract, hooks, tools and sessions ([中文](docs/agent.zh-CN.md)) |
+
+**The project**
+
+| | |
+| --- | --- |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
 | [Changelog](CHANGELOG.md) | What changed in each release |
-| [`examples/`](examples) | Runnable programs, one per vendor plus tools and structured output |
+| [`examples/`](examples) | Runnable programs, one per vendor plus tools, structured output and an agent |
 
 ## Versioning
 

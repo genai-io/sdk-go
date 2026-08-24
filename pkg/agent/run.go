@@ -20,13 +20,9 @@ var ErrBusy = errors.New("agent: already running")
 // failed exchange is none of those: TurnEnd carries the error and Run serves
 // the next message. To make a failure fatal, watch for it and close In.
 func (a *Agent) Run(ctx context.Context) (err error) {
-	a.mu.Lock()
-	if a.running {
-		a.mu.Unlock()
+	if !a.running.CompareAndSwap(false, true) {
 		return ErrBusy
 	}
-	a.running = true
-	a.mu.Unlock()
 
 	a.emit(ctx, RunStart{})
 
@@ -67,10 +63,6 @@ func (a *Agent) Run(ctx context.Context) (err error) {
 
 		a.turnCount.Add(1)
 		a.turn(ctx, work, batch)
-
-		a.mu.Lock()
-		a.interrupt = nil
-		a.mu.Unlock()
 		stop()
 		if ctx.Err() != nil {
 			return ctx.Err()

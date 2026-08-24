@@ -47,7 +47,7 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (ai.Message, ai.U
 		// The stream gets a context of its own so a stall can end it without
 		// ending the turn.
 		streamCtx, stopStream := context.WithCancel(ctx)
-		quiet := watch(a.firstChunk, a.idle, stopStream)
+		quiet := watch(a.streamFirst, a.streamIdle, stopStream)
 
 		var resp *ai.Response
 		var err error

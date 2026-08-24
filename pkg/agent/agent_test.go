@@ -1782,3 +1782,94 @@ func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 		t.Errorf("the conversation ends on %q — the trap this field avoids has moved", got)
 	}
 }
+
+// Turn is the whole shape of a subagent standing behind a tool call: one
+// exchange, and an answer back.
+func TestTurnAnswersSynchronously(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}},
+		agent.WithoutEvents())
+
+	if a.Out() != nil {
+		t.Error("Out is not nil on an agent built WithoutEvents")
+	}
+
+	out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
+	if err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+	if out.StopReason != agent.StopEndTurn {
+		t.Errorf("stop reason = %q, want end_turn", out.StopReason)
+	}
+	if got := out.Message.Text(); got != "the answer" {
+		t.Errorf("Turn returned %q", got)
+	}
+}
+
+// Turn reports like everything else — it does not bypass the stream, which is
+// what keeps a session from recording an empty exchange. And it emits no run
+// boundaries, because a turn is not a run.
+func TestTurnStillReportsOnTheStream(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}})
+
+	if _, err := a.Turn(context.Background(), ai.UserMessage("ask")); err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+
+	// A short turn fits the buffer, so what it reported is still sitting there
+	// — no concurrent reader needed, and nothing closes the channel because a
+	// turn closes nothing.
+	var names []string
+	for done := false; !done; {
+		select {
+		case e := <-a.Out():
+			names = append(names, strings.TrimPrefix(fmt.Sprintf("%T", e), "agent."))
+		default:
+			done = true
+		}
+	}
+
+	if !slices.Contains(names, "MessageAdded") || !slices.Contains(names, "TurnEnd") {
+		t.Errorf("the stream carried %v, want the exchange reported", names)
+	}
+	for _, n := range names {
+		if n == "RunStart" || n == "RunEnd" {
+			t.Errorf("Turn emitted %s — a turn is not a run", n)
+		}
+	}
+}
+
+// A turn closes nothing, so a caller may take several in a row.
+func TestTurnsCanBeTakenInSequence(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("first"), text("second")}},
+		agent.WithoutEvents())
+
+	for i, want := range []string{"first", "second"} {
+		out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
+		if err != nil {
+			t.Fatalf("turn %d: %v", i+1, err)
+		}
+		if got := out.Message.Text(); got != want {
+			t.Errorf("turn %d returned %q, want %q", i+1, got, want)
+		}
+		if out.Turn != i+1 {
+			t.Errorf("turn %d numbered %d", i+1, out.Turn)
+		}
+	}
+}
+
+// Run and Turn are two drivers for one conversation, so they exclude each other.
+func TestTurnAndRunExcludeEachOther(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("fine")}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = a.Run(ctx) }()
+	for range a.Out() { // drains until Run ends, which the cancel below does
+		break
+	}
+
+	if _, err := a.Turn(context.Background(), ai.UserMessage("ask")); !errors.Is(err, agent.ErrBusy) {
+		t.Errorf("Turn during Run = %v, want ErrBusy", err)
+	}
+}

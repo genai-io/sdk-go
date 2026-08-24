@@ -138,6 +138,17 @@ func WithStreamTimeout(first, idle time.Duration) Option {
 	return func(a *Agent) { a.streamFirst, a.streamIdle = first, idle }
 }
 
+// WithoutEvents builds an agent that reports nothing: Out is nil and every
+// event is dropped where it is made. For a Turn nobody is watching — a
+// subagent behind a tool call, whose answer is the only thing its caller
+// wants.
+//
+// Nothing can observe such an agent, a session recorder included. A caller
+// who wants both an answer and a record reads Out instead.
+func WithoutEvents() Option {
+	return func(a *Agent) { a.outBuf = 0 }
+}
+
 // WithBuffers sizes the two channels: how many messages may wait on In before
 // a sender blocks, and how far ahead of a reader Out may get.
 func WithBuffers(in, out int) Option {
@@ -183,7 +194,9 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 		}
 	}
 	a.in = make(chan ai.Message, a.inBuf)
-	a.out = make(chan Event, a.outBuf)
+	if a.outBuf > 0 {
+		a.out = make(chan Event, a.outBuf)
+	}
 	return a, nil
 }
 
@@ -267,6 +280,9 @@ func (a *Agent) In() chan<- ai.Message { return a.in }
 //
 //	go a.Run(ctx)
 //	for e := range a.Out() { … }
+//
+// It is nil when the agent was built WithoutEvents — there is no channel in
+// that mode, and ranging over nil would block for ever.
 func (a *Agent) Out() <-chan Event { return a.out }
 
 // request is what this agent would send. One lock, not three: a prompt read

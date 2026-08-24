@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
+
+// never is longer than any process runs, so a timer set to it is one that does
+// not fire — which is what a caller who turned a timeout off asked for.
+const never = time.Duration(math.MaxInt64)
 
 // A turn is one exchange: someone said something, and the loop runs until the
 // model stops asking for tools. It holds as many inferences as the tools
@@ -31,28 +36,47 @@ func options(req *ai.Request) []ai.Option {
 // reason asks the model what to do next: one call, returning the message and
 // what it cost, retrying a stream that failed retryably. The message is either
 // an answer or a request to act. opts apply to this call only.
-func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (ai.Message, ai.Usage, error) {
+// ctx is the run's and carries the reports; work is the turn's and drives the
+// call. Interrupt cancels work, and the span still closes — a reader that saw
+// it open is still there to see it end.
+func (a *Agent) reason(ctx, work context.Context, opts ...ai.Option) (ai.Message, ai.Usage, error) {
 	var spent ai.Usage
 	var lastErr error
+
+	// A stream that says nothing is the one failure that looks like work, so a
+	// timer ends it: streamFirst before the endpoint says anything at all,
+	// streamIdle between events once it has. Zero means never — a duration no
+	// timer reaches, so nothing below has a case for it.
+	first, idle := never, never
+	if a.streamFirst > 0 {
+		first = a.streamFirst
+	}
+	if a.streamIdle > 0 {
+		idle = a.streamIdle
+	}
 
 	for attempt := 1; attempt <= a.maxAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
 		// refusal returns before anything is announced.
 		req := a.request()
-		if err := a.preInfer(ctx, req); err != nil {
+		if err := a.preInfer(work, req); err != nil {
 			return ai.Message{}, spent, err
 		}
 		a.emit(ctx, MessageStart{Attempt: attempt, Request: req})
 
 		// The stream gets a context of its own so a stall can end it without
 		// ending the turn.
-		streamCtx, stopStream := context.WithCancel(ctx)
-		quiet := watch(a.streamFirst, a.streamIdle, stopStream)
+		streamCtx, stopStream := context.WithCancel(work)
+		var silent atomic.Bool
+		quiet := time.AfterFunc(first, func() {
+			silent.Store(true)
+			stopStream()
+		})
 
 		var resp *ai.Response
 		var err error
 		for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, append(options(req), opts...)...) {
-			quiet.beat()
+			quiet.Reset(idle)
 			if streamErr != nil {
 				// A failed call still spent tokens and may have produced text.
 				resp, err = evt.Response, streamErr
@@ -67,16 +91,20 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (ai.Message, ai.U
 				resp = evt.Response
 			}
 		}
+		quiet.Stop()
 		stopStream()
 
 		// A stall reads as a cancelled stream, which says nothing about why.
 		// Naming it makes the attempt retryable, which is what it should be.
-		if quiet.fired() {
+		if silent.Load() {
 			err = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream went silent"}
 		}
 
-		if ctx.Err() != nil {
-			return ai.Message{}, spent, ctx.Err()
+		if work.Err() != nil {
+			// Abandoned, not failed — but the span still closes, because the
+			// reader that saw it open has not gone anywhere.
+			a.emit(ctx, MessageEnd{Response: resp, Err: work.Err()})
+			return ai.Message{}, spent, work.Err()
 		}
 
 		// A failed call is paid for too: the tokens are spent either way.
@@ -90,7 +118,7 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (ai.Message, ai.U
 		// the call earns another go, an objection to the answer does not.
 		retry := err != nil && ai.IsRetryable(err)
 		if err == nil {
-			err = a.postInfer(ctx, resp)
+			err = a.postInfer(work, resp)
 		}
 
 		a.emit(ctx, MessageEnd{Response: resp, Err: err})
@@ -123,7 +151,7 @@ type call struct {
 
 // act runs the tools a model asked for: vet the batch, run what survives,
 // close each as it lands, reply.
-func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, bool) {
+func (a *Agent) act(ctx, work context.Context, calls []ai.ToolCall) ([]ai.ToolResult, bool) {
 	batch := make([]call, len(calls))
 	messages := a.Messages()
 
@@ -155,7 +183,7 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 			if h.PreTool == nil {
 				continue
 			}
-			decision, err := h.PreTool(ctx, PreToolContext{
+			decision, err := h.PreTool(work, PreToolContext{
 				Call: c.ToolCall, Tool: tool, Messages: messages,
 			})
 			if err != nil {
@@ -188,7 +216,7 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 			if h.PostTool == nil {
 				continue
 			}
-			replacement, err := h.PostTool(ctx, PostToolContext{
+			replacement, err := h.PostTool(work, PostToolContext{
 				Call: c.ToolCall, Tool: c.tool, Result: c.result, Err: c.err, Messages: messages,
 			})
 			if err != nil {
@@ -231,7 +259,7 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 
 		run := func(i int) {
 			c := &batch[i]
-			c.result, c.err = c.tool.Run(ctx, c.ToolCall, func(partial Result) {
+			c.result, c.err = c.tool.Run(work, c.ToolCall, func(partial Result) {
 				a.emit(ctx, ToolUpdate{ID: c.ID, Partial: partial})
 			})
 			done <- i
@@ -280,53 +308,13 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 	return results, terminate
 }
 
-// watch cancels a stream that goes quiet: first bounds how long it may take to
-// say anything, idle how long it may pause once it has started. Either at zero
-// turns that half off; both at zero and there is no watchdog at all.
-func watch(first, idle time.Duration, cancel context.CancelFunc) *watchdog {
-	if first <= 0 && idle <= 0 {
-		return nil
-	}
-	if first <= 0 {
-		first = idle
-	}
-	w := &watchdog{idle: idle}
-	w.timer = time.AfterFunc(first, func() {
-		w.stalled.Store(true)
-		cancel()
-	})
-	return w
-}
-
-// A nil watchdog is one that was never asked for, so every method takes that
-// case — the caller has no branch of its own.
-type watchdog struct {
-	timer   *time.Timer
-	idle    time.Duration
-	stalled atomic.Bool
-}
-
-func (w *watchdog) beat() {
-	if w != nil && w.idle > 0 {
-		w.timer.Reset(w.idle)
-	}
-}
-
-func (w *watchdog) fired() bool {
-	if w == nil {
-		return false
-	}
-	w.timer.Stop()
-	return w.stalled.Load()
-}
-
 // turn runs one exchange: the input goes in, then reason and act alternate
 // until the model stops asking for tools or the step budget runs out.
 // work is the turn's own context: cancelling it ends this exchange and leaves
 // the run alive, which is what Interrupt does. ctx is the run's, and only the
 // closing report uses it — an interrupted turn still has a reader.
 func (a *Agent) turn(ctx, work context.Context, in []ai.Message) (out TurnEnd) {
-	a.emit(work, TurnStart{Turn: int(a.turnCount.Load())})
+	a.emit(ctx, TurnStart{Turn: int(a.turnCount.Load())})
 
 	// A turn the context killed reports nothing further: the reader is gone.
 	// The count is read again rather than pinned: only Run advances it, and it
@@ -339,7 +327,7 @@ func (a *Agent) turn(ctx, work context.Context, in []ai.Message) (out TurnEnd) {
 	}()
 
 	for _, m := range in {
-		a.add(work, m)
+		a.add(ctx, m)
 	}
 
 	for step := 0; ; step++ {
@@ -354,10 +342,10 @@ func (a *Agent) turn(ctx, work context.Context, in []ai.Message) (out TurnEnd) {
 			return out.canceled(work)
 		}
 		for _, m := range drain(a.in) {
-			a.add(work, m)
+			a.add(ctx, m)
 		}
 
-		msg, spent, err := a.reason(work)
+		msg, spent, err := a.reason(ctx, work)
 		out.Usage.Add(spent)
 		switch {
 		case work.Err() != nil:
@@ -373,8 +361,8 @@ func (a *Agent) turn(ctx, work context.Context, in []ai.Message) (out TurnEnd) {
 			return out.stopped(StopEndTurn)
 		}
 
-		results, terminate := a.act(work, calls)
-		a.add(work, ai.ToolResultsMessage(results...))
+		results, terminate := a.act(ctx, work, calls)
+		a.add(ctx, ai.ToolResultsMessage(results...))
 		if terminate {
 			return out.stopped(StopTerminated)
 		}

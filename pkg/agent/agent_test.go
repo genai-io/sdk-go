@@ -1670,3 +1670,45 @@ func TestInterruptBetweenTurnsIsANoOp(t *testing.T) {
 		t.Errorf("stop reason = %q, want end_turn", last.StopReason)
 	}
 }
+
+// Interrupting a turn abandons the work, not the reporting. The run's reader
+// is still there, so every span the turn opened is closed and everything that
+// entered the conversation was announced — otherwise a session restored from
+// the stream would disagree with the agent that produced it.
+func TestAnInterruptedTurnStillClosesWhatItOpened(t *testing.T) {
+	driver := &stalling{after: 1, started: make(chan struct{})}
+	a := newAgent(t, driver, agent.WithStreamTimeout(0, 0))
+
+	go func() {
+		a.In() <- ai.UserMessage("first")
+		<-driver.started
+		a.Interrupt()
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background()) }()
+
+	var started, ended, added int
+	for e := range a.Out() {
+		switch e.(type) {
+		case agent.MessageStart:
+			started++
+		case agent.MessageEnd:
+			ended++
+		case agent.MessageAdded:
+			added++
+		case agent.TurnEnd:
+			close(a.In())
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if started != ended {
+		t.Errorf("%d spans opened, %d closed — an interrupt left one hanging", started, ended)
+	}
+	if got := len(a.Messages()); added != got {
+		t.Errorf("%d messages announced, %d in the conversation — the stream and the agent disagree", added, got)
+	}
+}

@@ -313,12 +313,12 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 // alive, which is what Interrupt does. Reporting does not go through it —
 // emitting asks the run whether anyone is listening, and an interrupted turn
 // still has a reader.
-func (a *Agent) turn(driver context.Context, in []ai.Message) (out TurnEnd) {
+func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 	// The turn's own context, so Interrupt can end this exchange without
-	// ending whatever is driving. Derived here rather than by the callers,
+	// ending whatever called it. Derived here rather than by the callers,
 	// because two of them deriving it separately is two chances to disagree
 	// about what Interrupt reaches.
-	ctx, stopTurn := context.WithCancel(driver)
+	turnCtx, stopTurn := context.WithCancel(ctx)
 	defer stopTurn()
 
 	a.mu.Lock()
@@ -347,18 +347,18 @@ func (a *Agent) turn(driver context.Context, in []ai.Message) (out TurnEnd) {
 		// Anything that arrived while the last tools ran lands here rather
 		// than mid-stream: changing what the model is about to see is safe
 		// exactly once per inference, at the boundary.
-		if ctx.Err() != nil {
-			return out.canceled(ctx)
+		if turnCtx.Err() != nil {
+			return out.canceled(turnCtx)
 		}
 		for _, m := range drain(a.in) {
 			a.add(m)
 		}
 
-		resp, spent, err := a.reason(ctx)
+		resp, spent, err := a.reason(turnCtx)
 		out.Usage.Add(spent)
 		switch {
-		case ctx.Err() != nil:
-			return out.canceled(ctx)
+		case turnCtx.Err() != nil:
+			return out.canceled(turnCtx)
 		case err != nil:
 			return out.failed(err)
 		}
@@ -378,7 +378,7 @@ func (a *Agent) turn(driver context.Context, in []ai.Message) (out TurnEnd) {
 			return out.stopped(StopEndTurn)
 		}
 
-		results, terminate := a.act(ctx, calls)
+		results, terminate := a.act(turnCtx, calls)
 		a.add(ai.ToolResultsMessage(results...))
 		if terminate {
 			return out.stopped(StopTerminated)

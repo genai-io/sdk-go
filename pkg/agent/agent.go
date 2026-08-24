@@ -32,22 +32,24 @@ type Agent struct {
 	maxSteps    int
 	maxAttempts int
 
-	// firstChunk and idle bound how long a stream may say nothing. Zero
-	// disables either one.
-	firstChunk time.Duration
-	idle       time.Duration
+	// streamFirst and streamIdle bound how long a model stream may say
+	// nothing. Zero disables either one.
+	streamFirst time.Duration
+	streamIdle  time.Duration
 
 	inBuf  int
 	outBuf int
 
-	// interrupt cancels the turn in flight. Nil between turns.
+	// interrupt ends the turn in flight. Never nil: between turns it is the
+	// last turn's, already spent, so calling it is the no-op it should be.
 	interrupt context.CancelFunc
 
 	// turnCount is how many exchanges this agent has held. It counts the ones
 	// it actually ran, so a restored conversation starts again at zero — what
 	// came back from storage was someone else's counting.
 	turnCount atomic.Int64
-	running   bool
+	// running is latched, never cleared: an agent runs once.
+	running atomic.Bool
 
 	// The two channels an agent is: what comes in, what goes out.
 	in  chan ai.Message
@@ -127,7 +129,7 @@ func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
 // Running out is reported as a network failure, because it is one, and is
 // retried like any other.
 func WithStreamTimeout(first, idle time.Duration) Option {
-	return func(a *Agent) { a.firstChunk, a.idle = first, idle }
+	return func(a *Agent) { a.streamFirst, a.streamIdle = first, idle }
 }
 
 // WithBuffers sizes the two channels: how many messages may wait on In before
@@ -163,10 +165,11 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 	a := &Agent{
 		client:      client,
 		maxAttempts: 3,
-		firstChunk:  defaultFirstChunk,
-		idle:        defaultIdle,
+		streamFirst: defaultFirstChunk,
+		streamIdle:  defaultIdle,
 		inBuf:       defaultInputBuffer,
 		outBuf:      defaultEventBuffer,
+		interrupt:   func() {},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -294,10 +297,6 @@ func (a *Agent) toolNamed(name string) (Tool, bool) {
 // interrupt and this does nothing; watch TurnEnd to know it landed.
 func (a *Agent) Interrupt() {
 	a.mu.Lock()
-	cancel := a.interrupt
-	a.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
-	}
+	defer a.mu.Unlock()
+	a.interrupt()
 }

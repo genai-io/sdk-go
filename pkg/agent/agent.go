@@ -120,7 +120,7 @@ func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
 
 // WithStreamTimeout bounds how long a model stream may say nothing: first is
 // how long the endpoint has to say anything at all, idle how long it may pause
-// once it has started. Either at zero turns that half off.
+// once it has started. Either at zero is that half turned off, independently.
 //
 // A stalled stream is the one failure that looks like work, so this is on by
 // default — five minutes and one minute. A model that reasons silently for

@@ -40,9 +40,9 @@ type Agent struct {
 	inBuf  int
 	outBuf int
 
-	// interrupt ends the turn in flight. Never nil: between turns it is the
+	// stopTurn ends the turn in flight. Never nil: between turns it is the
 	// last turn's, already spent, so calling it is the no-op it should be.
-	interrupt context.CancelFunc
+	stopTurn context.CancelFunc
 
 	// turnCount is how many exchanges this agent has held. It counts the ones
 	// it actually ran, so a restored conversation starts again at zero — what
@@ -54,6 +54,12 @@ type Agent struct {
 	// The two channels an agent is: what comes in, what goes out.
 	in  chan ai.Message
 	out chan Event
+
+	// alive is the run's ctx.Done(), set once when Run starts. It answers the
+	// only question emitting has — is anyone still listening — and that has
+	// one answer for the agent's whole life, which is why it is a field and
+	// not a parameter threaded through every call.
+	alive <-chan struct{}
 
 	mu sync.Mutex
 }
@@ -169,7 +175,7 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 		streamIdle:  defaultIdle,
 		inBuf:       defaultInputBuffer,
 		outBuf:      defaultEventBuffer,
-		interrupt:   func() {},
+		stopTurn:    func() {},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -298,5 +304,5 @@ func (a *Agent) toolNamed(name string) (Tool, bool) {
 func (a *Agent) Interrupt() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.interrupt()
+	a.stopTurn()
 }

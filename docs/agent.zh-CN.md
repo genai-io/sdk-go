@@ -67,10 +67,11 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 | `StopReason` | |
 | --- | --- |
 | `end_turn` | 模型直接作答,没要工具 |
+| `max_tokens` | 模型的输出配额用完了,**回答是半截的** |
 | `max_steps` | 步数预算用完,模型还在干活 |
 | `terminated` | 这一批工具**全体**要求停 |
 | `error` | 模型调用重试到底仍失败,或某个 hook 拒绝 |
-| `canceled` | 交换进行中 context 断了 |
+| `canceled` | 交换进行中 context 断了,或者调了 `Interrupt` |
 
 ### 提前结束一个 turn
 

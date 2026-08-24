@@ -313,11 +313,23 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 // alive, which is what Interrupt does. Reporting does not go through it —
 // emitting asks the run whether anyone is listening, and an interrupted turn
 // still has a reader.
-func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
+func (a *Agent) turn(driver context.Context, in []ai.Message) (out TurnEnd) {
+	// The turn's own context, so Interrupt can end this exchange without
+	// ending whatever is driving. Derived here rather than by the callers,
+	// because two of them deriving it separately is two chances to disagree
+	// about what Interrupt reaches.
+	ctx, stopTurn := context.WithCancel(driver)
+	defer stopTurn()
+
+	a.mu.Lock()
+	a.stopTurn = stopTurn
+	a.mu.Unlock()
+
+	a.turnCount.Add(1)
 	a.emit(TurnStart{Turn: int(a.turnCount.Load())})
 
-	// The count is read again rather than pinned: only Run advances it, and it
-	// is inside this call, so both ends carry the same number.
+	// The count is read again rather than pinned: only this function advances
+	// it, so both ends of the turn carry the same number.
 	defer func() {
 		out.Turn = int(a.turnCount.Load())
 		a.emit(out)

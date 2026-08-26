@@ -22,7 +22,7 @@ protocols, and an agent runtime that runs the loop around it.
 **`pkg/agent` — the loop around it**
 
 - **Reason and act** — call the model, run the tools it asks for, call it again.
-- **Everything as events** — eleven types on one channel, and the conversation is the fold of one of them.
+- **Everything as events** — eight types on one sequence, and the conversation is the fold of one of them.
 - **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
 - **Sessions** — record what an agent did, restore the conversation from it.

@@ -50,6 +50,11 @@ type Agent struct {
 	// own goroutine — a yield is not safe to call from anywhere else.
 	yield func(Event, error) bool
 
+	// replaced is SetMessages since the last exchange, reported by the next
+	// one. It cannot be reported where it happens: a yield belongs to the
+	// goroutine running an exchange, and SetMessages is called from outside.
+	replaced bool
+
 	mu sync.Mutex
 }
 
@@ -162,10 +167,21 @@ func (a *Agent) Messages() []ai.Message {
 
 // SetMessages replaces the conversation. This is how compaction and session
 // restore work: both hand over a history built somewhere else.
+//
+// The next exchange reports it as MessagesReplaced before anything else, so a
+// consumer folding the stream ends up with what the agent holds rather than
+// what it threw away. That is the first moment there is anyone to tell: a
+// yield belongs to the goroutine running an exchange, and this is called from
+// outside one.
+//
+// So a replacement with no exchange after it is not reported at all. A session
+// then restores the longer history — and the policy that compacted it will
+// compact it again.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.messages = slices.Clone(msgs)
+	a.replaced = true
 }
 
 func (a *Agent) Tools() []Tool {

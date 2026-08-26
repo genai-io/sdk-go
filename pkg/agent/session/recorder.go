@@ -37,6 +37,9 @@ func (r *Recorder) Handle(e agent.Event) {
 		r.turn = v.Turn
 		r.mu.Unlock()
 
+	case agent.MessagesReplaced:
+		r.write(Entry{Type: EntrySnapshot, Snapshot: v.Messages})
+
 	case agent.MessageAdded:
 		msg := v.Message
 		r.write(Entry{Type: EntryMessage, Message: &msg})

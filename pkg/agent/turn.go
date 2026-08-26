@@ -342,14 +342,8 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 			return out.stopped(StopMaxSteps)
 		}
 
-		// Anything that arrived while the last tools ran lands here rather
-		// than mid-stream: changing what the model is about to see is safe
-		// exactly once per inference, at the boundary.
 		if turnCtx.Err() != nil {
 			return out.canceled(turnCtx)
-		}
-		for _, m := range a.injected() {
-			a.add(m)
 		}
 
 		resp, spent, err := a.reason(turnCtx)

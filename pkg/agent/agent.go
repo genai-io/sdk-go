@@ -53,9 +53,6 @@ type Agent struct {
 	// own goroutine — a yield is not safe to call from anywhere else.
 	yield func(Event, error) bool
 
-	// pending is what Inject queued, taken at the next step boundary.
-	pending []ai.Message
-
 	mu sync.Mutex
 }
 

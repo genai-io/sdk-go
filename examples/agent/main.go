@@ -104,7 +104,7 @@ func main() {
 	// of its own; a one-shot has nothing else to do.
 	var last agent.TurnEnd
 	steps := 0
-	for e, err := range a.Stream(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
+	for e, err := range a.Turn(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
 		if err != nil {
 			log.Fatalf("\n%v", err)
 		}

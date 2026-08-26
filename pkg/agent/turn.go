@@ -47,18 +47,18 @@ func (x *exchange) reason(ctx context.Context, opts ...ai.Option) (*ai.Response,
 	// streamIdle between events once it has. Zero means never — a duration no
 	// timer reaches, so nothing below has a case for it.
 	first, idle := never, never
-	if x.a.streamFirst > 0 {
-		first = x.a.streamFirst
+	if x.streamFirst > 0 {
+		first = x.streamFirst
 	}
-	if x.a.streamIdle > 0 {
-		idle = x.a.streamIdle
+	if x.streamIdle > 0 {
+		idle = x.streamIdle
 	}
 
-	for attempt := 1; attempt <= x.a.maxAttempts; attempt++ {
+	for attempt := 1; attempt <= x.maxAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
 		// refusal returns before anything is announced.
-		req := x.a.request()
-		if err := x.a.preInfer(ctx, req); err != nil {
+		req := x.request()
+		if err := x.preInfer(ctx, req); err != nil {
 			return nil, spent, err
 		}
 		x.emit(MessageStart{Attempt: attempt, Request: req})
@@ -74,7 +74,7 @@ func (x *exchange) reason(ctx context.Context, opts ...ai.Option) (*ai.Response,
 
 		var resp *ai.Response
 		var err error
-		for evt, streamErr := range x.a.client.Stream(streamCtx, req.Messages, append(options(req), opts...)...) {
+		for evt, streamErr := range x.client.Stream(streamCtx, req.Messages, append(options(req), opts...)...) {
 			quiet.Reset(idle)
 			if streamErr != nil {
 				// A failed call still spent tokens and may have produced text.
@@ -117,7 +117,7 @@ func (x *exchange) reason(ctx context.Context, opts ...ai.Option) (*ai.Response,
 		// the call earns another go, an objection to the answer does not.
 		retry := err != nil && ai.IsRetryable(err)
 		if err == nil {
-			err = x.a.postInfer(ctx, resp)
+			err = x.postInfer(ctx, resp)
 		}
 
 		x.emit(MessageEnd{Response: resp, Err: err})
@@ -152,7 +152,7 @@ type call struct {
 // close each as it lands, reply.
 func (x *exchange) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, bool) {
 	batch := make([]call, len(calls))
-	messages := x.a.Messages()
+	messages := x.Messages()
 
 	// Vet: decided before anything runs, because the batch cannot choose a
 	// concurrency until it knows every tool. One at a time on this goroutine,
@@ -162,7 +162,7 @@ func (x *exchange) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResul
 		c := &batch[i]
 		x.emit(ToolStart{ID: c.ID, Name: c.Name, Args: c.Input})
 
-		tool, ok := x.a.toolNamed(c.Name)
+		tool, ok := x.toolNamed(c.Name)
 		if !ok {
 			c.err = fmt.Errorf("no tool named %q is available", c.Name)
 			continue
@@ -178,7 +178,7 @@ func (x *exchange) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResul
 
 		// First refusal is final: a gate that gets weaker as you add to it is
 		// not a gate.
-		for _, h := range x.a.hookSet() {
+		for _, h := range x.hookSet() {
 			if h.PreTool == nil {
 				continue
 			}
@@ -211,7 +211,7 @@ func (x *exchange) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResul
 		x.emit(ToolEnd{ID: c.ID, Result: c.result, Err: c.err})
 
 		// Chained: each hook is handed what the one before it produced.
-		for _, h := range x.a.hookSet() {
+		for _, h := range x.hookSet() {
 			if h.PostTool == nil {
 				continue
 			}
@@ -319,17 +319,17 @@ func (x *exchange) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 	turnCtx, stopTurn := context.WithCancel(ctx)
 	defer stopTurn()
 
-	x.a.mu.Lock()
-	x.a.stopTurn = stopTurn
-	x.a.mu.Unlock()
+	x.mu.Lock()
+	x.stopTurn = stopTurn
+	x.mu.Unlock()
 
-	x.a.turnCount.Add(1)
-	x.emit(TurnStart{Turn: int(x.a.turnCount.Load())})
+	x.turnCount.Add(1)
+	x.emit(TurnStart{Turn: int(x.turnCount.Load())})
 
 	// The count is read again rather than pinned: only this function advances
 	// it, so both ends of the turn carry the same number.
 	defer func() {
-		out.Turn = int(x.a.turnCount.Load())
+		out.Turn = int(x.turnCount.Load())
 		x.emit(out)
 	}()
 
@@ -338,7 +338,7 @@ func (x *exchange) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 	}
 
 	for step := 0; ; step++ {
-		if x.a.maxSteps > 0 && step >= x.a.maxSteps {
+		if x.maxSteps > 0 && step >= x.maxSteps {
 			return out.stopped(StopMaxSteps)
 		}
 
@@ -348,7 +348,7 @@ func (x *exchange) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 
 		// Anything added while the last tools ran enters here rather than
 		// mid-stream, and is reported here rather than where it was added.
-		for _, m := range x.a.taken() {
+		for _, m := range x.taken() {
 			x.add(m)
 		}
 

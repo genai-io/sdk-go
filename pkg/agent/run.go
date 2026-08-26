@@ -46,7 +46,7 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 		}
 		defer a.running.Store(false)
 
-		x := &exchange{a: a, yield: yield}
+		x := &exchange{Agent: a, yield: yield}
 
 		out := x.turn(ctx, in)
 		if out.Err != nil && x.yield != nil {
@@ -59,7 +59,7 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 // where its events go. yield lives here rather than on the agent because it
 // lasts exactly as long as this does — one range, one goroutine.
 type exchange struct {
-	a *Agent
+	*Agent
 	// yield is nil once the consumer has broken out. Yielding again after
 	// that is what the iterator forbids, and this is how the rest of the
 	// exchange knows nobody is listening.
@@ -79,7 +79,7 @@ func (x *exchange) emit(e Event) {
 	}
 	if !x.yield(e, nil) {
 		x.yield = nil
-		x.a.stopTurn()
+		x.stopTurn()
 	}
 }
 
@@ -87,9 +87,9 @@ func (x *exchange) emit(e Event) {
 // the time a reader sees MessageAdded, Messages already holds it. The other
 // order hands a handler news of a message and a conversation without it.
 func (x *exchange) add(msg ai.Message) {
-	x.a.mu.Lock()
-	x.a.messages = append(x.a.messages, msg)
-	x.a.mu.Unlock()
+	x.mu.Lock()
+	x.messages = append(x.messages, msg)
+	x.mu.Unlock()
 
 	x.emit(MessageAdded{Message: msg})
 }

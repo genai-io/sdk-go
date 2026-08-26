@@ -45,16 +45,6 @@ type Agent struct {
 	// running is latched, never cleared: an agent runs once.
 	running atomic.Bool
 
-	// yield is where events go while an exchange is running: the range body of
-	// whoever called Stream. Set for that call only, and read from the turn's
-	// own goroutine — a yield is not safe to call from anywhere else.
-	yield func(Event, error) bool
-
-	// replaced is SetMessages since the last exchange, reported by the next
-	// one. It cannot be reported where it happens: a yield belongs to the
-	// goroutine running an exchange, and SetMessages is called from outside.
-	replaced bool
-
 	// pending is what AddMessages queued, taken at the next step boundary.
 	pending []ai.Message
 
@@ -173,20 +163,15 @@ func (a *Agent) Messages() []ai.Message {
 // rather than replace it, use AddMessages — building on Messages and setting
 // the result back races with the exchange that may be running.
 //
-// The next exchange reports it as MessagesReplaced before anything else, so a
-// consumer folding the stream ends up with what the agent holds rather than
-// what it threw away. That is the first moment there is anyone to tell: a
-// yield belongs to the goroutine running an exchange, and this is called from
-// outside one.
-//
-// So a replacement with no exchange after it is not reported at all. A session
-// then restores the longer history — and the policy that compacted it will
-// compact it again.
+// Nothing on the event stream says this happened, because nothing here knows
+// it did until it is done — and whoever calls it does. A consumer folding
+// MessageAdded would go on holding what the agent threw away, so tell it:
+// session.Recorder.Snapshot is that for a session, and a caller keeping its
+// own view of the conversation resets it the same way.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.messages = slices.Clone(msgs)
-	a.replaced = true
 }
 
 // AddMessages puts messages into the conversation from outside an exchange —

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"slices"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
@@ -47,24 +46,24 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 		}
 		defer a.running.Store(false)
 
-		a.yield = yield
-		defer func() { a.yield = nil }()
+		x := &exchange{a: a, yield: yield}
 
-		// A conversation swapped between exchanges is announced by this one:
-		// there was nobody to tell when it happened.
-		a.mu.Lock()
-		replaced, msgs := a.replaced, slices.Clone(a.messages)
-		a.replaced = false
-		a.mu.Unlock()
-		if replaced {
-			a.emit(MessagesReplaced{Messages: msgs})
-		}
-
-		out := a.turn(ctx, in)
-		if out.Err != nil && a.yield != nil {
+		out := x.turn(ctx, in)
+		if out.Err != nil && x.yield != nil {
 			yield(nil, out.Err)
 		}
 	}
+}
+
+// exchange is one advance of the conversation: the agent it advances, and
+// where its events go. yield lives here rather than on the agent because it
+// lasts exactly as long as this does — one range, one goroutine.
+type exchange struct {
+	a *Agent
+	// yield is nil once the consumer has broken out. Yielding again after
+	// that is what the iterator forbids, and this is how the rest of the
+	// exchange knows nobody is listening.
+	yield func(Event, error) bool
 }
 
 // emit hands one event to whoever is ranging. A consumer that breaks out of
@@ -72,26 +71,25 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 // the same way — and is never yielded to again: that is the iterator's rule,
 // and a nil yield is how the rest of the turn knows nobody is listening.
 //
-// It must be called from the goroutine running the turn. A yield is not safe
-// anywhere else, which is why a tool's progress travels back through a channel
-// before it gets here.
-func (a *Agent) emit(e Event) {
-	if a.yield == nil {
+// It must be called from the goroutine running the exchange: a yield is not
+// safe anywhere else.
+func (x *exchange) emit(e Event) {
+	if x.yield == nil {
 		return
 	}
-	if !a.yield(e, nil) {
-		a.yield = nil
-		a.stopTurn()
+	if !x.yield(e, nil) {
+		x.yield = nil
+		x.a.stopTurn()
 	}
 }
 
 // add puts a message into the conversation and reports it, in that order: by
 // the time a reader sees MessageAdded, Messages already holds it. The other
 // order hands a handler news of a message and a conversation without it.
-func (a *Agent) add(msg ai.Message) {
-	a.mu.Lock()
-	a.messages = append(a.messages, msg)
-	a.mu.Unlock()
+func (x *exchange) add(msg ai.Message) {
+	x.a.mu.Lock()
+	x.a.messages = append(x.a.messages, msg)
+	x.a.mu.Unlock()
 
-	a.emit(MessageAdded{Message: msg})
+	x.emit(MessageAdded{Message: msg})
 }

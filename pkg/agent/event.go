@@ -9,7 +9,7 @@ import "github.com/genai-io/sdk-go/pkg/ai"
 // which is never called and exists only to be that gate — a consumer switching
 // over Event knows this list is all there is.
 //
-//	MessageAdded    MessagesReplaced          the conversation, added to or swapped
+//	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
 //	ToolStart                    ToolEnd      a tool call, asked to answered
 //	TurnStart                    TurnEnd      the exchange around them
@@ -20,18 +20,6 @@ type Event interface{ event() }
 type MessageAdded struct{ Message ai.Message }
 
 func (MessageAdded) event() {}
-
-// MessagesReplaced says the conversation was swapped whole — compaction, or a
-// history restored from somewhere else. Folding MessageAdded alone would leave
-// a consumer holding what the agent threw away, so this is the reset: what
-// follows starts from these.
-//
-// It arrives at the start of the first exchange after the replacement, because
-// that is when there is somebody to tell. A replacement no exchange ever used
-// is one that changed nothing.
-type MessagesReplaced struct{ Messages []ai.Message }
-
-func (MessagesReplaced) event() {}
 
 // MessageStart says the model has been asked and a message is on its way.
 // Only a message the model produces has a span; the rest arrive whole.

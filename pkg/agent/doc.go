@@ -6,26 +6,30 @@
 // points where an application needs to interpose. It reads no environment
 // variable and touches no file: what it does is what it was handed.
 //
-// # A loop and two channels
+// # One exchange at a time
 //
 //	a, err := agent.New(client, agent.WithSystem("You are terse."), agent.WithTools(read))
 //
-//	go a.Run(ctx)
+//	for e, err := range a.Stream(ctx, ai.UserMessage("what is in config.json?")) {
+//	    render(e)
+//	}
 //
-//	a.In() <- ai.UserMessage("what is in config.json?")
-//	for e := range a.Out() { … }
+// Stream advances the conversation one exchange and reports what it does on the
+// way. Collect folds it for a caller that wants the answer rather than the
+// progress — the same pair pkg/ai offers one level down, where Complete is
+// Collect of Stream.
 //
-// In takes messages, Out reports what the agent does, and that is the whole
-// interface. Close In to say there is no more work; the agent closes Out when
-// it stops, so ranging over it ends by itself.
+//	out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
 //
-// A message sent while the agent is working joins the exchange in flight —
-// after the tools running now finish, before the model is asked again. There
-// is no second way in for "wait until this one is done", because someone who
-// wants to wait can wait.
+// The loop over incoming messages is the application's: a CLI reads stdin, an
+// interface reads keys, a server reads requests, and none of those is a shape
+// this package should guess. Inject hands a message to the exchange in flight,
+// which lands at the next step boundary — changing what the model is about to
+// see is safe exactly once per call, and that is where.
 //
-// An agent runs once and holds one conversation. Many exchanges belong to one
-// run, fed through In; that is what the loop is for.
+// Events arrive on the ranging goroutine, so an agent that must run ahead of a
+// slow reader is one whose caller forwards to a buffer of its own — how deep,
+// and what to drop when it fills, being theirs to decide.
 //
 // # The conversation is ai.Message
 //
@@ -42,8 +46,7 @@
 //	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
 //	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-//	RunStart                     RunEnd       the agent's working life
-//	TurnStart                    TurnEnd      one exchange within it
+//	TurnStart                    TurnEnd      the exchange around them
 //
 // A span always comes in pairs, and only what takes time has one. What entered
 // the conversation is its own event because a user's message and a batch of
@@ -83,26 +86,25 @@
 //
 // # Where things live
 //
-// The three loops nest — a run holds turns, a turn holds inferences — and the
-// files are named for the same three, so a reader who knows the vocabulary
-// knows the layout:
+// A turn holds inferences, and the files are named for what they are:
 //
 //	agent.go   an agent: what it holds, how it is built, what you read and set
-//	run.go     a run: many turns, fed by a channel, ended by closing it
-//	turn.go    a turn: infer, act, repeat — and how the tools are run
+//	stream.go  an exchange, from the outside: Stream, Collect, Inject
+//	turn.go    a turn: reason, act, repeat — and how the tools are run
 //
-//	event.go   what a run reports, and which reports may be dropped
+//	event.go   what an exchange reports
 //	tool.go    a tool: defined from a Go type, offered, run
-//	hook.go    the three places a caller gets between the loop and the model
+//	hook.go    the four places a caller gets between the loop and the model
 //
 // # What is deliberately not here
 //
-// The system prompt is a string, the toolset is a []Tool, and the input queue
-// is the caller's channel. Composing a prompt from sections, holding a
-// registry other subsystems mutate, deciding what to do when a queue is full —
-// each is something an application does, and each would have forced this
-// package to invent an answer that only fits one application. Keeping them out
-// is what stops it from growing a second, worse copy of its caller.
+// The system prompt is a string, the toolset is a []Tool, and there is no
+// queue in front of the agent at all. Composing a prompt from sections,
+// holding a registry other subsystems mutate, deciding how deep a backlog may
+// get and what to drop when it fills — each is something an application does,
+// and each would have forced this package to invent an answer that fits one
+// application. Keeping them out is what stops it from growing a second, worse
+// copy of its caller.
 //
 // Persisting what happened, and restoring it, is agent/session.
 package agent

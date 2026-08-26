@@ -53,37 +53,19 @@ func newAgent(t *testing.T, history []ai.Message, scripts ...[]ai.Delta) *agent.
 	return a
 }
 
-// converse drives an agent through several exchanges in one run, recording as
-// it goes. It is the whole shape of using this package with a session: your
-// loop, your recorder call, and the agent knowing nothing about either.
+// converse drives an agent through several exchanges, recording as it goes. It
+// is the whole shape of using this package with a session: your loop, your
+// recorder call, and the agent knowing nothing about either.
 func converse(t *testing.T, a *agent.Agent, rec *session.Recorder, msgs ...ai.Message) {
 	t.Helper()
 
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	// One message at a time, each waiting for the last exchange to finish, so
-	// they are separate exchanges rather than one batch.
-	next := make(chan struct{}, 1)
-	go func() {
-		for _, m := range msgs {
-			a.In() <- m
-			<-next
-		}
-		close(a.In())
-	}()
-
-	for e := range a.Out() {
-		rec.Handle(e)
-		if _, ok := e.(agent.TurnEnd); ok {
-			select {
-			case next <- struct{}{}:
-			default:
+	for _, m := range msgs {
+		for e, err := range a.Stream(context.Background(), m) {
+			if err != nil {
+				t.Fatalf("stream: %v", err)
 			}
+			rec.Handle(e)
 		}
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("run: %v", err)
 	}
 }
 

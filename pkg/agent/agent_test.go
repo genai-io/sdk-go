@@ -114,7 +114,7 @@ func outcome(t *testing.T, a *agent.Agent, msgs ...ai.Message) (agent.TurnEnd, e
 	t.Helper()
 
 	var out agent.TurnEnd
-	for e, err := range a.Turn(context.Background(), msgs...) {
+	for e, err := range a.Run(context.Background(), msgs...) {
 		if err != nil {
 			return out, err
 		}
@@ -129,7 +129,7 @@ func collect(t *testing.T, a *agent.Agent, msgs ...ai.Message) ([]agent.Event, e
 	t.Helper()
 
 	var events []agent.Event
-	for e, err := range a.Turn(context.Background(), msgs...) {
+	for e, err := range a.Run(context.Background(), msgs...) {
 		if err != nil {
 			return events, err
 		}
@@ -1564,7 +1564,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		var once bool
-		for e, err := range a.Turn(context.Background(), ai.UserMessage("go")) {
+		for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
 			if _, ok := e.(agent.ToolStart); ok && !once {
 				once = true
 				close(started)
@@ -1598,7 +1598,7 @@ func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
 	}}
 	a := newAgent(t, driver)
 
-	for e, err := range a.Turn(context.Background(), ai.UserMessage("go")) {
+	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
@@ -1625,7 +1625,7 @@ func TestSeveralExchangesAreACallersLoop(t *testing.T) {
 		{ai.UserMessage("one")},
 		{ai.UserMessage("two"), ai.UserMessage("and this too")},
 	} {
-		for e, err := range a.Turn(context.Background(), batch...) {
+		for e, err := range a.Run(context.Background(), batch...) {
 			if err != nil {
 				t.Fatalf("turn: %v", err)
 			}

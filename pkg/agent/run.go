@@ -13,13 +13,17 @@ import (
 // into a history neither asked for. Concurrency belongs between agents.
 var ErrBusy = errors.New("agent: an exchange is already running")
 
-// Turn advances the conversation one exchange and reports what it does as it
-// goes. Range over it; the last event is TurnEnd, which carries how it went.
+// Run advances the conversation one exchange and reports what it does as it
+// goes. Range over it; the last event is TurnEnd, which carries how it went
+// and the answer it came to.
 //
-//	for e, err := range a.Turn(ctx, ai.UserMessage("what changed?")) {
+// One exchange, not the agent's whole life — the same shape exec.Cmd.Run has,
+// where running means doing this thing and being done.
+//
+//	for e, err := range a.Run(ctx, ai.UserMessage("what changed?")) {
 //	    render(e)
 //	}
-//
+
 // Breaking out of the range ends the exchange, the same as Interrupt: a
 // consumer that stopped reading has stopped caring about this turn.
 //
@@ -32,9 +36,9 @@ var ErrBusy = errors.New("agent: an exchange is already running")
 // all things the application knows and this package does not.
 //
 //	for batch := range myMessages {
-//	    for e, err := range a.Turn(ctx, batch...) { render(e) }
+//	    for e, err := range a.Run(ctx, batch...) { render(e) }
 //	}
-func (a *Agent) Turn(ctx context.Context, in ...ai.Message) iter.Seq2[Event, error] {
+func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		if !a.running.CompareAndSwap(false, true) {
 			yield(nil, ErrBusy)

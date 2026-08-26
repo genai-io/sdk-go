@@ -211,7 +211,7 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 
 `pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环：问模型、跑它要的工具、再问一次，直到模型不再要东西、直接作答。
 
-`Turn` 把对话推进一轮，并把沿途做的事作为序列报出来；最后一个事件是 `TurnEnd`，它带着这一轮怎么结束的。
+`Run` 把对话推进一轮，并把沿途做的事作为序列报出来；最后一个事件是 `TurnEnd`，它带着这一轮怎么结束的，以及模型产出的那条消息。
 
 ```go
 a, err := agent.New(client,
@@ -222,7 +222,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-for e, err := range a.Turn(ctx, ai.UserMessage("main.go 是做什么的?")) {
+for e, err := range a.Run(ctx, ai.UserMessage("main.go 是做什么的?")) {
     render(e)
 }
 ```
@@ -240,7 +240,7 @@ for e, err := range a.Turn(ctx, ai.UserMessage("main.go 是做什么的?")) {
 
 ```go
 for batch := range myMessages {
-    for e, err := range a.Turn(ctx, batch...) { render(e) }
+    for e, err := range a.Run(ctx, batch...) { render(e) }
 }
 ```
 

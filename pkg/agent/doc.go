@@ -10,7 +10,7 @@
 //
 //	a, err := agent.New(client, agent.WithSystem("You are terse."), agent.WithTools(read))
 //
-//	for e, err := range a.Turn(ctx, ai.UserMessage("what is in config.json?")) {
+//	for e, err := range a.Run(ctx, ai.UserMessage("what is in config.json?")) {
 //	    render(e)
 //	}
 //
@@ -21,7 +21,7 @@
 // are batched into exchanges, what a failure means, when to stop:
 //
 //	for batch := range myMessages {
-//	    for e, err := range a.Turn(ctx, batch...) { render(e) }
+//	    for e, err := range a.Run(ctx, batch...) { render(e) }
 //	}
 //
 // A CLI reads stdin, an interface reads keys, a server reads requests, and
@@ -88,7 +88,7 @@
 // A turn holds inferences, and the files are named for what they are:
 //
 //	agent.go   an agent: what it holds, how it is built, what you read and set
-//	stream.go  an exchange, from the outside: Turn, Interrupt
+//	run.go  an exchange, from the outside: Turn, Interrupt
 //	turn.go    a turn: reason, act, repeat — and how the tools are run
 //
 //	event.go   what an exchange reports

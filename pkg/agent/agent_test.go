@@ -1690,3 +1690,46 @@ func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
 		t.Errorf("the conversation holds %d messages, want 6", folded)
 	}
 }
+
+// A tool that takes a while shows its work: Report reaches the consumer as
+// ToolUpdate, and the finished result still arrives on ToolEnd.
+func TestAToolReportsWhileItWorks(t *testing.T) {
+	slow := agent.ToolFunc("build", "Build the project.",
+		func(ctx context.Context, _ struct{}) (agent.Result, error) {
+			agent.Report(ctx, agent.TextResult("compiling…"))
+			agent.Report(ctx, agent.TextResult("linking…"))
+			return agent.TextResult("built"), nil
+		})
+
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
+		toolCall("c1", "build", `{}`),
+		text("done"),
+	}}, agent.WithTools(slow))
+
+	var partials []string
+	var final string
+	for e, err := range a.Run(context.Background(), ai.UserMessage("build it")) {
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		switch v := e.(type) {
+		case agent.ToolUpdate:
+			partials = append(partials, v.Partial.Text())
+		case agent.ToolEnd:
+			final = v.Result.Text()
+		}
+	}
+
+	if want := []string{"compiling…", "linking…"}; !slices.Equal(partials, want) {
+		t.Errorf("reported %q, want %q", partials, want)
+	}
+	if final != "built" {
+		t.Errorf("ToolEnd result = %q, want the finished one", final)
+	}
+}
+
+// A tool that reports where nobody installed a reporter — outside an exchange,
+// or in a test — is not a tool that panics.
+func TestReportOutsideAToolDoesNothing(t *testing.T) {
+	agent.Report(context.Background(), agent.TextResult("into the void"))
+}

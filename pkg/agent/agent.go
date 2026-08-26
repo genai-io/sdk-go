@@ -55,6 +55,9 @@ type Agent struct {
 	// goroutine running an exchange, and SetMessages is called from outside.
 	replaced bool
 
+	// pending is what AddMessages queued, taken at the next step boundary.
+	pending []ai.Message
+
 	mu sync.Mutex
 }
 
@@ -166,7 +169,9 @@ func (a *Agent) Messages() []ai.Message {
 }
 
 // SetMessages replaces the conversation. This is how compaction and session
-// restore work: both hand over a history built somewhere else.
+// restore work: both hand over a history built somewhere else. To add to it
+// rather than replace it, use AddMessages — building on Messages and setting
+// the result back races with the exchange that may be running.
 //
 // The next exchange reports it as MessagesReplaced before anything else, so a
 // consumer folding the stream ends up with what the agent holds rather than
@@ -182,6 +187,33 @@ func (a *Agent) SetMessages(msgs []ai.Message) {
 	defer a.mu.Unlock()
 	a.messages = slices.Clone(msgs)
 	a.replaced = true
+}
+
+// AddMessages puts messages into the conversation from outside an exchange —
+// something that arrived while one is already running, routed in from
+// elsewhere or typed while the model worked.
+//
+// They enter at the next step boundary: the model sees them at its next call,
+// and each is reported as MessageAdded there. Changing what the model is about
+// to see is safe exactly once per call, and that is where — which is also the
+// first moment there is a goroutine allowed to report it.
+//
+// Between exchanges, pass them to Run instead. This is for the ones that could
+// not wait.
+func (a *Agent) AddMessages(msgs ...ai.Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pending = append(a.pending, msgs...)
+}
+
+// taken empties the queue AddMessages fills.
+func (a *Agent) taken() []ai.Message {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	msgs := a.pending
+	a.pending = nil
+	return msgs
 }
 
 func (a *Agent) Tools() []Tool {

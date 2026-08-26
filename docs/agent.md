@@ -32,8 +32,10 @@ for batch := range myMessages {
 ```
 
 A CLI reads stdin, an interface reads keys, a server reads requests, and none
-of those is a shape this package can guess. `Interrupt`, or breaking out of the
-range, ends the exchange in flight.
+of those is a shape this package can guess. `AddMessages` puts something into
+the exchange in flight — it arrives at the next step boundary, which is the
+only place changing what the model is about to see is safe. `Interrupt`, or
+breaking out of the range, ends it instead.
 
 Events arrive on the ranging goroutine, so an agent that must run ahead of a
 slow reader is one whose caller forwards them to a buffer of its own — how

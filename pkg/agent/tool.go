@@ -31,9 +31,10 @@ func (r Result) Text() string { return r.Content.Text() }
 type Tool interface {
 	// Definition is what the model is told: name, description, argument schema.
 	Definition() ai.Tool
-	// Run executes one call. emit reports progress and may be called any
-	// number of times, including not at all.
-	Run(ctx context.Context, call ai.ToolCall, emit func(Result)) (Result, error)
+	// Run executes one call. Returning an error is how a tool fails: the loop
+	// turns it into a tool error the model can see and correct, rather than
+	// failing the turn.
+	Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 
 // Sequential marks a tool that must not run beside others. One of them in a
@@ -48,14 +49,14 @@ type sequential struct{ Tool }
 // the schema the model is sent is derived from the same struct the arguments
 // are decoded into, so the two cannot come to describe different things.
 func ToolFunc[T any](name, description string,
-	run func(ctx context.Context, args T, emit func(Result)) (Result, error)) Tool {
+	run func(ctx context.Context, args T) (Result, error)) Tool {
 	return &funcTool{
 		def: ai.Tool{
 			Name:        name,
 			Description: description,
 			Parameters:  jsonschema.For[T](),
 		},
-		run: func(ctx context.Context, call ai.ToolCall, emit func(Result)) (Result, error) {
+		run: func(ctx context.Context, call ai.ToolCall) (Result, error) {
 			var args T
 			input := strings.TrimSpace(call.Input)
 			if input != "" && input != "null" {
@@ -63,7 +64,7 @@ func ToolFunc[T any](name, description string,
 					return Result{}, err
 				}
 			}
-			return run(ctx, args, emit)
+			return run(ctx, args)
 		},
 	}
 }
@@ -73,7 +74,7 @@ func ToolFunc[T any](name, description string,
 func FromAI(t ai.Tool) Tool {
 	return &funcTool{
 		def: t,
-		run: func(ctx context.Context, call ai.ToolCall, _ func(Result)) (Result, error) {
+		run: func(ctx context.Context, call ai.ToolCall) (Result, error) {
 			if t.Run == nil {
 				return Result{}, &ai.Error{Kind: ai.KindInvalidRequest, Message: "agent: tool " + t.Name + " has no Run"}
 			}
@@ -88,11 +89,11 @@ func FromAI(t ai.Tool) Tool {
 
 type funcTool struct {
 	def ai.Tool
-	run func(context.Context, ai.ToolCall, func(Result)) (Result, error)
+	run func(context.Context, ai.ToolCall) (Result, error)
 }
 
 func (t *funcTool) Definition() ai.Tool { return t.def }
 
-func (t *funcTool) Run(ctx context.Context, call ai.ToolCall, emit func(Result)) (Result, error) {
-	return t.run(ctx, call, emit)
+func (t *funcTool) Run(ctx context.Context, call ai.ToolCall) (Result, error) {
+	return t.run(ctx, call)
 }

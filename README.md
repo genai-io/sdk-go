@@ -276,7 +276,7 @@ Four ideas carry the design:
 
 | | |
 | --- | --- |
-| **Everything is an event** | Nine types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
+| **Everything is an event** | Eight types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
 | **The conversation is a fold** | Replay `MessageAdded` in order and you have exactly what the agent holds. That is all a session stores, and all a restore reads. |
 | **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
 | **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |

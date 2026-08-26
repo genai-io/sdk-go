@@ -41,7 +41,7 @@
 //
 // # Events
 //
-// Eleven types, and each exists because a consumer would break without it.
+// Eight types, and each exists because a consumer would break without it.
 //
 //	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
@@ -92,8 +92,7 @@
 // A turn holds inferences, and the files are named for what they are:
 //
 //	agent.go   an agent: what it holds, how it is built, what you read and set
-//	run.go  an exchange, from the outside: Turn, Interrupt
-//	turn.go    a turn: reason, act, repeat — and how the tools are run
+//	run.go     an exchange: Run, and the reason-and-act loop behind it
 //
 //	event.go   what an exchange reports
 //	tool.go    a tool: defined from a Go type, offered, run

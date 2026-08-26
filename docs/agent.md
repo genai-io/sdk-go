@@ -104,7 +104,7 @@ other thing, and ends everything.
 
 ## Events
 
-Everything the agent does arrives as one of nine types. Two things have a life
+Everything the agent does arrives as one of eight types. Two things have a life
 worth following — a message and a tool call — and each is reported the same
 way: it starts, it may report as it goes, it ends.
 
@@ -336,9 +336,8 @@ interface only has to name what this package calls.
 ```
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
-  run.go    an exchange from the outside: Turn, Interrupt
-  turn.go      one turn: reason, act, and the loop between them
-  event.go     the nine events
+  run.go       an exchange: Run, and the reason-and-act loop behind it
+  event.go     the eight events
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   session/     events → durable entries, and back

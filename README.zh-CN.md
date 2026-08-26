@@ -20,7 +20,7 @@
 **`pkg/agent` —— 外面那圈循环**
 
 - **reason 与 act** —— 问模型、跑它要的工具、再问一次。
-- **一切皆事件** —— 一个 channel 上 11 种类型，而对话就是其中一种的折叠。
+- **一切皆事件** —— 一段序列上 9 种类型，而对话就是其中一种的折叠。
 - **四种 hook** —— 拦下一次工具调用、改写发出去的东西、抹掉返回来的东西。
 - **并行工具** —— 一批默认并发，除非某个工具说它不能。
 - **会话** —— 记录 agent 做过什么，再从中恢复对话。
@@ -211,7 +211,7 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 
 `pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环：问模型、跑它要的工具、再问一次，直到模型不再要东西、直接作答。
 
-一个 agent 就是**一个循环加两个 channel**——消息进来，事件出去。`Run` 是唯一的驱动入口，所以**不会有事件流报告不到的事情发生**。
+`Stream` 把对话推进一轮，并把沿途做的事作为序列报出来——和 `pkg/ai` 低一层的那对动词一样，那边 `Complete` 就是 `Collect(Stream)`。
 
 ```go
 a, err := agent.New(client,
@@ -222,26 +222,30 @@ if err != nil {
     log.Fatal(err)
 }
 
-go a.Run(ctx)
-
-a.In() <- ai.UserMessage("main.go 是做什么的?")
-close(a.In())
-
-for e := range a.Out() {
+for e, err := range a.Stream(ctx, ai.UserMessage("main.go 是做什么的?")) {
     render(e)
 }
+```
+
+要答案不要过程的调用方——比如站在工具后面的子 agent——用 `Collect` 折叠它：
+
+```go
+out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+return agent.TextResult(out.Message.Text()), err
 ```
 
 四个想法撑起整个设计：
 
 | | |
 | --- | --- |
-| **一切皆事件** | 一个 channel 上 11 种类型。一条消息和一次工具调用各自有开始、流式、结束；run 和 turn 在外面标出边界。集合是封闭的，消费者可以确信这就是全部。 |
+| **一切皆事件** | 一段序列上 9 种类型。一条消息和一次工具调用各自有开始、流式、结束，turn 在外面标出边界。集合是封闭的，消费者可以确信这就是全部。 |
 | **对话是一次折叠** | 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份。会话要存的只有这些，恢复要读的也只有这些。 |
 | **hook 是征询，事件是通知** | `PreInfer` / `PostInfer` 分列模型调用两侧，`PreTool` / `PostTool` 分列工具两侧。一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。 |
 | **一个工具面对两个受众** | `Content` 给模型，`Details` 给你的界面——为人排版的东西，不必此后每一轮都为它付费。 |
 
-一批工具调用默认并发执行，除非某个工具声明自己不能。可重试的流失败会重试，**静默的流有时限、超时也重试**，而 `Interrupt()` 结束正在进行的交换却让 run 活着——每一种都以一个说明原因的 stop reason 结束一个 turn。
+**消息进来的那个循环是你的**：CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`Inject` 把一条消息交给正在跑的那一轮，`Interrupt`（或者直接 `break` 出 range）结束它。
+
+一批工具调用默认并发执行，除非某个工具声明自己不能。可重试的流失败会重试，**静默的流有时限、超时也重试**——每一种都以一个说明原因的 stop reason 结束一个 turn。
 
 会话是这条事件流的**消费者**，不住在 agent 内部：在你自己的循环里 `rec.Handle(e)` 记录发生了什么，`session.Open` 再把它折回成一段可以续上的对话。
 

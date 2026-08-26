@@ -245,9 +245,9 @@ one.
 model, run the tools it asks for, call it again, until the model answers
 without asking for anything more.
 
-An agent is **a loop and two channels** — messages in, events out. `Run` is the
-only way to drive it, so nothing can happen that the event stream does not
-report.
+`Stream` advances the conversation one exchange and reports what it does as it
+goes — the same pair `pkg/ai` offers one level down, where `Complete` is
+`Collect` of `Stream`.
 
 ```go
 a, err := agent.New(client,
@@ -258,31 +258,38 @@ if err != nil {
     log.Fatal(err)
 }
 
-go a.Run(ctx)
-
-a.In() <- ai.UserMessage("what does main.go do?")
-close(a.In())
-
-for e := range a.Out() {
+for e, err := range a.Stream(ctx, ai.UserMessage("what does main.go do?")) {
     render(e)
 }
+```
+
+For a caller that wants the answer rather than the progress — a subagent behind
+a tool call — `Collect` folds it:
+
+```go
+out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+return agent.TextResult(out.Message.Text()), err
 ```
 
 Four ideas carry the design:
 
 | | |
 | --- | --- |
-| **Everything is an event** | Eleven types on one channel. A message and a tool call each start, stream and end; run and turn bracket the work around them. The set is closed, so a consumer knows the list is all there is. |
+| **Everything is an event** | Nine types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
 | **The conversation is a fold** | Replay `MessageAdded` in order and you have exactly what the agent holds. That is all a session stores, and all a restore reads. |
 | **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
 | **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
 
-A batch of tool calls runs concurrently unless a tool declares it cannot. A
-retryable stream failure is retried, a stream that goes silent is bounded and
-retried, and `Interrupt()` ends the exchange in flight while leaving the run
-alive — each ending a turn with a stop reason that says which.
+The loop over incoming messages is yours: a CLI reads stdin, an interface reads
+keys, a server reads requests, and none of those is a shape a library should
+guess. `Inject` hands a message to the exchange in flight, and `Interrupt` — or
+simply breaking out of the range — ends it.
 
-Sessions consume that event stream rather than living inside the agent:
+A batch of tool calls runs concurrently unless a tool declares it cannot. A
+retryable stream failure is retried, and a stream that goes silent is bounded
+and retried — each ending a turn with a stop reason that says which.
+
+Sessions consume that stream rather than living inside the agent:
 `rec.Handle(e)` in your own loop records what happened, and `session.Open`
 folds it back into a conversation to resume from.
 

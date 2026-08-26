@@ -2,7 +2,7 @@
 
 `pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环:问模型、跑它要的工具、再问一次,并把沿途发生的每件事作为事件报出来。
 
-一个 agent 就是**一个循环加两个 channel**——进来什么,出去什么:
+一个 agent **一次推进一轮**,并把沿途做的事作为序列报出来:
 
 ```go
 a, err := agent.New(client,
@@ -10,41 +10,38 @@ a, err := agent.New(client,
     agent.WithTools(readFile, listDir),
 )
 
-go a.Run(ctx)
-
-a.In() <- ai.UserMessage("main.go 改了什么?")
-close(a.In())
-
-for e := range a.Out() {
+for e, err := range a.Stream(ctx, ai.UserMessage("main.go 改了什么?")) {
     render(e)
 }
 ```
 
-`Run` 是唯一的驱动入口。**没有第二条绕开事件通道的路**——正是这一点,让 session 存储不会因为调用方走了另一条路而静悄悄什么都没记下。
+`Collect` 把它折叠成结果,给要答案不要过程的调用方——和 `pkg/ai` 低一层的那对动词完全一致,那边 `Complete` 就是 `Collect(Stream)`:
 
-## 三个层级,三个词
+```go
+out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+```
 
-这三个词是精确使用的,因为各家 agent 框架对它们的用法互相矛盾:
+**消息进来的那个循环是应用的**:CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜不到。`Inject` 把一条消息交给正在跑的那一轮,它在下一个 step 边界落地,那是**唯一安全改变模型即将看到什么的位置**。
+
+事件在 range 那条 goroutine 上到达,所以想让 agent 跑在慢读者前面的调用方,自己转发到自己的缓冲里——**多深、满了丢什么,由它决定**。`break` 出 range 就结束这一轮,和 `Interrupt` 一回事。
+
+## 两个层级,两个词
+
+这两个词是精确使用的,因为各家 agent 框架对它们的用法互相矛盾:
 
 ```mermaid
 flowchart TB
-    subgraph run["run —— agent 的整个工作生命"]
+    subgraph turn["turn —— 一次交换"]
         direction TB
-        subgraph turn["turn —— 一次交换"]
-            direction TB
-            inf1["inference —— 一次模型调用"]
-            tools["模型要的那批工具"]
-            inf2["inference —— 一次模型调用"]
-            inf1 --> tools --> inf2
-        end
-        turn2["turn —— 下一次交换"]
-        turn --> turn2
+        inf1["inference —— 一次模型调用"]
+        tools["模型要的那批工具"]
+        inf2["inference —— 一次模型调用"]
+        inf1 --> tools --> inf2
     end
 ```
 
 | | |
 | --- | --- |
-| **run** | 循环的整个生命,横跨 `In` 上陆续到来的所有交换 |
 | **turn** | 一次交换:有人说了句话,循环一直跑到模型不再要工具为止 |
 | **inference** | 一次模型调用;一个 turn 里有多少次,取决于工具要几轮 |
 
@@ -81,14 +78,13 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 
 ## 事件
 
-agent 干的每件事都以 11 种类型之一出现在 `Out()` 上。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
+agent 干的每件事都以 9 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
 
 ```
 MessageAdded                              一条消息进了对话
 MessageStart  MessageUpdate  MessageEnd   模型正在产生一条
 ToolStart     ToolUpdate     ToolEnd      一次工具调用,从提出到答复
-RunStart                     RunEnd       agent 的工作生命
-TurnStart                    TurnEnd      其中的一次交换
+TurnStart                    TurnEnd      包住它们的那一轮
 ```
 
 这个集合是**封闭**的——`event()` 方法不可导出,别的包加不进来——所以消费者 switch 的时候可以确信上面这张表就是全部。
@@ -234,7 +230,7 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 rec, history, err := session.Open(ctx, store, resume)   // "" 表示新开一个
 a.SetMessages(history)
 
-for e := range a.Out() {
+for e, err := range a.Stream(ctx, msg) {
     rec.Handle(e)   // 先写盘
     render(e)       // 再画屏
 }

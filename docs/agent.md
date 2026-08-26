@@ -4,7 +4,8 @@
 model, run the tools it asks for, call it again, and report everything on the
 way as events.
 
-An agent is **a loop and two channels** — what comes in, what goes out:
+An agent advances **one exchange at a time**, reporting what it does as a
+sequence:
 
 ```go
 a, err := agent.New(client,
@@ -12,43 +13,47 @@ a, err := agent.New(client,
     agent.WithTools(readFile, listDir),
 )
 
-go a.Run(ctx)
-
-a.In() <- ai.UserMessage("what changed in main.go?")
-close(a.In())
-
-for e := range a.Out() {
+for e, err := range a.Stream(ctx, ai.UserMessage("what changed in main.go?")) {
     render(e)
 }
 ```
 
-`Run` is the only way to drive it. There is no second entry point that skips
-the event channel — which is what keeps a session store from silently recording
-nothing because the caller reached for the other one.
+`Collect` folds that for a caller who wants the answer rather than the
+progress — the same pair `pkg/ai` offers one level down, where `Complete` is
+`Collect` of `Stream`:
 
-## Three levels, three words
+```go
+out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+```
 
-The words are used precisely, because agent frameworks disagree about them:
+The loop over incoming messages is the application's: a CLI reads stdin, an
+interface reads keys, a server reads requests, and none of those is a shape
+this package should guess. `Inject` hands a message to the exchange in flight;
+it lands at the next step boundary, which is the only place changing what the
+model is about to see is safe.
+
+Events arrive on the ranging goroutine, so an agent that must run ahead of a
+slow reader is one whose caller forwards them to a buffer of its own — how
+deep, and what to drop when it fills, being theirs to decide. Breaking out of
+the range ends the exchange, the same as `Interrupt`.
+
+## Two levels, two words
+
+Both words are used precisely, because agent frameworks disagree about them:
 
 ```mermaid
 flowchart TB
-    subgraph run["run — the agent's working life"]
+    subgraph turn["turn — one exchange"]
         direction TB
-        subgraph turn["turn — one exchange"]
-            direction TB
-            inf1["inference — one model call"]
-            tools["tools the model asked for"]
-            inf2["inference — one model call"]
-            inf1 --> tools --> inf2
-        end
-        turn2["turn — the next exchange"]
-        turn --> turn2
+        inf1["inference — one model call"]
+        tools["tools the model asked for"]
+        inf2["inference — one model call"]
+        inf1 --> tools --> inf2
     end
 ```
 
 | | |
 | --- | --- |
-| **run** | the loop's whole life, across as many exchanges as arrive on `In` |
 | **turn** | one exchange: someone said something, and the loop runs until the model stops asking for tools |
 | **inference** | one model call, of which a turn holds as many as the tools require |
 
@@ -95,16 +100,15 @@ other thing, and ends everything.
 
 ## Events
 
-Everything the agent does arrives on `Out()` as one of eleven types. Two things
-have a life worth following — a message and a tool call — and each is reported
-the same way: it starts, it may report as it goes, it ends.
+Everything the agent does arrives as one of nine types. Two things have a life
+worth following — a message and a tool call — and each is reported the same
+way: it starts, it may report as it goes, it ends.
 
 ```
 MessageAdded                              a message entered the conversation
 MessageStart  MessageUpdate  MessageEnd   the model producing one
 ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-RunStart                     RunEnd       the agent's working life
-TurnStart                    TurnEnd      one exchange within it
+TurnStart                    TurnEnd      the exchange around them
 ```
 
 The set is closed — the `event()` method is unexported, so no other package can
@@ -123,7 +127,7 @@ sequenceDiagram
     participant Model
     participant Tool
 
-    App->>Agent: In() <- "what changed?"
+    App->>Agent: Stream(ctx, "what changed?")
     Agent-->>App: TurnStart
     Agent-->>App: MessageAdded (user)
     Agent->>Model: MessageStart (attempt 1)
@@ -154,16 +158,13 @@ the partial output it drew is void.
 MessageStart(attempt=1) → MessageEnd(err) → MessageStart(attempt=2) → … → MessageEnd → MessageAdded
 ```
 
-### Only fragments are dropped
+### Nothing is dropped
 
-`MessageUpdate` and `ToolUpdate` are discarded when a reader falls behind,
-because the event closing each span carries the complete value and a consumer
-that missed fragments converges anyway. **Everything else waits.** Dropping any
-of it would leave the consumer holding a different conversation than the agent
-does.
-
-A reader that cannot afford to hold the agent up forwards each event to a
-buffer of its own, making the drop policy theirs.
+There is no reader to fall behind: the events arrive on the ranging goroutine,
+so the agent waits for the body of the loop. A caller who cannot afford to hold
+it up forwards to a buffer of its own — and **how deep it is, and what to drop
+when it fills, are the caller's to decide**, which is the only place that
+decision can be made with enough information.
 
 ## Hooks
 
@@ -290,7 +291,7 @@ own event loop:
 rec, history, err := session.Open(ctx, store, resume)   // "" starts a new one
 a.SetMessages(history)
 
-for e := range a.Out() {
+for e, err := range a.Stream(ctx, msg) {
     rec.Handle(e)   // write first
     render(e)       // then paint
 }
@@ -334,9 +335,9 @@ interface only has to name what this package calls.
 ```
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
-  run.go       one run: Run, emit, add
+  stream.go    an exchange from the outside: Stream, Collect, Inject
   turn.go      one turn: reason, act, and the loop between them
-  event.go     the eleven events
+  event.go     the nine events
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   session/     events → durable entries, and back

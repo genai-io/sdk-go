@@ -70,8 +70,8 @@ func declarations(tools []ai.Tool) []*tool {
 	}
 	decls := make([]*functionDeclaration, 0, len(tools))
 	for _, t := range tools {
-		decl := &functionDeclaration{Name: t.Name, Description: t.Description}
-		if schema := t.ParameterSchema(); schema != nil {
+		decl := &functionDeclaration{Name: t.Schema.Name, Description: t.Schema.Description}
+		if schema := t.Schema.DefinitionMap(); schema != nil {
 			decl.ParametersJSONSchema = schema
 		}
 		decls = append(decls, decl)

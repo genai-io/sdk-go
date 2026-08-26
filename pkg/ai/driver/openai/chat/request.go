@@ -231,14 +231,14 @@ func convertTools(tools []ai.Tool) []sdk.ChatCompletionToolUnionParam {
 	out := make([]sdk.ChatCompletionToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		var params sdk.FunctionParameters
-		if props := t.ParameterSchema(); props != nil {
+		if props := t.Schema.DefinitionMap(); props != nil {
 			params = props
 		}
 		out = append(out, sdk.ChatCompletionToolUnionParam{
 			OfFunction: &sdk.ChatCompletionFunctionToolParam{
 				Function: sdk.FunctionDefinitionParam{
-					Name:        t.Name,
-					Description: sdk.String(t.Description),
+					Name:        t.Schema.Name,
+					Description: sdk.String(t.Schema.Description),
 					Parameters:  params,
 				},
 			},

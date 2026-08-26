@@ -275,3 +275,73 @@ func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 		t.Error("the failed write was never surfaced")
 	}
 }
+
+// The shape examples/agent-session teaches, and the one that matters: the
+// process ends. A second store opened on the same directory — a different
+// *jsonl.Store, holding none of the first one's state — restores what the
+// first recorded, and carries on numbering where it left off.
+func TestASecondProcessPicksUpTheConversation(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	first, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	a := newAgent(t, nil, text("morning"), text("afternoon"))
+	rec, history, err := session.Open(ctx, first, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("a new session restored %d messages", len(history))
+	}
+	converse(t, a, rec, ai.UserMessage("hello"))
+	id := rec.ID()
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A new process: nothing survives but the directory.
+	second, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer second.Close()
+
+	// Finding it the way a program would, rather than by remembering the id.
+	sessions, err := second.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != id {
+		t.Fatalf("List = %+v, want the one session just written", sessions)
+	}
+
+	rec2, restored, err := session.Open(ctx, second, id)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if len(restored) != len(a.Messages()) {
+		t.Fatalf("restored %d messages, the first process ended holding %d",
+			len(restored), len(a.Messages()))
+	}
+	if got := restored[0].Text(); got != "hello" {
+		t.Errorf("the conversation starts at %q, want what was asked first", got)
+	}
+
+	// And it carries on: a second exchange lands after the first, not on top.
+	b := newAgent(t, restored, text("afternoon"))
+	converse(t, b, rec2, ai.UserMessage("still there?"))
+
+	final, err := session.Messages(ctx, second, id)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(final) != len(b.Messages()) {
+		t.Errorf("the store holds %d messages, the agent holds %d", len(final), len(b.Messages()))
+	}
+	if got := final[0].Text(); got != "hello" {
+		t.Errorf("the first message is %q; the second process overwrote history", got)
+	}
+}

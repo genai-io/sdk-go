@@ -1,6 +1,9 @@
 package ai
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -258,12 +261,29 @@ type ToolCall struct {
 	Name string `json:"name"`
 	// Input is the arguments as raw JSON, exactly as the model produced them
 	// rather than decoded and re-encoded, so replaying the call is byte-exact.
-	// Check it with Tool.ValidateArgs, then decode with UnmarshalArgs.
+	// Check it with the tool's Schema.Validate, then decode with UnmarshalArgs.
 	Input string `json:"input"`
 
 	// Signature is an opaque provider token that must be echoed back with the
 	// call on the following turn. Gemini uses it for thought signatures.
 	Signature []byte `json:"signature,omitempty"`
+}
+
+// UnmarshalArgs decodes the call's arguments into a Go value. A field the
+// model did not send keeps whatever the target already holds, and a field the
+// schema does not have is an error rather than a silent drop — a model that
+// invents an argument should be told, not obeyed halfway.
+func (c ToolCall) UnmarshalArgs(into any) error {
+	trimmed := bytes.TrimSpace([]byte(c.Input))
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return fmt.Errorf("arguments for %s: %w", c.Name, err)
+	}
+	return nil
 }
 
 // ToolResult is what running one tool produced.

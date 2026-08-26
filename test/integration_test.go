@@ -215,7 +215,7 @@ func TestToolsRoundTrip(t *testing.T) {
 	if !strings.Contains(string(wire), "what to look for") {
 		t.Errorf("tool schema did not reach the wire: %s", wire)
 	}
-	if err := tool.ValidateArgs(calls[0].Input); err != nil {
+	if err := tool.Schema.Validate(calls[0].Input); err != nil {
 		t.Fatalf("the model's own arguments failed their schema: %v", err)
 	}
 	// And the tool answers its own call, decoding into the type it came from.
@@ -864,7 +864,7 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := tool.ValidateArgs(tc.input)
+			err := tool.Schema.Validate(tc.input)
 			if err == nil {
 				t.Fatalf("%s was accepted", tc.input)
 			}
@@ -874,7 +874,7 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 		})
 	}
 
-	if err := tool.ValidateArgs(`{"query":"go","priority":"low","limit":3}`); err != nil {
+	if err := tool.Schema.Validate(`{"query":"go","priority":"low","limit":3}`); err != nil {
 		t.Errorf("a correct call was rejected: %v", err)
 	}
 }
@@ -886,7 +886,7 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 // cannot disagree.
 func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 	tools := []ai.Tool{areaTool(nil), censusTool(),
-		{Name: "unhandled", Description: "offered without a handler"}}
+		{Schema: ai.Schema{Name: "unhandled", Description: "offered without a handler"}}}
 
 	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
 		{ID: "1", Name: "census", Input: `{"year":2010}`},
@@ -1067,13 +1067,15 @@ type RecorderArgs struct {
 // told, with nothing executable in it.
 func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 	tool := ai.Tool{
-		Name:        "echo",
-		Description: "repeats what it is given",
-		Parameters: map[string]any{
-			"type":                 "object",
-			"properties":           map[string]any{"text": map[string]any{"type": "string"}},
-			"required":             []any{"text"},
-			"additionalProperties": false,
+		Schema: ai.Schema{
+			Name:        "echo",
+			Description: "repeats what it is given",
+			Definition: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"text": map[string]any{"type": "string"}},
+				"required":             []any{"text"},
+				"additionalProperties": false,
+			},
 		},
 		Run: func(_ context.Context, arguments string) (string, error) {
 			return "echoed " + arguments, nil
@@ -1216,9 +1218,11 @@ func TestToolFuncFoldsToAnOrdinaryTool(t *testing.T) {
 	shorthand := ai.ToolFunc("search", "search the knowledge base", run)
 
 	written := ai.Tool{
-		Name:        "search",
-		Description: "search the knowledge base",
-		Parameters:  jsonschema.For[SearchArgs](),
+		Schema: ai.Schema{
+			Name:        "search",
+			Description: "search the knowledge base",
+			Definition:  jsonschema.For[SearchArgs](),
+		},
 		Run: func(ctx context.Context, arguments string) (string, error) {
 			var a SearchArgs
 			if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
@@ -1277,7 +1281,7 @@ func TestToolFuncFoldsToAnOrdinaryTool(t *testing.T) {
 func TestASchemaAndItsArgumentsAreOneDeclaration(t *testing.T) {
 	tool := searchTool()
 
-	schema := tool.ParameterSchema()
+	schema := tool.Schema.DefinitionMap()
 	properties := schema["properties"].(map[string]any)
 	fields := reflect.VisibleFields(reflect.TypeOf(SearchArgs{}))
 	if len(properties) != len(fields) {
@@ -1292,7 +1296,7 @@ func TestASchemaAndItsArgumentsAreOneDeclaration(t *testing.T) {
 
 	// So a call the schema accepts is one the arguments can hold, and one it
 	// refuses never reaches the function.
-	if err := tool.ValidateArgs(`{"query":"go","priority":"low","limit":3}`); err != nil {
+	if err := tool.Schema.Validate(`{"query":"go","priority":"low","limit":3}`); err != nil {
 		t.Errorf("a correct call was rejected: %v", err)
 	}
 }
@@ -1337,8 +1341,8 @@ func TestAToolIsCalledWhateverYouCallIt(t *testing.T) {
 		func(_ context.Context, a FetchDocumentArgs) (string, error) {
 			return "doc " + a.ID, nil
 		})
-	if tool.Name != "fetch_document" {
-		t.Errorf("Name = %q, want the name it was given", tool.Name)
+	if tool.Schema.Name != "fetch_document" {
+		t.Errorf("Name = %q, want the name it was given", tool.Schema.Name)
 	}
 
 	results := ai.RunTools(context.Background(), []ai.Tool{tool},

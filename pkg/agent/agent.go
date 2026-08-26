@@ -26,8 +26,11 @@ type Agent struct {
 	tools    []Tool
 	hooks    []Hook
 
-	maxSteps    int
-	maxAttempts int
+	maxSteps int
+	// maxAttempts is 1 unless WithRetry asked for more: the client owns retry,
+	// and stacking a second budget on it multiplies rather than adds.
+	maxAttempts  int
+	retryBackoff time.Duration
 
 	// streamFirst and streamIdle bound how long a model stream may say
 	// nothing. Zero disables either one.
@@ -42,7 +45,8 @@ type Agent struct {
 	// it actually ran, so a restored conversation starts again at zero — what
 	// came back from storage was someone else's counting.
 	turnCount atomic.Int64
-	// running is latched, never cleared: an agent runs once.
+	// running is held for the length of one exchange and released after it;
+	// a second Run while one is in flight is ErrBusy, not a queue.
 	running atomic.Bool
 
 	// pending is what AddMessages queued, taken at the next step boundary.
@@ -118,11 +122,28 @@ func WithStreamTimeout(first, idle time.Duration) Option {
 	return func(a *Agent) { a.streamFirst, a.streamIdle = first, idle }
 }
 
-// WithMaxAttempts caps attempts per model call when a stream fails retryably.
-func WithMaxAttempts(n int) Option {
+// WithRetry has the agent replay a failed model call, at most attempts times
+// in total, waiting backoff before the second and doubling it after each
+// further failure — the same rule, and the same arguments, as ai.Retry.
+//
+// It is off by default, and that is the point: retry belongs on the client,
+// where ai.Retry already implements it, and two budgets do not compose. An
+// agent set to three attempts on a client wrapped in ai.Retry(3, …) is nine
+// model calls for one step, and neither loop can see the other's count.
+//
+//	client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second)), model)
+//
+// Turn this on for what the client cannot retry: ai.Retry gives up once a
+// stream has yielded output, because its caller has already seen it, where
+// this loop discards the attempt and opens a new message. A stalled stream is
+// the same case — ending one cancels the context ai.Retry would wait on.
+func WithRetry(attempts int, backoff time.Duration) Option {
 	return func(a *Agent) {
-		if n > 0 {
-			a.maxAttempts = n
+		if attempts > 0 {
+			a.maxAttempts = attempts
+		}
+		if backoff >= 0 {
+			a.retryBackoff = backoff
 		}
 	}
 }
@@ -136,11 +157,12 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 		return nil, errors.New("agent: a client is required")
 	}
 	a := &Agent{
-		client:      client,
-		maxAttempts: 3,
-		streamFirst: defaultFirstChunk,
-		streamIdle:  defaultIdle,
-		stopTurn:    func() {},
+		client:       client,
+		maxAttempts:  1,
+		retryBackoff: time.Second,
+		streamFirst:  defaultFirstChunk,
+		streamIdle:   defaultIdle,
+		stopTurn:     func() {},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -219,7 +241,7 @@ func (a *Agent) SetTools(tools []Tool) {
 func (a *Agent) definitions() []ai.Tool {
 	defs := make([]ai.Tool, len(a.tools))
 	for i, t := range a.tools {
-		defs[i] = t.Definition()
+		defs[i] = ai.Tool{Schema: t.Schema()}
 	}
 	return defs
 }
@@ -248,10 +270,11 @@ func (a *Agent) SetSystem(prompt string) {
 }
 
 func (a *Agent) String() string {
-	if n := a.Name(); n != "" {
-		return fmt.Sprintf("agent(%s)", n)
+	name := a.Name()
+	if name == "" {
+		name = a.client.Model().ID
 	}
-	return fmt.Sprintf("agent(%s)", a.client.Model().ID)
+	return fmt.Sprintf("agent(%s)", name)
 }
 
 // request is what this agent would send. One lock, not three: a prompt read
@@ -273,7 +296,7 @@ func (a *Agent) toolNamed(name string) (Tool, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, t := range a.tools {
-		if t.Definition().Name == name {
+		if t.Schema().Name == name {
 			return t, true
 		}
 	}

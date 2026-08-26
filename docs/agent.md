@@ -68,7 +68,7 @@ here rests on.
 
 ```mermaid
 flowchart LR
-    in([In]) --> reason
+    in([Run]) --> reason
     reason{{"reason<br/>ask the model"}} -->|tool calls| act{{"act<br/>run them"}}
     act --> reason
     reason -->|no tool calls| done([TurnEnd])
@@ -84,6 +84,8 @@ Five ways a turn can end, and every exit names one:
 | --- | --- |
 | `end_turn` | the model answered without asking for a tool |
 | `max_tokens` | the model ran out of output room mid-answer — the reply is not whole |
+| `refusal` | the model declined, or a content filter stopped it — there may be text, it is not the answer |
+| `stop_sequence` | generation stopped at one of `WithStopSequences` |
 | `max_steps` | the step budget ran out with the model still working |
 | `terminated` | every tool in a batch asked the loop to stop |
 | `error` | a model call failed past its retry budget, or a hook refused |
@@ -95,11 +97,26 @@ A stream that says nothing is the one failure that looks like work, so an
 agent bounds it: `WithStreamTimeout(first, idle)` caps how long the endpoint
 may take to say anything and how long it may pause once it has started, on by
 default at five minutes and one minute. Running out is reported as a network
-failure — because it is one — and retried like any other.
+failure — because it is one — and it is one of the two things `WithRetry` is
+for.
 
-`Interrupt()` ends the exchange in flight and leaves the run alive: the turn
-stops with `StopCanceled` and the agent goes back to waiting on `In`. That is
-what a user pressing escape asks for. Cancelling `Run`'s own context is the
+### Retry belongs to the client
+
+`ai.Retry(attempts, backoff)` wraps the driver and is where retry goes. The
+agent does not retry by default, because two budgets multiply rather than add:
+three attempts here on a client already wrapped in `ai.Retry(3, …)` is nine
+model calls for one step, and neither loop can see the other's count.
+
+`WithRetry(attempts, backoff)` turns on a second budget deliberately, for the
+two failures the client cannot replay: a stream that already yielded output —
+`ai.Retry` gives up there, because its caller has seen it, where this loop
+discards the attempt and opens a new message — and a stalled stream, since
+ending one cancels the context `ai.Retry` would wait on. Either way the wait
+honours the endpoint's `Retry-After` before its own backoff.
+
+`Interrupt()` ends the exchange in flight and leaves the agent alive: the turn
+stops with `StopCanceled`, `Run` returns, and the next one starts clean. That
+is what a user pressing escape asks for. Cancelling `Run`'s own context is the
 other thing, and ends everything.
 
 ## Events
@@ -201,7 +218,7 @@ flowchart LR
 ```go
 agent.WithHooks(agent.Hook{
     PreTool: func(ctx context.Context, c agent.PreToolContext) (agent.Decision, error) {
-        if c.Tool.Definition().Name == "write_file" && !approved(c.Call) {
+        if c.Tool.Schema().Name == "write_file" && !approved(c.Call) {
             return agent.Decision{Block: true, Reason: "not approved by the user"}, nil
         }
         return agent.Decision{}, nil
@@ -239,7 +256,7 @@ A tool is two methods:
 
 ```go
 type Tool interface {
-    Definition() ai.Tool
+    Schema() ai.Schema
     Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 ```

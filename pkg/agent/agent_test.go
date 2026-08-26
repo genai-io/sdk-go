@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,7 +292,7 @@ func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 	a := newAgent(t, &scripted{
 		errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
 		scripts: [][]ai.Delta{nil, text("second time lucky")},
-	})
+	}, agent.WithRetry(3, 0))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -730,7 +731,7 @@ func TestAFailedAttemptStillCountsWhatItCost(t *testing.T) {
 				{Usage: &ai.Usage{Input: 40, Output: 6}, StopReason: ai.StopEndTurn},
 			},
 		},
-	})
+	}, agent.WithRetry(3, 0))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -971,6 +972,7 @@ func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 	attempts := 0
 	a, err := agent.New(client,
 		agent.WithSystem("base"),
+		agent.WithRetry(3, 0),
 		agent.WithHooks(agent.Hook{
 			PreInfer: func(_ context.Context, req *ai.Request) error {
 				attempts++
@@ -1365,11 +1367,13 @@ func (d *stalling) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Del
 	}
 }
 
-// A stream that goes quiet is a transient failure, so the attempt that hit it
-// is retried rather than failing the turn.
+// A stream that goes quiet is a transient failure, and the one the client
+// structurally cannot retry — ending the stall cancels the context ai.Retry
+// would wait on — so it is what the agent's own budget is for.
 func TestAStalledStreamIsRetried(t *testing.T) {
 	a := newAgent(t, &stalling{after: 1},
-		agent.WithStreamTimeout(20*time.Millisecond, 20*time.Millisecond))
+		agent.WithStreamTimeout(20*time.Millisecond, 20*time.Millisecond),
+		agent.WithRetry(2, 0))
 
 	events, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {
@@ -1531,7 +1535,7 @@ func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
 	a := newAgent(t, &scripted{
 		errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "no key"}},
 		scripts: [][]ai.Delta{nil, text("second time")},
-	}, agent.WithMaxAttempts(1))
+	})
 
 	if _, err := outcome(t, a, ai.UserMessage("first")); err == nil {
 		t.Fatal("the failure never reached the caller")
@@ -1732,4 +1736,188 @@ func TestAToolReportsWhileItWorks(t *testing.T) {
 // or in a test — is not a tool that panics.
 func TestReportOutsideAToolDoesNothing(t *testing.T) {
 	agent.Report(context.Background(), agent.TextResult("into the void"))
+}
+
+// A tool declares its arguments once, as a Go type, and that type is both what
+// the model is shown and what the arguments are decoded into. An argument the
+// schema does not have is the model inventing something: it comes back as a
+// tool error the model can read and correct, not as a field quietly dropped on
+// the way to code that then acts on a request it never received.
+func TestAToolRejectsAnArgumentItsSchemaDoesNotHave(t *testing.T) {
+	type args struct {
+		Path string `json:"path"`
+	}
+	var ran bool
+	tool := agent.ToolFunc("read", "read a file", func(_ context.Context, a args) (agent.Result, error) {
+		ran = true
+		return agent.TextResult(a.Path), nil
+	})
+
+	if _, err := tool.Run(context.Background(), ai.ToolCall{
+		Name: "read", Input: `{"path":"main.go","recursive":true}`,
+	}); err == nil {
+		t.Fatal("an unknown argument was accepted; the model would never learn it was ignored")
+	}
+	if ran {
+		t.Error("the tool ran on arguments that did not match its schema")
+	}
+
+	// The same call without the invention is fine, and an absent optional
+	// field keeps whatever the target already held.
+	got, err := tool.Run(context.Background(), ai.ToolCall{Name: "read", Input: `{"path":"main.go"}`})
+	if err != nil {
+		t.Fatalf("valid arguments were rejected: %v", err)
+	}
+	if got.Text() != "main.go" {
+		t.Errorf("got %q, want the decoded path", got.Text())
+	}
+}
+
+// The two halves of a tool are the schema the model reads and the function
+// that answers it, and ToolFunc derives the first from the second's argument
+// type — so they cannot come to describe different things.
+func TestAToolsSchemaComesFromItsArgumentType(t *testing.T) {
+	type args struct {
+		City string `json:"city" description:"which city"`
+	}
+	tool := agent.ToolFunc("weather", "look up the weather", func(context.Context, args) (agent.Result, error) {
+		return agent.Result{}, nil
+	})
+
+	schema := tool.Schema()
+	if schema.Name != "weather" || schema.Description != "look up the weather" {
+		t.Errorf("Schema = %+v, want the name and description it was given", schema)
+	}
+	props, _ := schema.DefinitionMap()["properties"].(map[string]any)
+	if _, ok := props["city"]; !ok {
+		t.Errorf("properties = %v, want the field from the argument type", props)
+	}
+	if err := schema.Validate(`{"city":42}`); err == nil {
+		t.Error("a wrongly typed argument passed validation")
+	}
+}
+
+// A model that was stopped rather than one that chose to stop did not answer,
+// whatever text arrived before it. Collapsing a refusal into end_turn tells a
+// caller the reply is whole, which is the same lie max_tokens was fixed for.
+func TestAStoppedModelSaysWhatStoppedIt(t *testing.T) {
+	for _, tc := range []struct {
+		wire ai.StopReason
+		want agent.StopReason
+	}{
+		{ai.StopEndTurn, agent.StopEndTurn},
+		{ai.StopMaxTokens, agent.StopMaxTokens},
+		{ai.StopRefusal, agent.StopRefusal},
+		{ai.StopSequence, agent.StopSequence},
+	} {
+		t.Run(string(tc.wire), func(t *testing.T) {
+			d := &scripted{scripts: [][]ai.Delta{{
+				{Block: ai.TextBlock("as far as it got")},
+				{EndBlock: true},
+				{StopReason: tc.wire},
+			}}}
+			a := newAgent(t, d)
+
+			var end agent.TurnEnd
+			for e, err := range a.Run(context.Background(), ai.UserMessage("go on")) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if v, ok := e.(agent.TurnEnd); ok {
+					end = v
+				}
+			}
+			if end.StopReason != tc.want {
+				t.Errorf("StopReason = %q, want %q for a wire reason of %q",
+					end.StopReason, tc.want, tc.wire)
+			}
+		})
+	}
+}
+
+// Sequential is a promise that a tool never runs beside another, and it holds
+// through a caller's own wrapper as long as the mark stays outermost — which
+// is the rule Sequential documents, because no marker survives a decorator
+// that embeds the Tool interface.
+func TestASequentialToolRunsAloneThroughADecorator(t *testing.T) {
+	var live, peak atomic.Int64
+	slow := agent.ToolFunc("touch", "touch shared state",
+		func(ctx context.Context, _ struct{}) (agent.Result, error) {
+			n := live.Add(1)
+			for {
+				old := peak.Load()
+				if n <= old || peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			live.Add(-1)
+			return agent.TextResult("ok"), nil
+		})
+
+	d := &scripted{scripts: [][]ai.Delta{
+		{
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "touch", Input: "{}"})},
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "touch", Input: "{}"})},
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "3", Name: "touch", Input: "{}"})},
+			{StopReason: ai.StopToolUse},
+		},
+		text("done"),
+	}}
+	a := newAgent(t, d, agent.WithTools(agent.Sequential(logged{slow})))
+
+	for _, err := range a.Run(context.Background(), ai.UserMessage("touch it three times")) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := peak.Load(); got != 1 {
+		t.Errorf("%d of them ran at once; Sequential promised 1", got)
+	}
+}
+
+// logged is the kind of wrapper a caller writes: it passes everything through
+// and adds nothing the agent knows about.
+type logged struct{ agent.Tool }
+
+// An endpoint that says how long to wait is the whole reason RetryAfter is on
+// the error. Replaying immediately is what rate limiting exists to punish, and
+// a loop that counts attempts without ever waiting does exactly that.
+func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
+	const askedFor = 60 * time.Millisecond
+	a := newAgent(t, &scripted{
+		errs: []error{&ai.Error{
+			Kind: ai.KindRateLimit, Message: "slow down", RetryAfter: askedFor,
+		}},
+		scripts: [][]ai.Delta{nil, text("thank you for waiting")},
+		// A backoff of zero, so anything waited for came from the endpoint.
+	}, agent.WithRetry(2, 0))
+
+	start := time.Now()
+	if _, err := outcome(t, a, ai.UserMessage("hi")); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	if waited := time.Since(start); waited < askedFor {
+		t.Errorf("retried after %v; the endpoint asked for %v", waited, askedFor)
+	}
+}
+
+// Retry is off unless asked for, because the client already has ai.Retry and
+// two budgets multiply: three attempts here on a client wrapping ai.Retry(3)
+// is nine model calls for one step.
+func TestAnAgentDoesNotRetryUnlessAsked(t *testing.T) {
+	d := &scripted{
+		errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
+		scripts: [][]ai.Delta{nil, text("would have been the retry")},
+	}
+	a := newAgent(t, d)
+
+	if _, err := outcome(t, a, ai.UserMessage("hi")); err == nil {
+		t.Fatal("the failure never reached the caller")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.calls != 1 {
+		t.Errorf("the driver was called %d times, want 1 — retry is the client's", d.calls)
+	}
 }

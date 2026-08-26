@@ -168,38 +168,41 @@ response, history, err := client.Run(ctx,
 <details>
 <summary><code>ToolFunc</code> is shorthand. This is what it folds down to.</summary>
 
+A tool is two halves: `Schema` is everything the model is told, `Run` is what
+answers a call. `ToolFunc` derives the first from the Go type the second takes.
+
 ```go
 search := ai.Tool{
-	Name:        "search",
-	Description: "Search the documentation and return matching passages.",
-	Parameters:  jsonschema.For[SearchArgs](),
+	Schema: ai.Schema{
+		Name:        "search",
+		Description: "Search the documentation and return matching passages.",
+		Definition:  jsonschema.For[SearchArgs](),
+	},
 	Run: func(ctx context.Context, arguments string) (string, error) {
 		var a SearchArgs
-		if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
-			decoder := json.NewDecoder(bytes.NewReader(raw))
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&a); err != nil {
-				return "", fmt.Errorf("arguments for search: %w", err)
-			}
+		if err := (ai.ToolCall{Name: "search", Input: arguments}).UnmarshalArgs(&a); err != nil {
+			return "", err
 		}
 		return docs.Search(ctx, a.Query, a.Limit)
 	},
 }
 ```
 
-`ai.Tool` is the whole of what a tool is: the three fields that go on the wire,
-and one function that answers a call. `ToolFunc` derives the schema from
+`ai.Tool` is the whole of what a tool is: the schema that goes on the wire, and
+one function that answers a call. `ToolFunc` derives the first from
 `SearchArgs` and decodes into it, and that is all it does — the two forms
 produce byte-identical definitions and behave identically, errors included.
 
 So the escape hatches are not features. A hand-written schema is an assignment,
-`search.Parameters = handWritten`. A tool whose shape is not known until run
-time is this form with `Parameters` from somewhere else. Neither needs anything
-the common case does not already use.
+`search.Schema.Definition = handWritten`. A tool whose shape is not known until
+run time is this form with the schema from somewhere else. Neither needs
+anything the common case does not already use.
 
-The empty-argument branch is not decoration: every protocol here sends an empty
-object for a call to a tool that takes none, and `json.Decoder` returns `EOF`
-rather than a zero value for it.
+`UnmarshalArgs` is what `ToolFunc` decodes with, and it is worth reaching for
+directly: an argument the schema does not have is an error rather than a silent
+drop — a model that invents one should be told, not obeyed halfway — and an
+empty document is read as an empty object, which is what every protocol here
+sends for a call to a tool that takes no arguments.
 
 </details>
 
@@ -274,9 +277,9 @@ for batch := range myMessages {
 
 Four ideas carry the design:
 
-| | |
+| Idea | What it means |
 | --- | --- |
-| **Everything is an event** | Eight types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
+| **Everything is an event** | Nine types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
 | **The conversation is a fold** | Replay `MessageAdded` in order and you have exactly what the agent holds. That is all a session stores, and all a restore reads. |
 | **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
 | **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
@@ -287,15 +290,20 @@ is your loop, not a method here. `AddMessages` puts something into the exchange
 in flight; `Interrupt`, or simply breaking out of the range, ends it.
 
 A batch of tool calls runs concurrently unless a tool declares it cannot. A
-retryable stream failure is retried, and a stream that goes silent is bounded
-and retried — each ending a turn with a stop reason that says which.
+stream that goes silent is bounded rather than hung on. Retry belongs to the
+client — `ai.Retry` wraps the driver — so the agent adds none by default; two
+budgets would multiply rather than add. `WithRetry` turns on a second one for
+what the client cannot replay.
 
 Sessions consume that stream rather than living inside the agent:
 `rec.Handle(e)` in your own loop records what happened, and `session.Open`
 folds it back into a conversation to resume from.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
-rules, tools and sessions.
+rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
+[`examples/agent-progress`](examples/agent-progress),
+[`examples/agent-session`](examples/agent-session) and
+[`examples/agent`](examples/agent) for programs that run.
 
 ## Structured outputs
 
@@ -440,7 +448,7 @@ somebody else's protocol, so adding one is a data change.
 | --- | --- |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
 | [Changelog](CHANGELOG.md) | What changed in each release |
-| [`examples/`](examples) | Runnable programs, one per vendor plus tools, structured output and an agent |
+| [`examples/`](examples) | Runnable programs: one per vendor, plus tool calling, structured output and four agents |
 
 ## Versioning
 
@@ -449,7 +457,7 @@ version is `0` the API may still change between minor releases; the
 [changelog](CHANGELOG.md) says what moved and what to write instead.
 
 ```sh
-go get github.com/genai-io/sdk-go@v0.1.0
+go get github.com/genai-io/sdk-go@v0.1.2
 ```
 
 ## License

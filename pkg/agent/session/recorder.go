@@ -57,7 +57,7 @@ func (r *Recorder) Handle(e agent.Event) {
 		if req := started.Request; req != nil {
 			rec.System = req.System
 			for _, t := range req.Tools {
-				rec.Tools = append(rec.Tools, t.Name)
+				rec.Tools = append(rec.Tools, t.Schema.Name)
 			}
 		}
 		if v.Response != nil {
@@ -81,13 +81,10 @@ func (r *Recorder) Handle(e agent.Event) {
 		delete(r.openTool, v.ID)
 		r.mu.Unlock()
 
-		rec := Tool{ID: v.ID, Name: started.Name, Args: started.Args, Content: v.Result.Text()}
-		if v.Err != nil {
-			rec.IsError = true
-			if rec.Content == "" {
-				rec.Content = v.Err.Error()
-			}
-		}
+		// The same text the model was told, from the same function, so the
+		// record cannot come to disagree with the conversation.
+		rec := Tool{ID: v.ID, Name: started.Name, Args: started.Args,
+			Content: agent.Told(v.Result, v.Err), IsError: v.Err != nil}
 		r.write(Entry{Type: EntryTool, Tool: &rec})
 
 	case agent.TurnEnd:

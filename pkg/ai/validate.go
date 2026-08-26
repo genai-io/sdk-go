@@ -139,16 +139,17 @@ func validateSettings(req *Request) error {
 
 	toolNames := make(map[string]bool, len(req.Tools))
 	for i, tool := range req.Tools {
-		if strings.TrimSpace(tool.Name) == "" {
+		name := tool.Schema.Name
+		if strings.TrimSpace(name) == "" {
 			return invalidRequest("tool %d has no name", i)
 		}
-		if tool.Parameters != nil && tool.ParameterSchema() == nil {
-			return invalidRequest("tool %q parameters must be a JSON Schema object", tool.Name)
+		if tool.Schema.Definition != nil && tool.Schema.DefinitionMap() == nil {
+			return invalidRequest("tool %q parameters must be a JSON Schema object", name)
 		}
-		if toolNames[tool.Name] {
-			return invalidRequest("tool name %q is duplicated", tool.Name)
+		if toolNames[name] {
+			return invalidRequest("tool name %q is duplicated", name)
 		}
-		toolNames[tool.Name] = true
+		toolNames[name] = true
 	}
 	if name, forced := req.ToolChoice.Tool(); forced {
 		if name == "" {

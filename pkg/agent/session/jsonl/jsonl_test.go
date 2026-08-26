@@ -2,10 +2,12 @@ package jsonl_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -351,5 +353,116 @@ func TestATornLastLineEndsTheSessionRatherThanFailingIt(t *testing.T) {
 	}
 	if got[0].Message.Text() != "first" {
 		t.Errorf("surviving entry = %q", got[0].Message.Text())
+	}
+}
+
+// meta.json is a cache of what the entries file already knows, and it is
+// allowed to be behind — which means it is behind whenever a process died
+// without closing the store. What must not happen is a second process
+// carrying on from the stale number and writing entries that share a sequence
+// with entries already there.
+func TestASessionCarriesOnFromWhatWasWrittenNotFromTheMetadata(t *testing.T) {
+	dir := t.TempDir()
+
+	first := open(t, dir)
+	meta, err := first.Create(ctx(), session.Meta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		if err := first.Append(ctx(), meta.ID, msg(fmt.Sprintf("before %d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No Close: this is a process that died, so meta.json still says zero.
+	onDisk := readMetaFile(t, filepath.Join(dir, meta.ID, "meta.json"))
+	if onDisk.Entries != 0 {
+		t.Logf("meta.json says %d entries — the test is weaker than intended", onDisk.Entries)
+	}
+
+	second := open(t, dir)
+	if err := second.Append(ctx(), meta.ID, msg("after")); err != nil {
+		t.Fatal(err)
+	}
+
+	var seqs []int64
+	for e, err := range second.Entries(ctx(), meta.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		seqs = append(seqs, e.Seq)
+	}
+	if want := []int64{1, 2, 3, 4, 5, 6}; !slices.Equal(seqs, want) {
+		t.Errorf("sequence numbers = %v, want %v — the new process reused numbers", seqs, want)
+	}
+
+	// And reading metadata through the store brings it up to date.
+	got, err := second.Meta(ctx(), meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Entries != 6 {
+		t.Errorf("Entries = %d, want 6", got.Entries)
+	}
+}
+
+// An entry longer than the tail block lastSeq reads first must still be found.
+func TestASessionCarriesOnPastAVeryLongEntry(t *testing.T) {
+	dir := t.TempDir()
+	first := open(t, dir)
+	meta, err := first.Create(ctx(), session.Meta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Append(ctx(), meta.ID, msg(strings.Repeat("x", 64*1024))); err != nil {
+		t.Fatal(err)
+	}
+
+	second := open(t, dir)
+	if err := second.Append(ctx(), meta.ID, msg("next")); err != nil {
+		t.Fatal(err)
+	}
+	var last int64
+	for e, err := range second.Entries(ctx(), meta.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		last = e.Seq
+	}
+	if last != 2 {
+		t.Errorf("last Seq = %d, want 2", last)
+	}
+}
+
+func readMetaFile(t *testing.T, path string) session.Meta {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m session.Meta
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func BenchmarkAppendOneEntry(b *testing.B) {
+	dir := b.TempDir()
+	s, err := jsonl.Open(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer s.Close()
+	meta, err := s.Create(context.Background(), session.Meta{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	e := msg("a line of the sort a recorder writes")
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := s.Append(context.Background(), meta.ID, e); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

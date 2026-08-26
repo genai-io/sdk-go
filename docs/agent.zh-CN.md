@@ -10,7 +10,7 @@ a, err := agent.New(client,
     agent.WithTools(readFile, listDir),
 )
 
-for e, err := range a.Turn(ctx, ai.UserMessage("main.go 改了什么?")) {
+for e, err := range a.Run(ctx, ai.UserMessage("main.go 改了什么?")) {
     render(e)
 }
 ```
@@ -19,7 +19,7 @@ for e, err := range a.Turn(ctx, ai.UserMessage("main.go 改了什么?")) {
 
 ```go
 for batch := range myMessages {
-    for e, err := range a.Turn(ctx, batch...) { render(e) }
+    for e, err := range a.Run(ctx, batch...) { render(e) }
 }
 ```
 
@@ -230,7 +230,7 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 rec, history, err := session.Open(ctx, store, resume)   // "" 表示新开一个
 a.SetMessages(history)
 
-for e, err := range a.Turn(ctx, msg) {
+for e, err := range a.Run(ctx, msg) {
     rec.Handle(e)   // 先写盘
     render(e)       // 再画屏
 }

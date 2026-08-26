@@ -13,25 +13,21 @@ a, err := agent.New(client,
     agent.WithTools(readFile, listDir),
 )
 
-for e, err := range a.Turn(ctx, ai.UserMessage("what changed in main.go?")) {
+for e, err := range a.Run(ctx, ai.UserMessage("what changed in main.go?")) {
     render(e)
 }
 ```
 
-`Turn` folds that for a caller who wants the answer rather than the
-progress — the same pair `pkg/ai` offers one level down, where `Complete` is
-`Collect` of `Stream`:
-
-```go
-out, err := a.Turn(ctx, ai.UserMessage(task))
-```
+The last event is `TurnEnd`, which carries how the exchange went and the
+message the model produced — so a caller with nothing to render keeps that one
+and ignores the rest.
 
 Repeating it is a `for` loop, and the loop is the application's — how messages
 are batched into exchanges, what a failure means, when to stop:
 
 ```go
 for batch := range myMessages {
-    for e, err := range a.Turn(ctx, batch...) { render(e) }
+    for e, err := range a.Run(ctx, batch...) { render(e) }
 }
 ```
 
@@ -41,8 +37,7 @@ range, ends the exchange in flight.
 
 Events arrive on the ranging goroutine, so an agent that must run ahead of a
 slow reader is one whose caller forwards them to a buffer of its own — how
-deep, and what to drop when it fills, being theirs to decide. Breaking out of
-the range ends the exchange, the same as `Interrupt`.
+deep, and what to drop when it fills, being theirs to decide.
 
 ## Two levels, two words
 
@@ -134,7 +129,7 @@ sequenceDiagram
     participant Model
     participant Tool
 
-    App->>Agent: Stream(ctx, "what changed?")
+    App->>Agent: Run(ctx, "what changed?")
     Agent-->>App: TurnStart
     Agent-->>App: MessageAdded (user)
     Agent->>Model: MessageStart (attempt 1)
@@ -295,7 +290,7 @@ own event loop:
 rec, history, err := session.Open(ctx, store, resume)   // "" starts a new one
 a.SetMessages(history)
 
-for e, err := range a.Turn(ctx, msg) {
+for e, err := range a.Run(ctx, msg) {
     rec.Handle(e)   // write first
     render(e)       // then paint
 }
@@ -339,7 +334,7 @@ interface only has to name what this package calls.
 ```
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
-  stream.go    an exchange from the outside: Turn, Interrupt
+  run.go    an exchange from the outside: Turn, Interrupt
   turn.go      one turn: reason, act, and the loop between them
   event.go     the nine events
   hook.go      the four hooks, and how each chain runs

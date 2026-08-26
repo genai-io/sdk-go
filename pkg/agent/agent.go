@@ -15,10 +15,7 @@ import (
 // Agent runs a conversation: it calls the model, executes the tools the model
 // asks for, and reports everything it does as events.
 //
-//	go a.Run(ctx)
-//
-//	a.In() <- ai.UserMessage("hi")
-//	for e := range a.Out() { … }
+//	for e, err := range a.Run(ctx, ai.UserMessage("hi")) { … }
 type Agent struct {
 	client *ai.Client
 

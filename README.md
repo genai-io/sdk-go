@@ -245,9 +245,9 @@ one.
 model, run the tools it asks for, call it again, until the model answers
 without asking for anything more.
 
-`Stream` advances the conversation one exchange and reports what it does as it
-goes — the same pair `pkg/ai` offers one level down, where `Complete` is
-`Collect` of `Stream`.
+`Run` advances the conversation one exchange and reports what it does as it
+goes. The last event is `TurnEnd`, which carries how it went and the message
+the model produced.
 
 ```go
 a, err := agent.New(client,
@@ -258,7 +258,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-for e, err := range a.Turn(ctx, ai.UserMessage("what does main.go do?")) {
+for e, err := range a.Run(ctx, ai.UserMessage("what does main.go do?")) {
     render(e)
 }
 ```
@@ -268,7 +268,7 @@ into exchanges, what a failure means, and when to stop:
 
 ```go
 for batch := range myMessages {
-    for e, err := range a.Turn(ctx, batch...) { render(e) }
+    for e, err := range a.Run(ctx, batch...) { render(e) }
 }
 ```
 

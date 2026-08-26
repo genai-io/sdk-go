@@ -264,10 +264,10 @@ for e, err := range a.Stream(ctx, ai.UserMessage("what does main.go do?")) {
 ```
 
 For a caller that wants the answer rather than the progress — a subagent behind
-a tool call — `Collect` folds it:
+a tool call — `Turn` folds it:
 
 ```go
-out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+out, err := a.Turn(ctx, ai.UserMessage(task))
 return agent.TextResult(out.Message.Text()), err
 ```
 

@@ -18,12 +18,12 @@ for e, err := range a.Stream(ctx, ai.UserMessage("what changed in main.go?")) {
 }
 ```
 
-`Collect` folds that for a caller who wants the answer rather than the
+`Turn` folds that for a caller who wants the answer rather than the
 progress — the same pair `pkg/ai` offers one level down, where `Complete` is
 `Collect` of `Stream`:
 
 ```go
-out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+out, err := a.Turn(ctx, ai.UserMessage(task))
 ```
 
 The loop over incoming messages is the application's: a CLI reads stdin, an

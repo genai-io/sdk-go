@@ -27,7 +27,7 @@ var ErrBusy = errors.New("agent: an exchange is already running")
 // to run ahead of a slow reader forwards them to a buffer of its own — where
 // how deep it is, and what to drop when it fills, are the caller's to decide.
 //
-// Collect folds it for a caller that wants the answer rather than the progress.
+// Turn folds it for a caller that wants the answer rather than the progress.
 func (a *Agent) Stream(ctx context.Context, in ...ai.Message) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		if !a.running.CompareAndSwap(false, true) {
@@ -46,15 +46,18 @@ func (a *Agent) Stream(ctx context.Context, in ...ai.Message) iter.Seq2[Event, e
 	}
 }
 
-// Collect folds an exchange into what it came to, for a caller with nothing to
-// render: a subagent behind a tool call, which owes the model that asked for it
-// an answer rather than a stream.
+// Turn advances the conversation one exchange and reports how it went, for a
+// caller with nothing to render: a subagent behind a tool call, which owes the
+// model that asked for it an answer rather than a stream.
 //
-//	out, err := agent.Collect(sub.Stream(ctx, ai.UserMessage(task)))
+//	out, err := sub.Turn(ctx, ai.UserMessage(task))
 //	return agent.TextResult(out.Message.Text()), err
-func Collect(events iter.Seq2[Event, error]) (TurnEnd, error) {
+//
+// It is Stream, folded. The same operation either way — what differs is what
+// you get back.
+func (a *Agent) Turn(ctx context.Context, in ...ai.Message) (TurnEnd, error) {
 	var out TurnEnd
-	for e, err := range events {
+	for e, err := range a.Stream(ctx, in...) {
 		if err != nil {
 			return out, err
 		}

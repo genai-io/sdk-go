@@ -15,10 +15,10 @@ for e, err := range a.Stream(ctx, ai.UserMessage("main.go 改了什么?")) {
 }
 ```
 
-`Collect` 把它折叠成结果,给要答案不要过程的调用方——和 `pkg/ai` 低一层的那对动词完全一致,那边 `Complete` 就是 `Collect(Stream)`:
+`Turn` 把它折叠成结果,给要答案不要过程的调用方——和 `pkg/ai` 低一层的那对动词完全一致,那边 `Complete` 就是 `Collect(Stream)`:
 
 ```go
-out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+out, err := a.Turn(ctx, ai.UserMessage(task))
 ```
 
 **消息进来的那个循环是应用的**:CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜不到。`Inject` 把一条消息交给正在跑的那一轮,它在下一个 step 边界落地,那是**唯一安全改变模型即将看到什么的位置**。

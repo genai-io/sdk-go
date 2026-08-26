@@ -227,10 +227,10 @@ for e, err := range a.Stream(ctx, ai.UserMessage("main.go 是做什么的?")) {
 }
 ```
 
-要答案不要过程的调用方——比如站在工具后面的子 agent——用 `Collect` 折叠它：
+要答案不要过程的调用方——比如站在工具后面的子 agent——用 `Turn` 折叠它：
 
 ```go
-out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+out, err := a.Turn(ctx, ai.UserMessage(task))
 return agent.TextResult(out.Message.Text()), err
 ```
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"slices"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
@@ -48,6 +49,16 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 
 		a.yield = yield
 		defer func() { a.yield = nil }()
+
+		// A conversation swapped between exchanges is announced by this one:
+		// there was nobody to tell when it happened.
+		a.mu.Lock()
+		replaced, msgs := a.replaced, slices.Clone(a.messages)
+		a.replaced = false
+		a.mu.Unlock()
+		if replaced {
+			a.emit(MessagesReplaced{Messages: msgs})
+		}
 
 		out := a.turn(ctx, in)
 		if out.Err != nil && a.yield != nil {

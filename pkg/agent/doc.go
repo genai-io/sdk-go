@@ -53,8 +53,10 @@
 // tool results enter without any span at all — they were whole before the
 // agent saw them.
 //
-// The conversation is the fold of MessageAdded, and that is the only event
-// that changes it. Everything else reports work in progress.
+// The conversation is the fold of MessageAdded, started over by each
+// MessagesReplaced — compaction and restore swap it whole, and a fold that only
+// appended would hold what the agent threw away. Everything else reports work
+// in progress.
 //
 // TurnEnd carries the summary: what the turn cost and why it stopped. It holds
 // nothing a consumer could fold out of the stream itself.

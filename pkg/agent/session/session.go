@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"slices"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -43,6 +44,10 @@ const (
 	// EntryMessage is something that entered the conversation. Folding these
 	// is what restores a session.
 	EntryMessage EntryType = "message"
+	// EntrySnapshot is the conversation as it stood after being replaced —
+	// compaction, or a history handed in from elsewhere. A fold starts from
+	// the last one of these, because everything before it was thrown away.
+	EntrySnapshot EntryType = "snapshot"
 	// EntryInference is one model call: what was asked, what it cost, how it
 	// ended. Not needed to resume; needed to explain and to bill.
 	EntryInference EntryType = "inference"
@@ -59,10 +64,11 @@ type Entry struct {
 	At   time.Time `json:"at"`
 	Type EntryType `json:"type"`
 
-	Message   *ai.Message `json:"message,omitempty"`
-	Inference *Inference  `json:"inference,omitempty"`
-	Tool      *Tool       `json:"tool,omitempty"`
-	Turn      *Turn       `json:"turn,omitempty"`
+	Message   *ai.Message  `json:"message,omitempty"`
+	Snapshot  []ai.Message `json:"snapshot,omitempty"`
+	Inference *Inference   `json:"inference,omitempty"`
+	Tool      *Tool        `json:"tool,omitempty"`
+	Turn      *Turn        `json:"turn,omitempty"`
 }
 
 // Inference is one model call as it is kept.
@@ -116,14 +122,19 @@ type Store interface {
 	Meta(ctx context.Context, id string) (Meta, error)
 }
 
-// Messages folds a session's entries back into a conversation.
+// Messages folds a session's entries back into a conversation: messages
+// append, and a snapshot starts it over, because what came before one of those
+// is what the agent threw away.
 func Messages(ctx context.Context, store Store, id string) ([]ai.Message, error) {
 	var msgs []ai.Message
 	for entry, err := range store.Entries(ctx, id) {
 		if err != nil {
 			return nil, err
 		}
-		if entry.Type == EntryMessage && entry.Message != nil {
+		switch {
+		case entry.Type == EntrySnapshot:
+			msgs = slices.Clone(entry.Snapshot)
+		case entry.Type == EntryMessage && entry.Message != nil:
 			msgs = append(msgs, *entry.Message)
 		}
 	}

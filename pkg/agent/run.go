@@ -323,15 +323,26 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 			}
 		}
 
-		// Each goroutine owns one element of batch, fills it in, and says which
-		// one it was — the only thing that has to cross back, since reporting
-		// happens on the turn's own goroutine.
-		done := make(chan int, len(pending)) // one each, so no tool waits to report
+		// Everything crosses back on one channel, because reporting happens on
+		// the turn's goroutine and a tool runs on its own. A goroutine owns its
+		// element of batch and says which when done; what Report sends rides
+		// the same channel, and is dropped rather than stalling a tool for it.
+		type update struct {
+			index   int
+			partial *Result // non-nil is progress; otherwise the call finished
+		}
+		ch := make(chan update, len(pending)*2)
 
 		run := func(i int) {
 			c := &batch[i]
-			c.result, c.err = c.tool.Run(ctx, c.ToolCall)
-			done <- i
+			rctx := context.WithValue(ctx, reporter{}, func(partial Result) {
+				select {
+				case ch <- update{index: i, partial: &partial}:
+				default:
+				}
+			})
+			c.result, c.err = c.tool.Run(rctx, c.ToolCall)
+			ch <- update{index: i}
 		}
 
 		// Both modes feed the same channel, so sequential is a pool of one.
@@ -347,8 +358,14 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 			}()
 		}
 
-		for range pending {
-			finish(&batch[<-done])
+		for remaining := len(pending); remaining > 0; {
+			u := <-ch
+			if u.partial != nil {
+				emit(ToolUpdate{ID: batch[u.index].ID, Partial: *u.partial})
+				continue
+			}
+			remaining--
+			finish(&batch[u.index])
 		}
 	}
 

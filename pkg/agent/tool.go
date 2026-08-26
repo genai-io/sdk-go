@@ -37,6 +37,25 @@ type Tool interface {
 	Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 
+// reporter is where a running tool's partial results go, put in its context by
+// the exchange running it.
+type reporter struct{}
+
+// Report sends a partial result from inside a tool, reaching whoever is ranging
+// over the exchange as ToolUpdate. It is how a tool that takes a while shows
+// its work while it works.
+//
+// It is reached through the context rather than a parameter so that a tool with
+// nothing to report pays nothing for it — no argument to declare, no interface
+// to satisfy. Outside a tool, or when nobody is listening, it does nothing.
+//
+//	agent.Report(ctx, agent.TextResult(line))
+func Report(ctx context.Context, partial Result) {
+	if to, ok := ctx.Value(reporter{}).(func(Result)); ok {
+		to(partial)
+	}
+}
+
 // Sequential marks a tool that must not run beside others. One of them in a
 // batch makes the whole batch run one at a time, because a batch is only safe
 // to parallelize if every member of it is. A tool that mutates shared state

@@ -104,14 +104,14 @@ other thing, and ends everything.
 
 ## Events
 
-Everything the agent does arrives as one of eight types. Two things have a life
+Everything the agent does arrives as one of nine types. Two things have a life
 worth following — a message and a tool call — and each is reported the same
 way: it starts, it may report as it goes, it ends.
 
 ```
 MessageAdded                              a message entered the conversation
 MessageStart  MessageUpdate  MessageEnd   the model producing one
-ToolStart                    ToolEnd      a tool call, asked to answered
+ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
 TurnStart                    TurnEnd      the exchange around them
 ```
 
@@ -259,6 +259,11 @@ readFile := agent.ToolFunc("read_file", "Read a file from the working tree.",
 Returning an error is how a tool fails: the loop turns it into a tool error the
 model can see and correct, rather than failing the turn.
 
+**A tool that takes a while shows its work.** `agent.Report(ctx, partial)`
+reaches the consumer as `ToolUpdate` — the output of a command as it arrives,
+a file list as it is walked. It comes through the context rather than a
+parameter so that a tool with nothing to report pays nothing for it.
+
 **`Result` keeps two audiences apart.** `Content` is what the model is told;
 `Details` is what the interface shows and the model never sees — a diff, a file
 list, an exit code. A tool that formats for a person ends up sending that
@@ -337,7 +342,7 @@ interface only has to name what this package calls.
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
   run.go       an exchange: Run, and the reason-and-act loop behind it
-  event.go     the eight events
+  event.go     the nine events
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   session/     events → durable entries, and back

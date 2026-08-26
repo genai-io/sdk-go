@@ -41,11 +41,11 @@
 //
 // # Events
 //
-// Eight types, and each exists because a consumer would break without it.
+// Nine types, and each exists because a consumer would break without it.
 //
 //	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
-//	ToolStart                    ToolEnd      a tool call, asked to answered
+//	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
 //	TurnStart                    TurnEnd      the exchange around them
 //
 // A span always comes in pairs, and only what takes time has one. What entered
@@ -63,8 +63,11 @@
 // TurnEnd carries the summary: what the turn cost and why it stopped. It holds
 // nothing a consumer could fold out of the stream itself.
 //
-// Nothing is dropped: the events arrive on the ranging goroutine, so there is
-// no reader to fall behind.
+// Nothing is dropped on the way out: the events arrive on the ranging
+// goroutine, so there is no reader to fall behind. What a tool reports is the
+// exception, because it crosses from the tool's own goroutine — progress is
+// dropped rather than stalling a tool for it, and ToolEnd carries the finished
+// result either way.
 //
 // Three words are used precisely, because agent frameworks disagree about
 // them. A *turn* is an exchange: someone said something, and the loop runs

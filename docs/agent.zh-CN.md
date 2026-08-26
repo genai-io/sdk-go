@@ -80,12 +80,12 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 
 ## 事件
 
-agent 干的每件事都以 8 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
+agent 干的每件事都以 9 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
 
 ```
 MessageAdded                              一条消息进了对话
 MessageStart  MessageUpdate  MessageEnd   模型正在产生一条
-ToolStart                    ToolEnd      一次工具调用,从提出到答复
+ToolStart     ToolUpdate     ToolEnd      一次工具调用,从提出到答复
 TurnStart                    TurnEnd      包住它们的那一轮
 ```
 
@@ -212,6 +212,8 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 
 返回 error 就是工具失败的方式:循环会把它变成模型看得见、能自己纠正的工具错误,而不是让整个 turn 失败。
 
+**跑得久的工具要边跑边给人看。** `agent.Report(ctx, partial)` 会作为 `ToolUpdate` 到达消费者——命令的输出边出边报、文件列表边走边报。它走 context 而不是参数,**这样没东西可报的工具一分钱都不付**。
+
 **`Result` 把两个受众分开。** `Content` 是告诉模型的;`Details` 是给界面看、模型永远看不到的——一段 diff、一个文件列表、一个退出码。**一个为人排版的工具,最后会把那些排版发给模型,而且此后每一轮都为它付费。**
 
 **并行。** 一批工具默认并发执行。`agent.Sequential(t)` 标记一个不能与别人同时跑的工具,而**一批里只要有一个这样的,整批就串行**——一批工具只有在每个成员都安全时才能并行。
@@ -269,7 +271,7 @@ type Store interface {
 pkg/agent/
   agent.go     agent 是什么:状态、构造选项、能读能改的东西
   run.go       一次交换:Run,以及它背后 reason/act 的循环
-  event.go     8 个事件
+  event.go     9 个事件
   hook.go      4 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   session/     事件 → 持久条目,以及折回来

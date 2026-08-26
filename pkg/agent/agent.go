@@ -37,9 +37,6 @@ type Agent struct {
 	streamFirst time.Duration
 	streamIdle  time.Duration
 
-	inBuf  int
-	outBuf int
-
 	// stopTurn ends the turn in flight. Never nil: between turns it is the
 	// last turn's, already spent, so calling it is the no-op it should be.
 	stopTurn context.CancelFunc
@@ -51,27 +48,18 @@ type Agent struct {
 	// running is latched, never cleared: an agent runs once.
 	running atomic.Bool
 
-	// The two channels an agent is: what comes in, what goes out.
-	in  chan ai.Message
-	out chan Event
+	// yield is where events go while an exchange is running: the range body of
+	// whoever called Stream. Set for that call only, and read from the turn's
+	// own goroutine — a yield is not safe to call from anywhere else.
+	yield func(Event, error) bool
 
-	// alive is the run's ctx.Done(), set once when Run starts. It answers the
-	// only question emitting has — is anyone still listening — and that has
-	// one answer for the agent's whole life, which is why it is a field and
-	// not a parameter threaded through every call.
-	alive <-chan struct{}
+	// pending is what Inject queued, taken at the next step boundary.
+	pending []ai.Message
 
 	mu sync.Mutex
 }
 
 const (
-	// defaultInputBuffer is how many messages may wait before a sender blocks.
-	defaultInputBuffer = 64
-	// defaultEventBuffer is how far ahead of a reader the agent may get. Past
-	// it the loop waits, which is the right thing to do: an event a session
-	// needed is worse to lose than a paint is to delay.
-	defaultEventBuffer = 256
-
 	// A stream that says nothing is the one failure that looks like work.
 	// These bound it; WithStreamTimeout replaces them.
 	defaultFirstChunk = 5 * time.Minute
@@ -138,30 +126,6 @@ func WithStreamTimeout(first, idle time.Duration) Option {
 	return func(a *Agent) { a.streamFirst, a.streamIdle = first, idle }
 }
 
-// WithoutEvents builds an agent that reports nothing: Out is nil and every
-// event is dropped where it is made. For a Turn nobody is watching — a
-// subagent behind a tool call, whose answer is the only thing its caller
-// wants.
-//
-// Nothing can observe such an agent, a session recorder included. A caller
-// who wants both an answer and a record reads Out instead.
-func WithoutEvents() Option {
-	return func(a *Agent) { a.outBuf = 0 }
-}
-
-// WithBuffers sizes the two channels: how many messages may wait on In before
-// a sender blocks, and how far ahead of a reader Out may get.
-func WithBuffers(in, out int) Option {
-	return func(a *Agent) {
-		if in > 0 {
-			a.inBuf = in
-		}
-		if out > 0 {
-			a.outBuf = out
-		}
-	}
-}
-
 // WithMaxAttempts caps attempts per model call when a stream fails retryably.
 func WithMaxAttempts(n int) Option {
 	return func(a *Agent) {
@@ -184,18 +148,12 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 		maxAttempts: 3,
 		streamFirst: defaultFirstChunk,
 		streamIdle:  defaultIdle,
-		inBuf:       defaultInputBuffer,
-		outBuf:      defaultEventBuffer,
 		stopTurn:    func() {},
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(a)
 		}
-	}
-	a.in = make(chan ai.Message, a.inBuf)
-	if a.outBuf > 0 {
-		a.out = make(chan Event, a.outBuf)
 	}
 	return a, nil
 }
@@ -268,22 +226,6 @@ func (a *Agent) String() string {
 	}
 	return fmt.Sprintf("agent(%s)", a.client.Model().ID)
 }
-
-// In is where you put messages. Close it to say there is no more work; the
-// agent finishes the exchange it is in and Run returns.
-//
-//	a.In() <- ai.UserMessage("hi")
-func (a *Agent) In() chan<- ai.Message { return a.in }
-
-// Out is where the agent reports what it does. Range over it: Run closes it
-// when it stops, so the range ends on its own.
-//
-//	go a.Run(ctx)
-//	for e := range a.Out() { … }
-//
-// It is nil when the agent was built WithoutEvents — there is no channel in
-// that mode, and ranging over nil would block for ever.
-func (a *Agent) Out() <-chan Event { return a.out }
 
 // request is what this agent would send. One lock, not three: a prompt read
 // before SetTools and a toolset read after it would describe an agent that

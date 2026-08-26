@@ -109,26 +109,16 @@ func names(events []agent.Event) []string {
 // smallest complete use of the package: two channels and a range.
 func collect(t *testing.T, a *agent.Agent, msgs ...ai.Message) ([]agent.Event, error) {
 	t.Helper()
-	for _, m := range msgs {
-		a.In() <- m
-	}
-	close(a.In())
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
 
 	var events []agent.Event
-	for e := range a.Out() {
-		// Run's own boundaries are not part of an exchange's sequence.
-		switch e.(type) {
-		case agent.RunStart, agent.RunEnd:
-			continue
+	for e, err := range a.Stream(context.Background(), msgs...) {
+		if err != nil {
+			return events, err
 		}
 		events = append(events, e)
 	}
-	<-done
 
-	// A failed exchange is reported on the stream, not returned by Run.
+	// A failed exchange is reported on the stream, not returned.
 	for _, e := range events {
 		if v, ok := e.(agent.TurnEnd); ok && v.Err != nil {
 			return events, v.Err
@@ -137,7 +127,7 @@ func collect(t *testing.T, a *agent.Agent, msgs ...ai.Message) ([]agent.Event, e
 	return events, nil
 }
 
-// steps counts what the loop counts: an inference that is not a retry.
+// steps counts what the loop counts: a model call that is not a retry.
 // TurnEnd does not carry this — it is on the stream, and this is the fold.
 func steps(events []agent.Event) int {
 	n := 0
@@ -569,144 +559,6 @@ func TestATerminatingToolEndsTheExchangeWithoutAnotherCall(t *testing.T) {
 	}
 }
 
-// Run closes out when it stops, so a caller ranging over it terminates without
-// being told to — and RunStart / RunEnd bracket everything in between.
-func TestRunBracketsAndClosesTheEventChannel(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("one"), text("two")}})
-
-	go func() {
-		a.In() <- ai.UserMessage("first")
-		for len(a.Messages()) < 2 {
-			time.Sleep(time.Millisecond)
-		}
-		a.In() <- ai.UserMessage("second")
-		// The failed exchange appends only the user turn, so the second one
-		// brings the total to three.
-		for len(a.Messages()) < 3 {
-			time.Sleep(time.Millisecond)
-		}
-		close(a.In())
-	}()
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	var seen []string
-	for e := range a.Out() { // terminates because Run closes out
-		seen = append(seen, strings.TrimPrefix(fmt.Sprintf("%T", e), "agent."))
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if seen[0] != "RunStart" {
-		t.Errorf("first event = %q, want RunStart", seen[0])
-	}
-	if last := seen[len(seen)-1]; last != "RunEnd" {
-		t.Errorf("last event = %q, want RunEnd", last)
-	}
-	turns := 0
-	for _, n := range seen {
-		if n == "TurnStart" {
-			turns++
-		}
-	}
-	if turns != 2 {
-		t.Errorf("turns = %d, want 2", turns)
-	}
-}
-
-// Messages that arrive while the agent works join one exchange, not several:
-// someone who typed three lines meant them together.
-func TestMessagesQueuedDuringAnExchangeArriveAsOneBatch(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("1"), text("2")}})
-
-	a.In() <- ai.UserMessage("first")
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	var prompts []string
-	var turns int
-	queued, closed := false, false
-	for e := range a.Out() {
-		switch v := e.(type) {
-		case agent.MessageAdded:
-			if v.Message.Role == ai.RoleUser {
-				prompts = append(prompts, v.Message.Text())
-			}
-		case agent.TurnStart:
-			turns++
-		case agent.MessageStart:
-			if !queued {
-				queued = true
-				a.In() <- ai.UserMessage("and also")
-				a.In() <- ai.UserMessage("and this")
-			}
-		case agent.TurnEnd:
-			if queued && !closed {
-				closed = true
-				close(a.In())
-			}
-		}
-	}
-	<-done
-
-	if want := []string{"first", "and also", "and this"}; !slices.Equal(prompts, want) {
-		t.Errorf("prompts = %v, want %v", prompts, want)
-	}
-	if turns != 2 {
-		t.Errorf("turns = %d, want 2 — the two queued lines belong to one exchange", turns)
-	}
-}
-
-// A failed exchange is reported and the run carries on. The failure reaches
-// the caller as TurnEnd — with why it stopped and what it cost — not as a
-// second, weaker event saying the same thing.
-func TestAFailedExchangeIsReportedAndTheRunCarriesOn(t *testing.T) {
-	a := newAgent(t, &scripted{
-		errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}},
-		scripts: [][]ai.Delta{nil, text("second is fine")},
-	})
-
-	go func() {
-		a.In() <- ai.UserMessage("first")
-		for len(a.Messages()) < 1 {
-			time.Sleep(time.Millisecond)
-		}
-		a.In() <- ai.UserMessage("second")
-		// The failed exchange appends only the user turn, so the second one
-		// brings the total to three.
-		for len(a.Messages()) < 3 {
-			time.Sleep(time.Millisecond)
-		}
-		close(a.In())
-	}()
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	var outcomes []agent.TurnEnd
-	for e := range a.Out() {
-		if v, ok := e.(agent.TurnEnd); ok {
-			outcomes = append(outcomes, v)
-		}
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("a failed exchange ended the run: %v", err)
-	}
-
-	if len(outcomes) != 2 {
-		t.Fatalf("saw %d turns, want 2 — the run stopped at the failure", len(outcomes))
-	}
-	if outcomes[0].Err == nil || outcomes[0].StopReason != agent.StopError {
-		t.Errorf("first turn = %+v, want the failure on its outcome", outcomes[0])
-	}
-	if outcomes[1].Err != nil {
-		t.Errorf("second turn failed too: %v", outcomes[1].Err)
-	}
-}
-
 // Several hooks run in order, and the first refusal is final: a later one must
 // not be able to allow what an earlier one denied, or adding a hook could
 // weaken the gate.
@@ -793,44 +645,6 @@ func TestHooksChainTheirRewrites(t *testing.T) {
 	}
 }
 
-// Every way a turn ends says why. A cancelled one used to report an empty stop
-// reason, because the branch that set StopCanceled sat after the return that
-// made it unreachable.
-func TestACancelledTurnSaysItWasCancelled(t *testing.T) {
-	gate := make(chan struct{})
-	slow := agent.ToolFunc("slow", "Block until released.",
-		func(ctx context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
-			select {
-			case <-gate:
-			case <-ctx.Done():
-			}
-			return agent.TextResult("done"), nil
-		})
-
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
-		toolCall("c1", "slow", `{}`),
-		text("never asked for"),
-	}}, agent.WithTools(slow))
-
-	ctx, stop := context.WithCancel(context.Background())
-	go func() {
-		a.In() <- ai.UserMessage("go")
-		for _, ok := <-a.Out(); ok; _, ok = <-a.Out() {
-		}
-	}()
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(ctx) }()
-
-	time.Sleep(30 * time.Millisecond)
-	stop()
-	close(gate)
-
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Errorf("Run = %v, want context.Canceled", err)
-	}
-}
-
 // The same claim without the concurrency: every exit sets a stop reason.
 func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 	for _, tc := range []struct {
@@ -882,39 +696,6 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 				t.Error("the outcome does not say why it stopped")
 			}
 		})
-	}
-}
-
-func TestTurnsAreNumberedInOrder(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("one"), text("two")}})
-
-	go func() {
-		a.In() <- ai.UserMessage("first")
-		for len(a.Messages()) < 2 {
-			time.Sleep(time.Millisecond)
-		}
-		a.In() <- ai.UserMessage("second")
-		for len(a.Messages()) < 4 {
-			time.Sleep(time.Millisecond)
-		}
-		close(a.In())
-	}()
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	var numbers []int
-	for e := range a.Out() {
-		if v, ok := e.(agent.TurnStart); ok {
-			numbers = append(numbers, v.Turn)
-		}
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if want := []int{1, 2}; !slices.Equal(numbers, want) {
-		t.Errorf("turn numbers = %v, want %v", numbers, want)
 	}
 }
 
@@ -1607,56 +1388,6 @@ func TestNoStreamTimeoutMeansNoWatchdog(t *testing.T) {
 	}
 }
 
-// Interrupt ends the exchange in flight and leaves the run alive, which is
-// what a user pressing escape asks for. Cancelling Run's context is the other
-// thing, and ends everything.
-func TestInterruptEndsTheTurnAndNotTheRun(t *testing.T) {
-	driver := &stalling{after: 1, started: make(chan struct{})}
-	a := newAgent(t, driver, agent.WithStreamTimeout(0, 0))
-
-	go func() {
-		a.In() <- ai.UserMessage("first")
-		<-driver.started
-		a.Interrupt()
-	}()
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	var turns []agent.TurnEnd
-	go func() {
-		// The run keeps going, so a second exchange has to be able to land.
-		for range time.Tick(time.Millisecond) {
-			if len(a.Messages()) > 0 {
-				break
-			}
-		}
-		a.In() <- ai.UserMessage("second")
-	}()
-
-	for e := range a.Out() {
-		if v, ok := e.(agent.TurnEnd); ok {
-			turns = append(turns, v)
-			if len(turns) == 2 {
-				close(a.In())
-			}
-		}
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("Interrupt ended the run: %v", err)
-	}
-
-	if len(turns) != 2 {
-		t.Fatalf("saw %d turns, want 2 — the run stopped at the interrupt", len(turns))
-	}
-	if turns[0].StopReason != agent.StopCanceled {
-		t.Errorf("first turn = %q, want canceled", turns[0].StopReason)
-	}
-	if turns[1].StopReason != agent.StopEndTurn {
-		t.Errorf("second turn = %q, want the run to have carried on", turns[1].StopReason)
-	}
-}
-
 // Interrupt between turns has nothing to end, and must not poison the next one.
 func TestInterruptBetweenTurnsIsANoOp(t *testing.T) {
 	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("fine")}})
@@ -1668,48 +1399,6 @@ func TestInterruptBetweenTurnsIsANoOp(t *testing.T) {
 	}
 	if last := events[len(events)-1].(agent.TurnEnd); last.StopReason != agent.StopEndTurn {
 		t.Errorf("stop reason = %q, want end_turn", last.StopReason)
-	}
-}
-
-// Interrupting a turn abandons the work, not the reporting. The run's reader
-// is still there, so every span the turn opened is closed and everything that
-// entered the conversation was announced — otherwise a session restored from
-// the stream would disagree with the agent that produced it.
-func TestAnInterruptedTurnStillClosesWhatItOpened(t *testing.T) {
-	driver := &stalling{after: 1, started: make(chan struct{})}
-	a := newAgent(t, driver, agent.WithStreamTimeout(0, 0))
-
-	go func() {
-		a.In() <- ai.UserMessage("first")
-		<-driver.started
-		a.Interrupt()
-	}()
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(context.Background()) }()
-
-	var started, ended, added int
-	for e := range a.Out() {
-		switch e.(type) {
-		case agent.MessageStart:
-			started++
-		case agent.MessageEnd:
-			ended++
-		case agent.MessageAdded:
-			added++
-		case agent.TurnEnd:
-			close(a.In())
-		}
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if started != ended {
-		t.Errorf("%d spans opened, %d closed — an interrupt left one hanging", started, ended)
-	}
-	if got := len(a.Messages()); added != got {
-		t.Errorf("%d messages announced, %d in the conversation — the stream and the agent disagree", added, got)
 	}
 }
 
@@ -1783,93 +1472,160 @@ func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 	}
 }
 
-// Turn is the whole shape of a subagent standing behind a tool call: one
-// exchange, and an answer back.
-func TestTurnAnswersSynchronously(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}},
-		agent.WithoutEvents())
+// Collect folds an exchange for a caller that wants the answer rather than the
+// progress — the shape a subagent behind a tool call needs.
+func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}})
 
-	if a.Out() != nil {
-		t.Error("Out is not nil on an agent built WithoutEvents")
-	}
-
-	out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
+	out, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("ask")))
 	if err != nil {
-		t.Fatalf("Turn: %v", err)
+		t.Fatalf("Collect: %v", err)
 	}
 	if out.StopReason != agent.StopEndTurn {
 		t.Errorf("stop reason = %q, want end_turn", out.StopReason)
 	}
 	if got := out.Message.Text(); got != "the answer" {
-		t.Errorf("Turn returned %q", got)
+		t.Errorf("Collect returned %q", got)
 	}
 }
 
-// Turn reports like everything else — it does not bypass the stream, which is
-// what keeps a session from recording an empty exchange. And it emits no run
-// boundaries, because a turn is not a run.
-func TestTurnStillReportsOnTheStream(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}})
-
-	if _, err := a.Turn(context.Background(), ai.UserMessage("ask")); err != nil {
-		t.Fatalf("Turn: %v", err)
-	}
-
-	// A short turn fits the buffer, so what it reported is still sitting there
-	// — no concurrent reader needed, and nothing closes the channel because a
-	// turn closes nothing.
-	var names []string
-	for done := false; !done; {
-		select {
-		case e := <-a.Out():
-			names = append(names, strings.TrimPrefix(fmt.Sprintf("%T", e), "agent."))
-		default:
-			done = true
-		}
-	}
-
-	if !slices.Contains(names, "MessageAdded") || !slices.Contains(names, "TurnEnd") {
-		t.Errorf("the stream carried %v, want the exchange reported", names)
-	}
-	for _, n := range names {
-		if n == "RunStart" || n == "RunEnd" {
-			t.Errorf("Turn emitted %s — a turn is not a run", n)
-		}
-	}
-}
-
-// A turn closes nothing, so a caller may take several in a row.
-func TestTurnsCanBeTakenInSequence(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("first"), text("second")}},
-		agent.WithoutEvents())
+// An exchange closes nothing, so a caller may take several in a row, and the
+// turns are numbered in order.
+func TestExchangesRunInSequence(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("first"), text("second")}})
 
 	for i, want := range []string{"first", "second"} {
-		out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
+		out, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("ask")))
 		if err != nil {
-			t.Fatalf("turn %d: %v", i+1, err)
+			t.Fatalf("exchange %d: %v", i+1, err)
 		}
 		if got := out.Message.Text(); got != want {
-			t.Errorf("turn %d returned %q, want %q", i+1, got, want)
+			t.Errorf("exchange %d returned %q, want %q", i+1, got, want)
 		}
 		if out.Turn != i+1 {
-			t.Errorf("turn %d numbered %d", i+1, out.Turn)
+			t.Errorf("exchange %d numbered %d", i+1, out.Turn)
 		}
 	}
 }
 
-// Run and Turn are two drivers for one conversation, so they exclude each other.
-func TestTurnAndRunExcludeEachOther(t *testing.T) {
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("fine")}})
+// A failure ends its own exchange and nothing more: the next one runs.
+func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
+	a := newAgent(t, &scripted{
+		errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "no key"}},
+		scripts: [][]ai.Delta{nil, text("second time")},
+	}, agent.WithMaxAttempts(1))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() { _ = a.Run(ctx) }()
-	for range a.Out() { // drains until Run ends, which the cancel below does
-		break
+	if _, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("first"))); err == nil {
+		t.Fatal("the failure never reached the caller")
 	}
 
-	if _, err := a.Turn(context.Background(), ai.UserMessage("ask")); !errors.Is(err, agent.ErrBusy) {
-		t.Errorf("Turn during Run = %v, want ErrBusy", err)
+	out, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("second")))
+	if err != nil {
+		t.Fatalf("the second exchange failed too: %v", err)
+	}
+	if out.StopReason != agent.StopEndTurn {
+		t.Errorf("stop reason = %q, want the agent to have carried on", out.StopReason)
+	}
+}
+
+// One conversation advances one exchange at a time.
+func TestAConcurrentExchangeIsRefused(t *testing.T) {
+	release := make(chan struct{})
+	blocking := agent.ToolFunc("wait", "Wait.",
+		func(ctx context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+			<-release
+			return agent.TextResult("done"), nil
+		})
+
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
+		toolCall("c1", "wait", `{}`),
+		text("finished"),
+	}}, agent.WithTools(blocking))
+
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		var once bool
+		for e, err := range a.Stream(context.Background(), ai.UserMessage("go")) {
+			if _, ok := e.(agent.ToolStart); ok && !once {
+				once = true
+				close(started)
+			}
+			if err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	<-started
+
+	_, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("also")))
+	if !errors.Is(err, agent.ErrBusy) {
+		t.Errorf("a second exchange = %v, want ErrBusy", err)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("the first exchange failed: %v", err)
+	}
+}
+
+// Inject hands a message to the exchange in flight; it lands at the next step
+// boundary, which is the only place changing what the model sees is safe.
+func TestInjectedMessagesJoinTheExchange(t *testing.T) {
+	echo := agent.ToolFunc("echo", "Echo.",
+		func(_ context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+			return agent.TextResult("echoed"), nil
+		})
+
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
+		toolCall("c1", "echo", `{}`),
+		text("done"),
+	}}, agent.WithTools(echo))
+
+	var prompts []string
+	for e, err := range a.Stream(context.Background(), ai.UserMessage("first")) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if v, ok := e.(agent.ToolEnd); ok && v.ID == "c1" {
+			a.Inject(ai.UserMessage("and also"), ai.UserMessage("and this"))
+		}
+		if v, ok := e.(agent.MessageAdded); ok && v.Message.Role == ai.RoleUser {
+			prompts = append(prompts, v.Message.Text())
+		}
+	}
+
+	// The tool-results message is a user turn too, so it is in this list.
+	want := []string{"first", "", "and also", "and this"}
+	if !slices.Equal(prompts, want) {
+		t.Errorf("user messages = %q, want %q", prompts, want)
+	}
+}
+
+// Breaking out of the range ends the exchange: a consumer that stopped reading
+// has stopped caring about this turn.
+func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
+	driver := &scripted{scripts: [][]ai.Delta{
+		toolCall("c1", "never", `{}`),
+		text("unreachable"),
+	}}
+	a := newAgent(t, driver)
+
+	for e, err := range a.Stream(context.Background(), ai.UserMessage("go")) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if _, ok := e.(agent.MessageEnd); ok {
+			break
+		}
+	}
+
+	driver.mu.Lock()
+	calls := driver.calls
+	driver.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("the model was called %d times after the consumer left, want 1", calls)
 	}
 }

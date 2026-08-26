@@ -251,17 +251,25 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 			}
 		}
 
-		// Each goroutine owns one element of batch and says which when done.
-		// Progress goes straight to the reader — the loop would only forward
-		// it, and being droppable it never blocks the tool.
-		done := make(chan int, len(pending)) // one each, so no tool waits to report
+		// Everything comes back through one channel, because reporting happens
+		// on the turn's goroutine and a tool runs on its own. Each goroutine
+		// owns its element of batch and says which when done; progress rides
+		// the same channel, and is dropped rather than stalling a tool for it.
+		type update struct {
+			index   int
+			partial *Result // non-nil is progress; otherwise the call finished
+		}
+		ch := make(chan update, len(pending)*2)
 
 		run := func(i int) {
 			c := &batch[i]
 			c.result, c.err = c.tool.Run(ctx, c.ToolCall, func(partial Result) {
-				a.emit(ToolUpdate{ID: c.ID, Partial: partial})
+				select {
+				case ch <- update{index: i, partial: &partial}:
+				default:
+				}
 			})
-			done <- i
+			ch <- update{index: i}
 		}
 
 		// Both modes feed the same channel, so sequential is a pool of one.
@@ -277,8 +285,14 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 			}()
 		}
 
-		for range pending {
-			finish(&batch[<-done])
+		for remaining := len(pending); remaining > 0; {
+			u := <-ch
+			if u.partial != nil {
+				a.emit(ToolUpdate{ID: batch[u.index].ID, Partial: *u.partial})
+				continue
+			}
+			remaining--
+			finish(&batch[u.index])
 		}
 	}
 
@@ -350,7 +364,7 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 		if turnCtx.Err() != nil {
 			return out.canceled(turnCtx)
 		}
-		for _, m := range drain(a.in) {
+		for _, m := range a.injected() {
 			a.add(m)
 		}
 

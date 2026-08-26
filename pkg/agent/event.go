@@ -12,8 +12,7 @@ import "github.com/genai-io/sdk-go/pkg/ai"
 //	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
 //	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-//	RunStart                     RunEnd       the agent's working life
-//	TurnStart                    TurnEnd      one exchange within it
+//	TurnStart                    TurnEnd      the exchange around them
 type Event interface{ event() }
 
 // MessageAdded says something entered the conversation — the only event that
@@ -84,16 +83,6 @@ type ToolEnd struct {
 }
 
 func (ToolEnd) event() {}
-
-// RunStart and RunEnd bracket Run: the agent's working life.
-type RunStart struct{}
-
-func (RunStart) event() {}
-
-// RunEnd reports why the agent stopped working; Err is nil on a clean stop.
-type RunEnd struct{ Err error }
-
-func (RunEnd) event() {}
 
 // TurnStart and TurnEnd bracket one exchange: the user said something, and the
 // loop runs until the model stops asking for tools. A turn holds as many model

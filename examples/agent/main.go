@@ -100,16 +100,15 @@ func main() {
 	}
 	a.SetMessages(history)
 
-	a.In() <- ai.UserMessage(strings.Join(os.Args[1:], " "))
-	close(a.In())
-
-	done := make(chan error, 1)
-	go func() { done <- a.Run(ctx) }()
-
-	// One loop, and it owns the order: record first, then paint.
+	// One loop, and it owns the order: record first, then paint. A longer
+	// programme would run this on its own goroutine and forward to a buffer
+	// of its own; a one-shot has nothing else to do.
 	var last agent.TurnEnd
 	steps := 0
-	for e := range a.Out() {
+	for e, err := range a.Stream(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
+		if err != nil {
+			log.Fatalf("\n%v", err)
+		}
 		rec.Handle(e)
 		render(e)
 		switch v := e.(type) {
@@ -120,9 +119,6 @@ func main() {
 		case agent.TurnEnd:
 			last = v
 		}
-	}
-	if err := <-done; err != nil {
-		log.Fatalf("\n%v", err)
 	}
 
 	fmt.Printf("\n\n— %s · %d steps · %d tokens · session %s\n",

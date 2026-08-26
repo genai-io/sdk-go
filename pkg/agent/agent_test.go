@@ -1477,7 +1477,7 @@ func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
 	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}})
 
-	out, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("ask")))
+	out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -1495,7 +1495,7 @@ func TestExchangesRunInSequence(t *testing.T) {
 	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("first"), text("second")}})
 
 	for i, want := range []string{"first", "second"} {
-		out, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("ask")))
+		out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
 		if err != nil {
 			t.Fatalf("exchange %d: %v", i+1, err)
 		}
@@ -1515,11 +1515,11 @@ func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
 		scripts: [][]ai.Delta{nil, text("second time")},
 	}, agent.WithMaxAttempts(1))
 
-	if _, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("first"))); err == nil {
+	if _, err := a.Turn(context.Background(), ai.UserMessage("first")); err == nil {
 		t.Fatal("the failure never reached the caller")
 	}
 
-	out, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("second")))
+	out, err := a.Turn(context.Background(), ai.UserMessage("second"))
 	if err != nil {
 		t.Fatalf("the second exchange failed too: %v", err)
 	}
@@ -1560,7 +1560,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 	}()
 	<-started
 
-	_, err := agent.Collect(a.Stream(context.Background(), ai.UserMessage("also")))
+	_, err := a.Turn(context.Background(), ai.UserMessage("also"))
 	if !errors.Is(err, agent.ErrBusy) {
 		t.Errorf("a second exchange = %v, want ErrBusy", err)
 	}

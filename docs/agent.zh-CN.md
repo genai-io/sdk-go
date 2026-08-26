@@ -102,7 +102,7 @@ sequenceDiagram
     participant Model as 模型
     participant Tool as 工具
 
-    App->>Agent: In() <- "改了什么?"
+    App->>Agent: Run(ctx, "改了什么?")
     Agent-->>App: TurnStart
     Agent-->>App: MessageAdded (user)
     Agent->>Model: MessageStart (attempt 1)
@@ -133,6 +133,8 @@ MessageStart(attempt=1) → MessageEnd(err) → MessageStart(attempt=2) → … 
 ### 什么都不会丢
 
 **什么都不会丢。** 事件在 range 那条 goroutine 上到达,所以不存在会落后的读者——agent 会等循环体跑完。承受不起拖住它的调用方,自己转发到自己的缓冲里,**多深、满了丢什么由它决定**,那才是有足够信息做这个决定的地方。
+
+只有一个例外,也是唯一真正跨 goroutine 的地方:**工具边跑边报的东西**来自工具自己那条 goroutine,它是可丢的——不能为了报进度卡住工具。`ToolEnd` 无论如何都带完整结果。
 
 承受不起拖住 agent 的读者,自己把事件转发到自己的缓冲里——丢弃策略就成了它自己的事。
 
@@ -251,6 +253,16 @@ flowchart LR
 ```
 
 `Recorder` 在 span 收尾时写一次:`MessageStart`+`MessageEnd` 合成一条推理记录,`ToolStart`+`ToolEnd` 合成一条工具记录。`MessageAdded` 单独存,把它们折回来就是恢复。片段不存——收尾事件已经带了完整值。
+
+**`SetMessages` 在折叠之外。** 压缩和恢复都是把对话整体换掉,而事件流上没有任何东西说这件事——因为 **agent 不知道自己的历史被换过,换它的那个人知道**:
+
+```go
+summary := compact(a.Messages())
+a.SetMessages(summary)
+rec.Snapshot(summary)   // 折叠从这里重新开始
+```
+
+忘了第二行,会话就会把 agent 扔掉的东西还给你——下次恢复读到的正是你压缩掉的那份。
 
 `Store` 只有四个方法,而且是刻意的:
 

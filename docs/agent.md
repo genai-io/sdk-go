@@ -170,6 +170,11 @@ it up forwards to a buffer of its own — and **how deep it is, and what to drop
 when it fills, are the caller's to decide**, which is the only place that
 decision can be made with enough information.
 
+One exception, and it is the one place something really does cross goroutines:
+what a tool reports while it works comes from the tool's own goroutine, and is
+dropped rather than stalling the tool for it. `ToolEnd` carries the finished
+result either way.
+
 ## Hooks
 
 Hooks are how an application gets between the loop and the model. Events are
@@ -320,6 +325,19 @@ A `Recorder` writes a span once, when it closes: `MessageStart`+`MessageEnd`
 become one inference entry, `ToolStart`+`ToolEnd` one tool entry. `MessageAdded`
 is stored on its own, and folding those back is what restore is. Fragments are
 not stored — the closing event already carried the whole value.
+
+**`SetMessages` is outside the fold.** Compaction and restore swap the
+conversation whole, and nothing on the stream says so, because the agent does
+not know its history was replaced — the caller who replaced it does:
+
+```go
+summary := compact(a.Messages())
+a.SetMessages(summary)
+rec.Snapshot(summary)   // the fold starts here now
+```
+
+Forget the second line and the session gives back what the agent threw away, so
+the next restore is the conversation you compacted away.
 
 `Store` is four methods, and deliberately no more:
 

@@ -107,11 +107,29 @@ func names(events []agent.Event) []string {
 // collect drives one exchange and returns everything the agent reported —
 // which is what a golden-sequence assertion compares against. It is also the
 // smallest complete use of the package: two channels and a range.
+// outcome folds an exchange the way a caller with nothing to render would:
+// range it, keep the TurnEnd. Four lines, at every such call site — which is
+// what a fold in the SDK would have saved.
+func outcome(t *testing.T, a *agent.Agent, msgs ...ai.Message) (agent.TurnEnd, error) {
+	t.Helper()
+
+	var out agent.TurnEnd
+	for e, err := range a.Turn(context.Background(), msgs...) {
+		if err != nil {
+			return out, err
+		}
+		if v, ok := e.(agent.TurnEnd); ok {
+			out = v
+		}
+	}
+	return out, out.Err
+}
+
 func collect(t *testing.T, a *agent.Agent, msgs ...ai.Message) ([]agent.Event, error) {
 	t.Helper()
 
 	var events []agent.Event
-	for e, err := range a.Stream(context.Background(), msgs...) {
+	for e, err := range a.Turn(context.Background(), msgs...) {
 		if err != nil {
 			return events, err
 		}
@@ -1477,7 +1495,7 @@ func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
 	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("the answer")}})
 
-	out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
+	out, err := outcome(t, a, ai.UserMessage("ask"))
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -1495,7 +1513,7 @@ func TestExchangesRunInSequence(t *testing.T) {
 	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("first"), text("second")}})
 
 	for i, want := range []string{"first", "second"} {
-		out, err := a.Turn(context.Background(), ai.UserMessage("ask"))
+		out, err := outcome(t, a, ai.UserMessage("ask"))
 		if err != nil {
 			t.Fatalf("exchange %d: %v", i+1, err)
 		}
@@ -1515,11 +1533,11 @@ func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
 		scripts: [][]ai.Delta{nil, text("second time")},
 	}, agent.WithMaxAttempts(1))
 
-	if _, err := a.Turn(context.Background(), ai.UserMessage("first")); err == nil {
+	if _, err := outcome(t, a, ai.UserMessage("first")); err == nil {
 		t.Fatal("the failure never reached the caller")
 	}
 
-	out, err := a.Turn(context.Background(), ai.UserMessage("second"))
+	out, err := outcome(t, a, ai.UserMessage("second"))
 	if err != nil {
 		t.Fatalf("the second exchange failed too: %v", err)
 	}
@@ -1546,7 +1564,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		var once bool
-		for e, err := range a.Stream(context.Background(), ai.UserMessage("go")) {
+		for e, err := range a.Turn(context.Background(), ai.UserMessage("go")) {
 			if _, ok := e.(agent.ToolStart); ok && !once {
 				once = true
 				close(started)
@@ -1560,7 +1578,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 	}()
 	<-started
 
-	_, err := a.Turn(context.Background(), ai.UserMessage("also"))
+	_, err := outcome(t, a, ai.UserMessage("also"))
 	if !errors.Is(err, agent.ErrBusy) {
 		t.Errorf("a second exchange = %v, want ErrBusy", err)
 	}
@@ -1568,39 +1586,6 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("the first exchange failed: %v", err)
-	}
-}
-
-// Inject hands a message to the exchange in flight; it lands at the next step
-// boundary, which is the only place changing what the model sees is safe.
-func TestInjectedMessagesJoinTheExchange(t *testing.T) {
-	echo := agent.ToolFunc("echo", "Echo.",
-		func(_ context.Context, _ struct{}) (agent.Result, error) {
-			return agent.TextResult("echoed"), nil
-		})
-
-	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
-		toolCall("c1", "echo", `{}`),
-		text("done"),
-	}}, agent.WithTools(echo))
-
-	var prompts []string
-	for e, err := range a.Stream(context.Background(), ai.UserMessage("first")) {
-		if err != nil {
-			t.Fatalf("stream: %v", err)
-		}
-		if v, ok := e.(agent.ToolEnd); ok && v.ID == "c1" {
-			a.Inject(ai.UserMessage("and also"), ai.UserMessage("and this"))
-		}
-		if v, ok := e.(agent.MessageAdded); ok && v.Message.Role == ai.RoleUser {
-			prompts = append(prompts, v.Message.Text())
-		}
-	}
-
-	// The tool-results message is a user turn too, so it is in this list.
-	want := []string{"first", "", "and also", "and this"}
-	if !slices.Equal(prompts, want) {
-		t.Errorf("user messages = %q, want %q", prompts, want)
 	}
 }
 
@@ -1613,7 +1598,7 @@ func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
 	}}
 	a := newAgent(t, driver)
 
-	for e, err := range a.Stream(context.Background(), ai.UserMessage("go")) {
+	for e, err := range a.Turn(context.Background(), ai.UserMessage("go")) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
@@ -1627,5 +1612,34 @@ func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
 	driver.mu.Unlock()
 	if calls != 1 {
 		t.Errorf("the model was called %d times after the consumer left, want 1", calls)
+	}
+}
+
+// Repeating an exchange is a for loop the caller writes, which is what lets it
+// decide the batching and what a failure means.
+func TestSeveralExchangesAreACallersLoop(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("first"), text("second")}})
+
+	var answers []string
+	for _, batch := range [][]ai.Message{
+		{ai.UserMessage("one")},
+		{ai.UserMessage("two"), ai.UserMessage("and this too")},
+	} {
+		for e, err := range a.Turn(context.Background(), batch...) {
+			if err != nil {
+				t.Fatalf("turn: %v", err)
+			}
+			if v, ok := e.(agent.TurnEnd); ok {
+				answers = append(answers, v.Message.Text())
+			}
+		}
+	}
+
+	if want := []string{"first", "second"}; !slices.Equal(answers, want) {
+		t.Errorf("answers = %v, want %v", answers, want)
+	}
+	// Five: one, then two-and-this-too as one exchange, each with its answer.
+	if got := len(a.Messages()); got != 5 {
+		t.Errorf("the conversation holds %d messages, want 5 — the second batch is one exchange", got)
 	}
 }

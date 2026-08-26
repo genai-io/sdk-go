@@ -10,18 +10,20 @@ a, err := agent.New(client,
     agent.WithTools(readFile, listDir),
 )
 
-for e, err := range a.Stream(ctx, ai.UserMessage("main.go 改了什么?")) {
+for e, err := range a.Turn(ctx, ai.UserMessage("main.go 改了什么?")) {
     render(e)
 }
 ```
 
-`Turn` 把它折叠成结果,给要答案不要过程的调用方——和 `pkg/ai` 低一层的那对动词完全一致,那边 `Complete` 就是 `Collect(Stream)`:
+**重复它是一个 `for` 循环,而这个循环是应用的**——消息怎么批成一轮、失败了算什么、什么时候停:
 
 ```go
-out, err := a.Turn(ctx, ai.UserMessage(task))
+for batch := range myMessages {
+    for e, err := range a.Turn(ctx, batch...) { render(e) }
+}
 ```
 
-**消息进来的那个循环是应用的**:CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜不到。`Inject` 把一条消息交给正在跑的那一轮,它在下一个 step 边界落地,那是**唯一安全改变模型即将看到什么的位置**。
+CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜不到。`Interrupt`(或者直接 `break` 出 range)结束正在跑的那一轮。
 
 事件在 range 那条 goroutine 上到达,所以想让 agent 跑在慢读者前面的调用方,自己转发到自己的缓冲里——**多深、满了丢什么,由它决定**。`break` 出 range 就结束这一轮,和 `Interrupt` 一回事。
 
@@ -228,7 +230,7 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 rec, history, err := session.Open(ctx, store, resume)   // "" 表示新开一个
 a.SetMessages(history)
 
-for e, err := range a.Stream(ctx, msg) {
+for e, err := range a.Turn(ctx, msg) {
     rec.Handle(e)   // 先写盘
     render(e)       // 再画屏
 }

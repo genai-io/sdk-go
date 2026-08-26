@@ -258,17 +258,18 @@ if err != nil {
     log.Fatal(err)
 }
 
-for e, err := range a.Stream(ctx, ai.UserMessage("what does main.go do?")) {
+for e, err := range a.Turn(ctx, ai.UserMessage("what does main.go do?")) {
     render(e)
 }
 ```
 
-For a caller that wants the answer rather than the progress — a subagent behind
-a tool call — `Turn` folds it:
+Repeating it is a `for` loop, and the loop is yours — how messages are batched
+into exchanges, what a failure means, and when to stop:
 
 ```go
-out, err := a.Turn(ctx, ai.UserMessage(task))
-return agent.TextResult(out.Message.Text()), err
+for batch := range myMessages {
+    for e, err := range a.Turn(ctx, batch...) { render(e) }
+}
 ```
 
 Four ideas carry the design:
@@ -280,10 +281,10 @@ Four ideas carry the design:
 | **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
 | **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
 
-The loop over incoming messages is yours: a CLI reads stdin, an interface reads
-keys, a server reads requests, and none of those is a shape a library should
-guess. `Inject` hands a message to the exchange in flight, and `Interrupt` — or
-simply breaking out of the range — ends it.
+A CLI reads stdin, an interface reads keys, a server reads requests, and none
+of those is a shape a library should guess — which is why repeating an exchange
+is your loop, not a method here. `Interrupt`, or simply breaking out of the
+range, ends the one in flight.
 
 A batch of tool calls runs concurrently unless a tool declares it cannot. A
 retryable stream failure is retried, and a stream that goes silent is bounded

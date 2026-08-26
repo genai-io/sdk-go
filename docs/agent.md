@@ -13,7 +13,7 @@ a, err := agent.New(client,
     agent.WithTools(readFile, listDir),
 )
 
-for e, err := range a.Stream(ctx, ai.UserMessage("what changed in main.go?")) {
+for e, err := range a.Turn(ctx, ai.UserMessage("what changed in main.go?")) {
     render(e)
 }
 ```
@@ -26,11 +26,18 @@ progress — the same pair `pkg/ai` offers one level down, where `Complete` is
 out, err := a.Turn(ctx, ai.UserMessage(task))
 ```
 
-The loop over incoming messages is the application's: a CLI reads stdin, an
-interface reads keys, a server reads requests, and none of those is a shape
-this package should guess. `Inject` hands a message to the exchange in flight;
-it lands at the next step boundary, which is the only place changing what the
-model is about to see is safe.
+Repeating it is a `for` loop, and the loop is the application's — how messages
+are batched into exchanges, what a failure means, when to stop:
+
+```go
+for batch := range myMessages {
+    for e, err := range a.Turn(ctx, batch...) { render(e) }
+}
+```
+
+A CLI reads stdin, an interface reads keys, a server reads requests, and none
+of those is a shape this package can guess. `Interrupt`, or breaking out of the
+range, ends the exchange in flight.
 
 Events arrive on the ranging goroutine, so an agent that must run ahead of a
 slow reader is one whose caller forwards them to a buffer of its own — how
@@ -288,7 +295,7 @@ own event loop:
 rec, history, err := session.Open(ctx, store, resume)   // "" starts a new one
 a.SetMessages(history)
 
-for e, err := range a.Stream(ctx, msg) {
+for e, err := range a.Turn(ctx, msg) {
     rec.Handle(e)   // write first
     render(e)       // then paint
 }
@@ -332,7 +339,7 @@ interface only has to name what this package calls.
 ```
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
-  stream.go    an exchange from the outside: Stream, Collect, Inject
+  stream.go    an exchange from the outside: Turn, Interrupt
   turn.go      one turn: reason, act, and the loop between them
   event.go     the nine events
   hook.go      the four hooks, and how each chain runs

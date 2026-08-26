@@ -10,22 +10,22 @@
 //
 //	a, err := agent.New(client, agent.WithSystem("You are terse."), agent.WithTools(read))
 //
-//	for e, err := range a.Stream(ctx, ai.UserMessage("what is in config.json?")) {
+//	for e, err := range a.Turn(ctx, ai.UserMessage("what is in config.json?")) {
 //	    render(e)
 //	}
 //
-// Stream advances the conversation one exchange and reports what it does on the
-// way. Collect folds it for a caller that wants the answer rather than the
-// progress — the same pair pkg/ai offers one level down, where Complete is
-// Collect of Stream.
+// Turn advances the conversation one exchange and reports what it does on the
+// way; the last event is TurnEnd, which carries how it went.
 //
-//	out, err := agent.Collect(a.Stream(ctx, ai.UserMessage(task)))
+// Repeating it is a for loop, and the loop is the application's — how messages
+// are batched into exchanges, what a failure means, when to stop:
 //
-// The loop over incoming messages is the application's: a CLI reads stdin, an
-// interface reads keys, a server reads requests, and none of those is a shape
-// this package should guess. Inject hands a message to the exchange in flight,
-// which lands at the next step boundary — changing what the model is about to
-// see is safe exactly once per call, and that is where.
+//	for batch := range myMessages {
+//	    for e, err := range a.Turn(ctx, batch...) { render(e) }
+//	}
+//
+// A CLI reads stdin, an interface reads keys, a server reads requests, and
+// none of those is a shape this package can guess.
 //
 // Events arrive on the ranging goroutine, so an agent that must run ahead of a
 // slow reader is one whose caller forwards to a buffer of its own — how deep,
@@ -88,7 +88,7 @@
 // A turn holds inferences, and the files are named for what they are:
 //
 //	agent.go   an agent: what it holds, how it is built, what you read and set
-//	stream.go  an exchange, from the outside: Stream, Collect, Inject
+//	stream.go  an exchange, from the outside: Turn, Interrupt
 //	turn.go    a turn: reason, act, repeat — and how the tools are run
 //
 //	event.go   what an exchange reports

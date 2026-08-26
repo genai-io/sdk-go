@@ -211,7 +211,7 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 
 `pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环：问模型、跑它要的工具、再问一次，直到模型不再要东西、直接作答。
 
-`Stream` 把对话推进一轮，并把沿途做的事作为序列报出来——和 `pkg/ai` 低一层的那对动词一样，那边 `Complete` 就是 `Collect(Stream)`。
+`Turn` 把对话推进一轮，并把沿途做的事作为序列报出来；最后一个事件是 `TurnEnd`，它带着这一轮怎么结束的。
 
 ```go
 a, err := agent.New(client,
@@ -222,16 +222,9 @@ if err != nil {
     log.Fatal(err)
 }
 
-for e, err := range a.Stream(ctx, ai.UserMessage("main.go 是做什么的?")) {
+for e, err := range a.Turn(ctx, ai.UserMessage("main.go 是做什么的?")) {
     render(e)
 }
-```
-
-要答案不要过程的调用方——比如站在工具后面的子 agent——用 `Turn` 折叠它：
-
-```go
-out, err := a.Turn(ctx, ai.UserMessage(task))
-return agent.TextResult(out.Message.Text()), err
 ```
 
 四个想法撑起整个设计：
@@ -243,7 +236,15 @@ return agent.TextResult(out.Message.Text()), err
 | **hook 是征询，事件是通知** | `PreInfer` / `PostInfer` 分列模型调用两侧，`PreTool` / `PostTool` 分列工具两侧。一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。 |
 | **一个工具面对两个受众** | `Content` 给模型，`Details` 给你的界面——为人排版的东西，不必此后每一轮都为它付费。 |
 
-**消息进来的那个循环是你的**：CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`Inject` 把一条消息交给正在跑的那一轮，`Interrupt`（或者直接 `break` 出 range）结束它。
+**重复它是一个 `for` 循环，而这个循环是你的**——消息怎么批成一轮、失败了算什么、什么时候停：
+
+```go
+for batch := range myMessages {
+    for e, err := range a.Turn(ctx, batch...) { render(e) }
+}
+```
+
+CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`Interrupt`（或者直接 `break` 出 range）结束正在跑的那一轮。
 
 一批工具调用默认并发执行，除非某个工具声明自己不能。可重试的流失败会重试，**静默的流有时限、超时也重试**——每一种都以一个说明原因的 stop reason 结束一个 turn。
 

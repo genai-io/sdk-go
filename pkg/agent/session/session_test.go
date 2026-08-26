@@ -60,7 +60,7 @@ func converse(t *testing.T, a *agent.Agent, rec *session.Recorder, msgs ...ai.Me
 	t.Helper()
 
 	for _, m := range msgs {
-		for e, err := range a.Stream(context.Background(), m) {
+		for e, err := range a.Turn(context.Background(), m) {
 			if err != nil {
 				t.Fatalf("stream: %v", err)
 			}

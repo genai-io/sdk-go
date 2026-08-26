@@ -244,7 +244,7 @@ for batch := range myMessages {
 }
 ```
 
-CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`Interrupt`（或者直接 `break` 出 range）结束正在跑的那一轮。
+CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`AddMessages` 把消息塞进正在跑的那一轮，`Interrupt`（或者直接 `break` 出 range）结束它。
 
 一批工具调用默认并发执行，除非某个工具声明自己不能。可重试的流失败会重试，**静默的流有时限、超时也重试**——每一种都以一个说明原因的 stop reason 结束一个 turn。
 

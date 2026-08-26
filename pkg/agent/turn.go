@@ -346,6 +346,12 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 			return out.canceled(turnCtx)
 		}
 
+		// Anything added while the last tools ran enters here rather than
+		// mid-stream, and is reported here rather than where it was added.
+		for _, m := range a.taken() {
+			a.add(m)
+		}
+
 		resp, spent, err := a.reason(turnCtx)
 		out.Usage.Add(spent)
 		switch {

@@ -283,8 +283,8 @@ Four ideas carry the design:
 
 A CLI reads stdin, an interface reads keys, a server reads requests, and none
 of those is a shape a library should guess — which is why repeating an exchange
-is your loop, not a method here. `Interrupt`, or simply breaking out of the
-range, ends the one in flight.
+is your loop, not a method here. `AddMessages` puts something into the exchange
+in flight; `Interrupt`, or simply breaking out of the range, ends it.
 
 A batch of tool calls runs concurrently unless a tool declares it cannot. A
 retryable stream failure is retried, and a stream that goes silent is bounded

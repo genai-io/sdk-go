@@ -1643,3 +1643,50 @@ func TestSeveralExchangesAreACallersLoop(t *testing.T) {
 		t.Errorf("the conversation holds %d messages, want 5 — the second batch is one exchange", got)
 	}
 }
+
+// A message added while an exchange is running joins it at the next step
+// boundary, and is reported there — so the stream and the conversation agree
+// about what the model was shown.
+func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
+	echo := agent.ToolFunc("echo", "Echo.",
+		func(_ context.Context, _ struct{}) (agent.Result, error) {
+			return agent.TextResult("echoed"), nil
+		})
+
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{
+		toolCall("c1", "echo", `{}`),
+		text("done"),
+	}}, agent.WithTools(echo))
+
+	var announced []string
+	for e, err := range a.Run(context.Background(), ai.UserMessage("first")) {
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		switch v := e.(type) {
+		case agent.ToolEnd:
+			// Added while the exchange is in flight, from the range body.
+			a.AddMessages(ai.UserMessage("and also"), ai.UserMessage("and this"))
+		case agent.MessageAdded:
+			if v.Message.Role == ai.RoleUser {
+				announced = append(announced, v.Message.Text())
+			}
+		}
+	}
+
+	// The tool-results message is a user turn too, hence the blank.
+	want := []string{"first", "", "and also", "and this"}
+	if !slices.Equal(announced, want) {
+		t.Errorf("announced %q, want %q", announced, want)
+	}
+
+	// And the stream said everything the conversation holds.
+	var folded int
+	for _, m := range a.Messages() {
+		_ = m
+		folded++
+	}
+	if folded != 6 {
+		t.Errorf("the conversation holds %d messages, want 6", folded)
+	}
+}

@@ -23,7 +23,7 @@ for batch := range myMessages {
 }
 ```
 
-CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜不到。`Interrupt`(或者直接 `break` 出 range)结束正在跑的那一轮。
+CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜不到。`AddMessages` 把消息塞进**正在跑的那一轮**,它在下一个 step 边界到达——那是唯一安全改变"模型即将看到什么"的位置。`Interrupt`(或者直接 `break` 出 range)则是结束它。
 
 事件在 range 那条 goroutine 上到达,所以想让 agent 跑在慢读者前面的调用方,自己转发到自己的缓冲里——**多深、满了丢什么,由它决定**。`break` 出 range 就结束这一轮,和 `Interrupt` 一回事。
 

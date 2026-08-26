@@ -141,11 +141,13 @@ func Messages(ctx context.Context, store Store, id string) ([]ai.Message, error)
 	return msgs, nil
 }
 
-// Recorder turns the events an agent reports into stored entries. It is a
-// plain function you call from your own event loop:
+// Open starts a session or resumes one, returning a Recorder to feed events to
+// and the conversation folded back out of what was stored. Pass an empty id for
+// a new session; the id it was given is on the Recorder.
 //
-//	rec, _ := session.Open(ctx, store, "")          // or an existing id
-//	for e := range out {
+//	rec, history, _ := session.Open(ctx, store, "")   // or an existing id
+//	a.SetMessages(history)
+//	for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 //	    rec.Handle(e)
 //	    render(e)
 //	}

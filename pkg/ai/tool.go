@@ -1,9 +1,7 @@
 package ai
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -12,14 +10,14 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
-// Tool is a tool definition offered to the model.
+// Tool is one thing the model can ask for. It is two halves: the Schema is
+// everything the model is told, and Run is what answers a call.
 type Tool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-
-	// Parameters is a JSON Schema object describing the tool's arguments,
-	// typically a map[string]any. Drivers translate it into their wire shape.
-	Parameters any `json:"parameters,omitempty"`
+	// Schema names the tool, says what it is for, and describes its arguments.
+	// It is the same Schema an answer's shape uses, because it is the same
+	// problem — a JSON object the model has to get right — so both are
+	// described and checked by the same code.
+	Schema Schema `json:"schema"`
 
 	// Run answers this tool's calls, taking the model's arguments as the JSON
 	// it sent. ToolFunc fills it in from a Go type, which is what most callers
@@ -28,50 +26,10 @@ type Tool struct {
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
-// ParameterSchema returns an independent JSON-object representation of the
-// tool's parameters. A nil result means that Parameters was omitted or is not
-// representable as a JSON object.
-func (t Tool) ParameterSchema() map[string]any {
-	return jsonSchemaObject(t.Parameters)
-}
-
-// ValidateArgs checks a tool call's arguments against the tool's own schema.
-func (t Tool) ValidateArgs(input string) error {
-	schema := t.ParameterSchema()
-	if len(schema) == 0 {
-		return nil
-	}
-	var value any
-	trimmed := bytes.TrimSpace([]byte(input))
-	if len(trimmed) == 0 {
-		// An empty argument string means an empty object, which every protocol
-		// sends for a no-argument call.
-		value = map[string]any{}
-	} else if err := json.Unmarshal(trimmed, &value); err != nil {
-		return fmt.Errorf("arguments for %s are not valid JSON: %w", t.Name, err)
-	}
-	if err := jsonschema.Check(schema, value); err != nil {
-		return fmt.Errorf("arguments for %s: %w", t.Name, err)
-	}
-	return nil
-}
-
-// decodeArgs writes a model's arguments over whatever the target already
-// holds, so a field the model did not send keeps the value it was given.
-func decodeArgs(arguments string, into any) error {
-	trimmed := bytes.TrimSpace([]byte(arguments))
-	if len(trimmed) == 0 {
-		return nil
-	}
-	dec := json.NewDecoder(bytes.NewReader(trimmed))
-	dec.DisallowUnknownFields()
-	return dec.Decode(into)
-}
-
 // FindTool returns the tool with the given name.
 func FindTool(tools []Tool, name string) (Tool, bool) {
 	for _, t := range tools {
-		if t.Name == name {
+		if t.Schema.Name == name {
 			return t, true
 		}
 	}
@@ -94,8 +52,22 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 //
 //	client.Run(ctx, messages, []ai.Tool{search, fetch})
 func ToolFunc[T any](name, description string, run func(ctx context.Context, arguments T) (string, error)) Tool {
-	var zero T
-	t := reflect.TypeOf(zero)
+	return Tool{
+		Schema: ToolSchema[T](name, description),
+		Run: func(ctx context.Context, arguments string) (string, error) {
+			var args T
+			if err := (ToolCall{Name: name, Input: arguments}).UnmarshalArgs(&args); err != nil {
+				return "", err
+			}
+			return run(ctx, args)
+		},
+	}
+}
+
+// ToolSchema derives a tool's schema from its Go argument type. ToolFunc uses
+// it; call it directly when you are filling in Tool.Run yourself.
+func ToolSchema[T any](name, description string) Schema {
+	t := reflect.TypeFor[T]()
 	if t == nil || t.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
 	}
@@ -103,18 +75,7 @@ func ToolFunc[T any](name, description string, run func(ctx context.Context, arg
 		panic(fmt.Sprintf("ai: the tool taking %s has no name; "+
 			"that is the string the model calls", t))
 	}
-	return Tool{
-		Name:        name,
-		Description: description,
-		Parameters:  jsonschema.ForType(t),
-		Run: func(ctx context.Context, arguments string) (string, error) {
-			var args T
-			if err := decodeArgs(arguments, &args); err != nil {
-				return "", fmt.Errorf("arguments for %s: %w", name, err)
-			}
-			return run(ctx, args)
-		},
-	}
+	return Schema{Name: name, Description: description, Definition: jsonschema.ForType(t)}
 }
 
 // RunTools answers every call in a turn, in order, and returns the results as
@@ -147,7 +108,7 @@ func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 	if tool.Run == nil {
 		return failed("tool %q was offered without anything to run it", call.Name)
 	}
-	if err := tool.ValidateArgs(call.Input); err != nil {
+	if err := tool.Schema.Validate(call.Input); err != nil {
 		return failed("%v", err)
 	}
 
@@ -162,7 +123,7 @@ func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 func toolNames(tools []Tool) string {
 	names := make([]string, len(tools))
 	for i, tool := range tools {
-		names[i] = tool.Name
+		names[i] = tool.Schema.Name
 	}
 	switch len(names) {
 	case 0:

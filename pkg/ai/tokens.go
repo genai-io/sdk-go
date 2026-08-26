@@ -114,9 +114,9 @@ func EstimateTokens(req *Request) int {
 	// Tool definitions are part of the prompt and are easy to forget: a dozen
 	// schemas can outweigh the conversation.
 	for _, t := range req.Tools {
-		total += messageOverhead + estimateText(t.Name) + estimateText(t.Description)
-		if t.Parameters != nil {
-			if schema, err := json.Marshal(t.Parameters); err == nil {
+		total += messageOverhead + estimateText(t.Schema.Name) + estimateText(t.Schema.Description)
+		if t.Schema.Definition != nil {
+			if schema, err := json.Marshal(t.Schema.Definition); err == nil {
 				total += estimateText(string(schema))
 			}
 		}

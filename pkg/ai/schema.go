@@ -1,8 +1,10 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"reflect"
 
@@ -70,6 +72,31 @@ func (s *Schema) DefinitionMap() map[string]any {
 	return jsonSchemaObject(s.Definition)
 }
 
+// Validate checks a JSON document against the schema. An empty document is
+// read as an empty object, which is what every protocol sends for a call that
+// takes no arguments. A schema with no definition accepts anything.
+func (s Schema) Validate(input string) error {
+	definition := jsonSchemaObject(s.Definition)
+	if len(definition) == 0 {
+		return nil
+	}
+	name := s.Name
+	if name == "" {
+		name = "the schema"
+	}
+	var value any
+	trimmed := bytes.TrimSpace([]byte(input))
+	if len(trimmed) == 0 {
+		value = map[string]any{}
+	} else if err := json.Unmarshal(trimmed, &value); err != nil {
+		return fmt.Errorf("arguments for %s are not valid JSON: %w", name, err)
+	}
+	if err := jsonschema.Check(definition, value); err != nil {
+		return fmt.Errorf("arguments for %s: %w", name, err)
+	}
+	return nil
+}
+
 // WireName is the identifier to send for a protocol that requires a schema to
 // be named. It is the schema's own Name, or "response" when it states none.
 func (s *Schema) WireName() string {
@@ -80,8 +107,6 @@ func (s *Schema) WireName() string {
 }
 
 // jsonSchemaObject renders a schema definition as an independent JSON object.
-// It is shared by Schema.DefinitionMap and Tool.ParameterSchema so that the
-// two places a JSON Schema enters this package accept exactly the same values.
 func jsonSchemaObject(value any) map[string]any {
 	switch def := value.(type) {
 	case map[string]any:

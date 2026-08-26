@@ -94,7 +94,7 @@ client, err := auth.Client(ref)
 
 `catalog.Models()` **不联网**就能列出全部 `厂商/模型` 引用。
 
-可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`tools/`](examples/tools) 和 [`structured/`](examples/structured)。
+可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`tools/`](examples/tools)、[`structured/`](examples/structured) 和四个 agent 例子。
 
 ## 流式
 
@@ -152,30 +152,31 @@ response, history, err := client.Run(ctx,
 <details>
 <summary><code>ToolFunc</code> 是简写。它折叠掉的就是下面这段。</summary>
 
+一个工具就是两半：`Schema` 是模型被告知的全部，`Run` 是应答调用的那部分。
+`ToolFunc` 从 `Run` 接受的 Go 类型推导出前者。
+
 ```go
 search := ai.Tool{
-	Name:        "search",
-	Description: "搜索文档，返回匹配的段落。",
-	Parameters:  jsonschema.For[SearchArgs](),
+	Schema: ai.Schema{
+		Name:        "search",
+		Description: "搜索文档，返回匹配的段落。",
+		Definition:  jsonschema.For[SearchArgs](),
+	},
 	Run: func(ctx context.Context, arguments string) (string, error) {
 		var a SearchArgs
-		if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
-			decoder := json.NewDecoder(bytes.NewReader(raw))
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&a); err != nil {
-				return "", fmt.Errorf("arguments for search: %w", err)
-			}
+		if err := (ai.ToolCall{Name: "search", Input: arguments}).UnmarshalArgs(&a); err != nil {
+			return "", err
 		}
 		return docs.Search(ctx, a.Query, a.Limit)
 	},
 }
 ```
 
-**`ai.Tool` 就是一个工具的全部**：上线的那三个字段，加一个应答调用的函数。`ToolFunc` 做的事只有两件——从 `SearchArgs` 推出 schema、把参数解码进它。仅此而已：两种写法产出的定义**逐字节相同**，行为也相同，连错误都一样。
+**`ai.Tool` 就是一个工具的全部**：上线的那个 schema，加一个应答调用的函数。`ToolFunc` 做的事只有两件——从 `SearchArgs` 推出 schema、把参数解码进它。仅此而已：两种写法产出的定义**逐字节相同**，行为也相同，连错误都一样。
 
-所以那些"逃生口"根本不是特性。手写 schema 是一次赋值 `search.Parameters = handWritten`；到运行时才知道形状的工具就是上面这个写法、`Parameters` 从别处来。两者都没用到常规路径之外的任何东西。
+所以那些"逃生口"根本不是特性。手写 schema 是一次赋值 `search.Schema.Definition = handWritten`；到运行时才知道形状的工具就是上面这个写法、schema 从别处来。两者都没用到常规路径之外的任何东西。
 
-那个"空参数"分支不是摆设：**无参数的工具，这里每个协议都会发一个空对象**，而 `json.Decoder` 对它返回的是 `EOF`，不是零值。
+`UnmarshalArgs` 就是 `ToolFunc` 用来解码的那个，也值得你直接用：**schema 里没有的参数是错误，不是静默丢弃**——模型编出来的东西该被告知，而不是被执行一半；空文档则按空对象读，那正是**无参数的工具，这里每个协议都会发的东西**。
 
 </details>
 
@@ -229,7 +230,7 @@ for e, err := range a.Run(ctx, ai.UserMessage("main.go 是做什么的?")) {
 
 四个想法撑起整个设计：
 
-| | |
+| 想法 | 含义 |
 | --- | --- |
 | **一切皆事件** | 一段序列上 9 种类型。一条消息和一次工具调用各自有开始、流式、结束，turn 在外面标出边界。集合是封闭的，消费者可以确信这就是全部。 |
 | **对话是一次折叠** | 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份。会话要存的只有这些，恢复要读的也只有这些。 |
@@ -246,11 +247,13 @@ for batch := range myMessages {
 
 CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`AddMessages` 把消息塞进正在跑的那一轮，`Interrupt`（或者直接 `break` 出 range）结束它。
 
-一批工具调用默认并发执行，除非某个工具声明自己不能。可重试的流失败会重试，**静默的流有时限、超时也重试**——每一种都以一个说明原因的 stop reason 结束一个 turn。
+一批工具调用默认并发执行，除非某个工具声明自己不能。**静默的流有时限**，不会一直挂着。重试归 client——`ai.Retry` 包在 driver 外面——所以 agent 默认一次都不重试：两份预算是相乘不是相加。`WithRetry` 才是显式给 client 重放不了的那部分再开一份。
 
 会话是这条事件流的**消费者**，不住在 agent 内部：在你自己的循环里 `rec.Handle(e)` 记录发生了什么，`session.Open` 再把它折回成一段可以续上的对话。
 
-事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)。
+事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；
+能直接跑的程序见 [`examples/agent-chat`](examples/agent-chat)、[`examples/agent-progress`](examples/agent-progress)、
+[`examples/agent-session`](examples/agent-session) 和 [`examples/agent`](examples/agent)。
 
 ## 结构化输出
 
@@ -360,14 +363,14 @@ client, err := ai.NewClient(ai.Config{
 | [Agent SDK](docs/agent.zh-CN.md) | 结构、事件契约、hook、工具与会话（[English](docs/agent.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
 | [更新日志](CHANGELOG.md) | 每个版本改了什么 |
-| [`examples/`](examples) | 可运行的程序，每家厂商一个，外加工具调用和结构化输出 |
+| [`examples/`](examples) | 可运行的程序：每家厂商一个，外加工具调用、结构化输出和四个 agent |
 
 ## 版本
 
 遵循[语义化版本](https://semver.org/lang/zh-CN/)。主版本号还是 `0`，所以 API 在次版本之间仍可能变动；[更新日志](CHANGELOG.md)会写清楚动了什么、该改成什么。
 
 ```sh
-go get github.com/genai-io/sdk-go@v0.1.0
+go get github.com/genai-io/sdk-go@v0.1.2
 ```
 
 ## 许可

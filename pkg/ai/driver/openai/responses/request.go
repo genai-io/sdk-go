@@ -74,13 +74,13 @@ func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 		tools := make([]wire.ToolUnionParam, len(req.Tools))
 		for i, t := range req.Tools {
 			var schema map[string]any
-			if props := t.ParameterSchema(); props != nil {
+			if props := t.Schema.DefinitionMap(); props != nil {
 				schema = props
 			}
 			tools[i] = wire.ToolUnionParam{
 				OfFunction: &wire.FunctionToolParam{
-					Name:        t.Name,
-					Description: sdk.Opt(t.Description),
+					Name:        t.Schema.Name,
+					Description: sdk.Opt(t.Schema.Description),
 					Parameters:  schema,
 				},
 			}

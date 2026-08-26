@@ -53,7 +53,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    in([In]) --> reason
+    in([Run]) --> reason
     reason{{"reason<br/>问模型"}} -->|要工具| act{{"act<br/>跑工具"}}
     act --> reason
     reason -->|不要工具| done([TurnEnd])
@@ -67,6 +67,8 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 | --- | --- |
 | `end_turn` | 模型直接作答,没要工具 |
 | `max_tokens` | 模型的输出配额用完了,**回答是半截的** |
+| `refusal` | 模型拒答,或者被内容过滤拦下——可能有文字,但那不是回答 |
+| `stop_sequence` | 生成停在 `WithStopSequences` 里的某个序列上 |
 | `max_steps` | 步数预算用完,模型还在干活 |
 | `terminated` | 这一批工具**全体**要求停 |
 | `error` | 模型调用重试到底仍失败,或某个 hook 拒绝 |
@@ -74,9 +76,15 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 
 ### 提前结束一个 turn
 
-**一个什么都不说的流,是唯一一种"看起来像在干活"的故障**,所以 agent 给它设了界:`WithStreamTimeout(first, idle)` 限定端点开口说第一句话的时限、以及开口之后可以停顿多久,默认开启,分别是五分钟和一分钟。超时会被报成**网络错误**——它本来就是——然后像其他网络错误一样重试。
+**一个什么都不说的流,是唯一一种"看起来像在干活"的故障**,所以 agent 给它设了界:`WithStreamTimeout(first, idle)` 限定端点开口说第一句话的时限、以及开口之后可以停顿多久,默认开启,分别是五分钟和一分钟。超时会被报成**网络错误**——它本来就是——而它正是 `WithRetry` 存在的两个理由之一。
 
-`Interrupt()` 结束正在进行的交换,**但让 run 活着**:这个 turn 以 `StopCanceled` 收尾,agent 回到 `In` 上继续等。这就是用户按 ESC 想要的效果。取消 `Run` 自己的 context 是另一回事,那会结束一切。
+### 重试归 client
+
+`ai.Retry(attempts, backoff)` 包在 driver 外面,那才是重试该待的地方。**agent 默认不重试**,因为两份预算是相乘不是相加:client 已经 `ai.Retry(3, …)` 了,agent 这边再来三次,一个 step 就是九次模型调用,而且两个循环互相看不见对方的计数。
+
+`WithRetry(attempts, backoff)` 是**显式**再开一份预算,给的是 client replay 不了的两种失败:**已经吐过内容的流**——`ai.Retry` 在这里会放弃,因为它的调用方已经看见了,而这个循环会丢弃这次尝试、另开一条消息——以及**卡住的流**,因为结束一次卡住就会取消掉 `ai.Retry` 要等的那个 context。两种情况下,等待都先看端点给的 `Retry-After`,再退到自己的退避。
+
+`Interrupt()` 结束正在进行的交换,**但 agent 还活着**:这个 turn 以 `StopCanceled` 收尾,`Run` 返回,下一轮干净地开始。这就是用户按 ESC 想要的效果。取消 `Run` 自己的 context 是另一回事,那会结束一切。
 
 ## 事件
 
@@ -163,7 +171,7 @@ flowchart LR
 ```go
 agent.WithHooks(agent.Hook{
     PreTool: func(ctx context.Context, c agent.PreToolContext) (agent.Decision, error) {
-        if c.Tool.Definition().Name == "write_file" && !approved(c.Call) {
+        if c.Tool.Schema().Name == "write_file" && !approved(c.Call) {
             return agent.Decision{Block: true, Reason: "用户没有批准"}, nil
         }
         return agent.Decision{}, nil
@@ -192,7 +200,7 @@ client 自己的设置——temperature、token 上限、effort——属于构�
 
 ```go
 type Tool interface {
-    Definition() ai.Tool
+    Schema() ai.Schema
     Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 ```

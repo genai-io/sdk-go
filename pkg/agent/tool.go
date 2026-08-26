@@ -2,11 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
 // Result is what running a tool produced.
@@ -27,10 +24,27 @@ func TextResult(text string) Result { return Result{Content: ai.TextContent(text
 // Text returns the result's text in block order.
 func (r Result) Text() string { return r.Content.Text() }
 
-// Tool is one thing an agent can do.
+// Told is what a tool call comes to say: the result's text, or the error when
+// it failed, or a placeholder when it produced neither — several endpoints
+// reject a tool result with no content at all. It is one function because the
+// model and the session must be told the same thing.
+func Told(r Result, err error) string {
+	if text := r.Text(); text != "" {
+		return text
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return "(no output)"
+}
+
+// Tool is one thing an agent can do. Like ai.Tool it is two halves — what the
+// model is told, and what answers a call — as an interface, so a tool can be
+// anything with those two.
 type Tool interface {
-	// Definition is what the model is told: name, description, argument schema.
-	Definition() ai.Tool
+	// Schema is what the model is told: the tool's name, what it is for, and
+	// the shape of its arguments.
+	Schema() ai.Schema
 	// Run executes one call. Returning an error is how a tool fails: the loop
 	// turns it into a tool error the model can see and correct, rather than
 	// failing the turn.
@@ -60,9 +74,26 @@ func Report(ctx context.Context, partial Result) {
 // batch makes the whole batch run one at a time, because a batch is only safe
 // to parallelize if every member of it is. A tool that mutates shared state
 // wants this.
+//
+// It must be the outermost wrapper. The mark is on the value the agent holds,
+// so a decorator of your own placed outside it hides it and the batch goes
+// back to running in parallel — wrap the other way round:
+//
+//	agent.Sequential(logged{writeFile})   // marked
+//	logged{agent.Sequential(writeFile)}   // not
 func Sequential(t Tool) Tool { return sequential{t} }
 
 type sequential struct{ Tool }
+
+// isSequential reports whether a tool was marked. Deliberately a type
+// assertion: a capability method would not survive a decorator that embeds the
+// Tool interface either, since the interface is the whole method set a
+// decorator forwards, so the honest fix is the documented rule on Sequential
+// rather than machinery that looks like it lifts it.
+func isSequential(t Tool) bool {
+	_, ok := t.(sequential)
+	return ok
+}
 
 // ToolFunc builds a tool from a Go argument type, the way ai.ToolFunc does:
 // the schema the model is sent is derived from the same struct the arguments
@@ -70,18 +101,11 @@ type sequential struct{ Tool }
 func ToolFunc[T any](name, description string,
 	run func(ctx context.Context, args T) (Result, error)) Tool {
 	return &funcTool{
-		def: ai.Tool{
-			Name:        name,
-			Description: description,
-			Parameters:  jsonschema.For[T](),
-		},
+		schema: ai.ToolSchema[T](name, description),
 		run: func(ctx context.Context, call ai.ToolCall) (Result, error) {
 			var args T
-			input := strings.TrimSpace(call.Input)
-			if input != "" && input != "null" {
-				if err := json.Unmarshal([]byte(input), &args); err != nil {
-					return Result{}, err
-				}
+			if err := call.UnmarshalArgs(&args); err != nil {
+				return Result{}, err
 			}
 			return run(ctx, args)
 		},
@@ -92,10 +116,10 @@ func ToolFunc[T any](name, description string,
 // works here without being rewritten.
 func FromAI(t ai.Tool) Tool {
 	return &funcTool{
-		def: t,
+		schema: t.Schema,
 		run: func(ctx context.Context, call ai.ToolCall) (Result, error) {
 			if t.Run == nil {
-				return Result{}, &ai.Error{Kind: ai.KindInvalidRequest, Message: "agent: tool " + t.Name + " has no Run"}
+				return Result{}, &ai.Error{Kind: ai.KindInvalidRequest, Message: "agent: tool " + t.Schema.Name + " has no Run"}
 			}
 			out, err := t.Run(ctx, call.Input)
 			if err != nil {
@@ -107,11 +131,11 @@ func FromAI(t ai.Tool) Tool {
 }
 
 type funcTool struct {
-	def ai.Tool
-	run func(context.Context, ai.ToolCall) (Result, error)
+	schema ai.Schema
+	run    func(context.Context, ai.ToolCall) (Result, error)
 }
 
-func (t *funcTool) Definition() ai.Tool { return t.def }
+func (t *funcTool) Schema() ai.Schema { return t.schema }
 
 func (t *funcTool) Run(ctx context.Context, call ai.ToolCall) (Result, error) {
 	return t.run(ctx, call)

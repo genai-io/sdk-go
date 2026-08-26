@@ -11,6 +11,60 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
+- **`ai.Tool` is now a schema and a function.** `Name`, `Description` and
+  `Parameters` are gone; the three of them were a `Schema` written out longhand,
+  which is the type the package already had for exactly this — a named,
+  described JSON shape. Write `ai.Tool{Schema: ai.Schema{Name: …, Description:
+  …, Definition: …}, Run: …}`, or `ai.ToolSchema[T](name, description)` to
+  derive it from a Go type. `ToolFunc` is unchanged. `Tool.ValidateArgs` and
+  `Tool.ParameterSchema` moved onto the schema as `Schema.Validate` and
+  `Schema.DefinitionMap`. A tool can now be `Strict`, which it could not be
+  before.
+- **`agent.Tool` declares `Schema() ai.Schema`** instead of `Definition()
+  ai.Tool`, which returned a value whose `Run` field was always nil.
+
+### Added
+
+- **`ai.ToolCall.UnmarshalArgs`** decodes a call's arguments into a Go value —
+  the function `ToolCall.Input` has always been documented as decoding with.
+  An argument the schema does not have is an error rather than a silent drop.
+- **`agent.WithRetry(attempts, backoff)`** — see below.
+- **`agent.StopRefusal` and `agent.StopSequence`.**
+
+### Fixed
+
+- **An agent no longer retries by default, and honours `Retry-After` when it
+  does.** Retry belongs on the client, where `ai.Retry` implements it; a second
+  budget on the agent multiplied rather than added, so the setup both READMEs
+  teach — three attempts on a client wrapped in `ai.Retry(3, …)` — was nine
+  model calls for one step. The agent's own loop also never waited at all,
+  replaying a rate limit that named a delay within microseconds of receiving it.
+  `WithRetry` replaces `WithMaxAttempts` and turns a second budget on
+  deliberately, for what `ai.Retry` structurally cannot replay: a stream that
+  already yielded output, and a stalled one.
+- **A refused or filtered turn is no longer reported as `end_turn`.** The loop
+  translated only `max_tokens`, so `ai.StopRefusal` and `ai.StopSequence` both
+  read as a model that answered normally.
+- **A stream that ends without a response is retryable again.** It was raised
+  as a bare `error`, which `ai.IsRetryable` — asked five lines later — reads as
+  permanent; `ai.Collect` calls the same failure retryable.
+- **A finished turn no longer pins the caller's context.** The agent held the
+  last turn's `CancelFunc`, and a `CancelFunc` closes over its context, so
+  everything hanging off it stayed alive until the next turn replaced it.
+- **`agent.ToolFunc` no longer silently drops arguments the model invented.**
+  It decoded with a bare `json.Unmarshal` where `ai.ToolFunc` refuses unknown
+  fields, so a tool could run on a request it never received.
+
+### Performance
+
+- **The jsonl session store appends ~25× faster** (204 µs → 8 µs, 42 → 4
+  allocations). It rewrote `meta.json` atomically on every recorded event to
+  maintain `Entries` and `UpdatedAt`, which are a cache of what the entries
+  file already knows. Metadata is now written when it is read, and each
+  session's sequence number is recovered from the entries file itself — which
+  also fixes a second process carrying on from a stale count after a crash and
+  writing duplicate sequence numbers. The store-wide lock is now per session.
+
 - **`ai.RepairHistory` is now `ai.Repair`.** The old name introduced a word the
   package does not otherwise use: there is no history type here, only
   `[]Message` and `Request.Messages`. `Repair` is unchanged in behaviour — it

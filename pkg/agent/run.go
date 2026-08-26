@@ -27,7 +27,7 @@ var ErrBusy = errors.New("agent: an exchange is already running")
 //	for e, err := range a.Run(ctx, ai.UserMessage("what changed?")) {
 //	    render(e)
 //	}
-
+//
 // Breaking out of the range ends the exchange, the same as Interrupt: a
 // consumer that stopped reading has stopped caring about this turn.
 //
@@ -110,7 +110,7 @@ func options(req *ai.Request) []ai.Option {
 //
 // The response rather than its message, because the caller needs both halves:
 // what the model said, and why it stopped saying it.
-func (a *Agent) reason(ctx context.Context, emit func(Event), opts ...ai.Option) (*ai.Response, ai.Usage, error) {
+func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.Usage, error) {
 	var spent ai.Usage
 	var lastErr error
 
@@ -126,6 +126,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event), opts ...ai.Option)
 		idle = a.streamIdle
 	}
 
+	wait := a.retryBackoff
 	for attempt := 1; attempt <= a.maxAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
 		// refusal returns before anything is announced.
@@ -146,7 +147,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event), opts ...ai.Option)
 
 		var resp *ai.Response
 		var err error
-		for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, append(options(req), opts...)...) {
+		for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, options(req)...) {
 			quiet.Reset(idle)
 			if streamErr != nil {
 				// A failed call still spent tokens and may have produced text.
@@ -182,7 +183,11 @@ func (a *Agent) reason(ctx context.Context, emit func(Event), opts ...ai.Option)
 		if resp != nil {
 			spent.Add(resp.Usage)
 		} else if err == nil {
-			err = errors.New("agent: the stream ended without a response")
+			// Classified, not bare: five lines down this is handed to
+			// ai.IsRetryable, and a plain error there is a permanent one.
+			// ai.Collect calls the same failure retryable; so does this.
+			err = &ai.Error{Kind: ai.KindNetwork,
+				Message: "agent: the stream ended without a response"}
 		}
 
 		// Read before PostInfer can put a different error in err: a failure of
@@ -197,6 +202,13 @@ func (a *Agent) reason(ctx context.Context, emit func(Event), opts ...ai.Option)
 		switch {
 		case retry:
 			lastErr = err
+			if attempt == a.maxAttempts {
+				break // nothing to wait for
+			}
+			if err := pause(ctx, wait, err); err != nil {
+				return nil, spent, err
+			}
+			wait *= 2
 		case err != nil:
 			return nil, spent, err
 		default:
@@ -244,7 +256,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		// Arguments are model output, so they are wrong sometimes. Checking
 		// them turns a mistake the model could correct into a tool error it
 		// sees, rather than whatever the tool does with them.
-		if c.err = tool.Definition().ValidateArgs(c.Input); c.err != nil {
+		if c.err = tool.Schema().Validate(c.Input); c.err != nil {
 			continue
 		}
 
@@ -317,7 +329,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 	if len(pending) > 0 {
 		parallel := len(pending) > 1
 		for _, i := range pending {
-			if _, ok := batch[i].tool.(sequential); ok {
+			if isSequential(batch[i].tool) {
 				parallel = false
 				break
 			}
@@ -374,19 +386,10 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 	terminate := true
 	for i := range batch {
 		c := &batch[i]
-		text := c.result.Text()
-		if text == "" {
-			if c.err != nil {
-				text = c.err.Error()
-			} else {
-				// Several endpoints reject a result with no content.
-				text = "(no output)"
-			}
-		}
 		results[i] = ai.ToolResult{
 			ToolCallID: c.ID,
 			ToolName:   c.Name,
-			Content:    text,
+			Content:    Told(c.result, c.err),
 			IsError:    c.err != nil,
 		}
 		terminate = terminate && c.stop
@@ -406,7 +409,17 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 	// because two of them deriving it separately is two chances to disagree
 	// about what Interrupt reaches.
 	turnCtx, stopTurn := context.WithCancel(ctx)
-	defer stopTurn()
+	defer func() {
+		stopTurn()
+		// Put the no-op back. A CancelFunc closes over its context, so
+		// holding the finished turn's here would keep the caller's whole
+		// context chain — and everything hanging off it — alive for as long
+		// as the agent is. Between turns there is nothing to interrupt, which
+		// is what the no-op already means.
+		a.mu.Lock()
+		a.stopTurn = func() {}
+		a.mu.Unlock()
+	}()
 
 	a.mu.Lock()
 	a.stopTurn = stopTurn
@@ -456,13 +469,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 
 		calls := msg.ToolCalls()
 		if len(calls) == 0 {
-			// A model that ran out of room did not answer, whatever the text
-			// says. Reporting that as end_turn would tell a caller the reply
-			// is whole when it is cut off mid-sentence.
-			if resp.StopReason == ai.StopMaxTokens {
-				return out.stopped(StopMaxTokens)
-			}
-			return out.stopped(StopEndTurn)
+			return out.stopped(endedBecause(resp.StopReason))
 		}
 
 		results, terminate := a.act(turnCtx, emit, calls)
@@ -482,6 +489,11 @@ const (
 	// StopMaxTokens is the model running out of output room mid-answer. The
 	// text that arrived is in the conversation, and it is not a whole reply.
 	StopMaxTokens StopReason = "max_tokens"
+	// StopRefusal is the model declining to answer, or a provider's content
+	// filter stopping it. There may be text; it is not the answer.
+	StopRefusal StopReason = "refusal"
+	// StopSequence is generation stopping at one of WithStopSequences.
+	StopSequence StopReason = "stop_sequence"
 	// StopMaxSteps is the step budget running out with the model still working.
 	StopMaxSteps StopReason = "max_steps"
 	// StopTerminated is every tool in a batch asking the loop not to continue.
@@ -491,6 +503,45 @@ const (
 	// StopCanceled is the context ending mid-exchange.
 	StopCanceled StopReason = "canceled"
 )
+
+// pause waits before another attempt: as long as the endpoint asked for, or
+// the caller's doubling backoff when it did not say. Reading RetryAfter is the
+// difference between retrying and hammering — a 429 that names a delay and is
+// replayed immediately is what rate limiting exists to punish.
+func pause(ctx context.Context, backoff time.Duration, failure error) error {
+	if after := ai.RetryAfter(failure); after > 0 {
+		backoff = after
+	}
+	if backoff <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// endedBecause carries the model's reason for stopping up to the turn. Only a
+// model that chose to stop is an end_turn: one that ran out of room, refused,
+// or hit a caller's stop sequence produced something that is not a whole
+// reply, and reporting any of those as end_turn tells a caller the answer is
+// complete when it is cut off.
+func endedBecause(reason ai.StopReason) StopReason {
+	switch reason {
+	case ai.StopMaxTokens:
+		return StopMaxTokens
+	case ai.StopRefusal:
+		return StopRefusal
+	case ai.StopSequence:
+		return StopSequence
+	default:
+		return StopEndTurn
+	}
+}
 
 // stopped, failed and canceled are the three ways a turn ends, one line each at
 // the call site — so no exit can forget to say why.

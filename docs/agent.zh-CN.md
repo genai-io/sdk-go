@@ -83,7 +83,7 @@ agent 干的每件事都以 9 种类型之一出现。**有两样东西有值得
 ```
 MessageAdded                              一条消息进了对话
 MessageStart  MessageUpdate  MessageEnd   模型正在产生一条
-ToolStart     ToolUpdate     ToolEnd      一次工具调用,从提出到答复
+ToolStart                    ToolEnd      一次工具调用,从提出到答复
 TurnStart                    TurnEnd      包住它们的那一轮
 ```
 
@@ -128,9 +128,9 @@ sequenceDiagram
 MessageStart(attempt=1) → MessageEnd(err) → MessageStart(attempt=2) → … → MessageEnd → MessageAdded
 ```
 
-### 只有片段会被丢弃
+### 什么都不会丢
 
-读者跟不上时,`MessageUpdate` 和 `ToolUpdate` 会被直接丢掉——因为**每个 span 的收尾事件都带着完整值**,漏了片段的消费者最终仍会收敛到正确状态。**其余事件一律等待。** 丢掉任何一个,消费者手里的对话就和 agent 手里的不一致了。
+**什么都不会丢。** 事件在 range 那条 goroutine 上到达,所以不存在会落后的读者——agent 会等循环体跑完。承受不起拖住它的调用方,自己转发到自己的缓冲里,**多深、满了丢什么由它决定**,那才是有足够信息做这个决定的地方。
 
 承受不起拖住 agent 的读者,自己把事件转发到自己的缓冲里——丢弃策略就成了它自己的事。
 
@@ -189,7 +189,7 @@ client 自己的设置——temperature、token 上限、effort——属于构�
 ```go
 type Tool interface {
     Definition() ai.Tool
-    Run(ctx context.Context, call ai.ToolCall, emit func(Result)) (Result, error)
+    Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 ```
 
@@ -199,7 +199,7 @@ type Tool interface {
 readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
     func(ctx context.Context, args struct {
         Path string `json:"path" description:"要读取的路径"`
-    }, emit func(agent.Result)) (agent.Result, error) {
+    }) (agent.Result, error) {
         b, err := os.ReadFile(args.Path)
         if err != nil {
             return agent.Result{}, err
@@ -211,8 +211,6 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 返回 error 就是工具失败的方式:循环会把它变成模型看得见、能自己纠正的工具错误,而不是让整个 turn 失败。
 
 **`Result` 把两个受众分开。** `Content` 是告诉模型的;`Details` 是给界面看、模型永远看不到的——一段 diff、一个文件列表、一个退出码。**一个为人排版的工具,最后会把那些排版发给模型,而且此后每一轮都为它付费。**
-
-**进度**通过 `emit` 回调作为 `ToolUpdate` 发出,并且**永远不会阻塞发出它的工具**。
 
 **并行。** 一批工具默认并发执行。`agent.Sequential(t)` 标记一个不能与别人同时跑的工具,而**一批里只要有一个这样的,整批就串行**——一批工具只有在每个成员都安全时才能并行。
 

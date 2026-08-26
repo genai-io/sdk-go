@@ -11,7 +11,7 @@ import "github.com/genai-io/sdk-go/pkg/ai"
 //
 //	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
-//	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
+//	ToolStart                    ToolEnd      a tool call, asked to answered
 //	TurnStart                    TurnEnd      the exchange around them
 type Event interface{ event() }
 
@@ -62,16 +62,6 @@ type ToolStart struct {
 }
 
 func (ToolStart) event() {}
-
-// ToolUpdate is a partial result from a tool that reports as it works. Unlike
-// a message fragment it replaces rather than appends. Dropped when a reader
-// falls behind; ToolEnd carries the finished result.
-type ToolUpdate struct {
-	ID      string
-	Partial Result
-}
-
-func (ToolUpdate) event() {}
 
 // ToolEnd closes one tool execution with what the tool produced, emitted
 // before PostTool runs so a reader is not waiting on hooks — a hook that

@@ -48,8 +48,7 @@ func main() {
 			"Working directory: %s\nToday: %s", cwd, time.Now().Format("2006-01-02"))
 
 	shell := agent.ToolFunc("shell", "Run a read-only shell command and return its output.",
-		func(ctx context.Context, args shellArgs, emit func(agent.Result)) (agent.Result, error) {
-			emit(agent.TextResult("running: " + args.Command))
+		func(ctx context.Context, args shellArgs) (agent.Result, error) {
 			out, err := exec.CommandContext(ctx, "sh", "-c", args.Command).CombinedOutput()
 			if err != nil {
 				// Returning the error lets the model read what went wrong and

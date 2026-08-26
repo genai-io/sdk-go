@@ -45,7 +45,7 @@
 //
 //	MessageAdded                              a message entered the conversation
 //	MessageStart  MessageUpdate  MessageEnd   the model producing one
-//	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
+//	ToolStart                    ToolEnd      a tool call, asked to answered
 //	TurnStart                    TurnEnd      the exchange around them
 //
 // A span always comes in pairs, and only what takes time has one. What entered
@@ -59,9 +59,8 @@
 // TurnEnd carries the summary: what the turn cost and why it stopped. It holds
 // nothing a consumer could fold out of the stream itself.
 //
-// Only MessageUpdate and ToolUpdate are dropped when a consumer falls behind,
-// because the event that closes each span carries the complete value.
-// Everything else waits.
+// Nothing is dropped: the events arrive on the ranging goroutine, so there is
+// no reader to fall behind.
 //
 // Three words are used precisely, because agent frameworks disagree about
 // them. A *turn* is an exchange: someone said something, and the loop runs

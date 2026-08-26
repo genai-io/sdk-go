@@ -107,7 +107,7 @@ way: it starts, it may report as it goes, it ends.
 ```
 MessageAdded                              a message entered the conversation
 MessageStart  MessageUpdate  MessageEnd   the model producing one
-ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
+ToolStart                    ToolEnd      a tool call, asked to answered
 TurnStart                    TurnEnd      the exchange around them
 ```
 
@@ -231,7 +231,7 @@ A tool is two methods:
 ```go
 type Tool interface {
     Definition() ai.Tool
-    Run(ctx context.Context, call ai.ToolCall, emit func(Result)) (Result, error)
+    Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 ```
 
@@ -243,7 +243,7 @@ to describe different things:
 readFile := agent.ToolFunc("read_file", "Read a file from the working tree.",
     func(ctx context.Context, args struct {
         Path string `json:"path" description:"the path to read"`
-    }, emit func(agent.Result)) (agent.Result, error) {
+    }) (agent.Result, error) {
         b, err := os.ReadFile(args.Path)
         if err != nil {
             return agent.Result{}, err
@@ -259,9 +259,6 @@ model can see and correct, rather than failing the turn.
 `Details` is what the interface shows and the model never sees — a diff, a file
 list, an exit code. A tool that formats for a person ends up sending that
 formatting to the model, and paying for it every turn thereafter.
-
-**Progress** goes out as `ToolUpdate` through the `emit` callback, and never
-blocks the tool that sent it.
 
 **Parallelism.** A batch runs concurrently by default. `agent.Sequential(t)`
 marks a tool that must not run beside others, and one of them in a batch makes

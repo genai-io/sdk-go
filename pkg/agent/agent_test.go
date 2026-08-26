@@ -182,7 +182,7 @@ func TestTurnWithAToolRunsASecondInference(t *testing.T) {
 	echo := agent.ToolFunc("echo", "Echo the argument.",
 		func(_ context.Context, args struct {
 			Text string `json:"text"`
-		}, _ func(agent.Result)) (agent.Result, error) {
+		}) (agent.Result, error) {
 			return agent.TextResult("echoed: " + args.Text), nil
 		})
 
@@ -229,7 +229,7 @@ func TestTurnWithAToolRunsASecondInference(t *testing.T) {
 // told and not what the stream reported, and the two are allowed to differ.
 func TestToolEndCarriesTheToolsOwnResult(t *testing.T) {
 	echo := agent.ToolFunc("echo", "Echo it.",
-		func(_ context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+		func(_ context.Context, _ struct{}) (agent.Result, error) {
 			return agent.TextResult("raw"), nil
 		})
 
@@ -343,7 +343,7 @@ func TestParallelToolsEndInCompletionOrderButRecordInSourceOrder(t *testing.T) {
 	wait := agent.ToolFunc("wait", "Wait for a signal.",
 		func(ctx context.Context, args struct {
 			Key string `json:"key"`
-		}, _ func(agent.Result)) (agent.Result, error) {
+		}) (agent.Result, error) {
 			<-release[args.Key]
 			return agent.TextResult("done: " + args.Key), nil
 		})
@@ -398,7 +398,7 @@ func TestTheGateSeesTheMessageThatRequestedTheCall(t *testing.T) {
 	}}, ai.Model{ID: "stub", API: "stub"})
 
 	noop := agent.ToolFunc("noop", "Do nothing.",
-		func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		func(context.Context, struct{}) (agent.Result, error) {
 			return agent.TextResult("ok"), nil
 		})
 
@@ -428,7 +428,7 @@ func TestTheGateSeesTheMessageThatRequestedTheCall(t *testing.T) {
 
 func TestABlockedCallBecomesAToolErrorTheModelCanRead(t *testing.T) {
 	dangerous := agent.ToolFunc("rm", "Delete everything.",
-		func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		func(context.Context, struct{}) (agent.Result, error) {
 			t.Fatal("a blocked tool must not run")
 			return agent.Result{}, nil
 		})
@@ -481,7 +481,7 @@ func TestBadArgumentsAreCaughtBeforeTheToolRuns(t *testing.T) {
 	strict := agent.ToolFunc("strict", "Needs a count.",
 		func(_ context.Context, args struct {
 			Count int `json:"count"`
-		}, _ func(agent.Result)) (agent.Result, error) {
+		}) (agent.Result, error) {
 			t.Fatal("the tool ran on arguments that do not match its schema")
 			return agent.Result{}, nil
 		})
@@ -501,7 +501,7 @@ func TestBadArgumentsAreCaughtBeforeTheToolRuns(t *testing.T) {
 
 func TestMaxStepsStopsTheExchange(t *testing.T) {
 	loop := agent.ToolFunc("again", "Ask again.",
-		func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		func(context.Context, struct{}) (agent.Result, error) {
 			return agent.TextResult("again"), nil
 		})
 
@@ -531,7 +531,7 @@ func TestMaxStepsStopsTheExchange(t *testing.T) {
 
 func TestATerminatingToolEndsTheExchangeWithoutAnotherCall(t *testing.T) {
 	done := agent.ToolFunc("finish", "Report completion.",
-		func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		func(context.Context, struct{}) (agent.Result, error) {
 			return agent.Result{Content: ai.TextContent("finished"), Terminate: true}, nil
 		})
 
@@ -564,7 +564,7 @@ func TestATerminatingToolEndsTheExchangeWithoutAnotherCall(t *testing.T) {
 // weaken the gate.
 func TestTheFirstRefusalIsFinal(t *testing.T) {
 	tool := agent.ToolFunc("rm", "Delete things.",
-		func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		func(context.Context, struct{}) (agent.Result, error) {
 			t.Fatal("a refused tool ran")
 			return agent.Result{}, nil
 		})
@@ -610,7 +610,7 @@ func TestHooksChainTheirRewrites(t *testing.T) {
 	tool := agent.ToolFunc("echo", "Echo it back.",
 		func(_ context.Context, args struct {
 			Text string `json:"text"`
-		}, _ func(agent.Result)) (agent.Result, error) {
+		}) (agent.Result, error) {
 			got = args.Text
 			return agent.TextResult(args.Text), nil
 		})
@@ -658,7 +658,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 
 		{"the step budget ran out", func(t *testing.T) *agent.Agent {
 			again := agent.ToolFunc("again", "Ask again.",
-				func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+				func(context.Context, struct{}) (agent.Result, error) {
 					return agent.TextResult("again"), nil
 				})
 			scripts := make([][]ai.Delta, 8)
@@ -675,7 +675,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 
 		{"a tool asked to stop", func(t *testing.T) *agent.Agent {
 			done := agent.ToolFunc("finish", "Report completion.",
-				func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+				func(context.Context, struct{}) (agent.Result, error) {
 					return agent.Result{Content: ai.TextContent("finished"), Terminate: true}, nil
 				})
 			return newAgent(t, &scripted{scripts: [][]ai.Delta{toolCall("c1", "finish", `{}`)}},
@@ -741,7 +741,7 @@ func TestAFailedAttemptStillCountsWhatItCost(t *testing.T) {
 // prunes history has to see the history each time it grew.
 func TestPreInferRunsOnEveryStep(t *testing.T) {
 	echo := agent.ToolFunc("echo", "Echo it back.",
-		func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		func(context.Context, struct{}) (agent.Result, error) {
 			return agent.TextResult("ok"), nil
 		})
 
@@ -777,10 +777,10 @@ func TestPreInferRunsOnEveryStep(t *testing.T) {
 // the agent keeps what it had.
 func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	tools := []agent.Tool{
-		agent.ToolFunc("keep", "Stays.", func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		agent.ToolFunc("keep", "Stays.", func(context.Context, struct{}) (agent.Result, error) {
 			return agent.TextResult("ok"), nil
 		}),
-		agent.ToolFunc("hide", "Hidden for one call.", func(context.Context, struct{}, func(agent.Result)) (agent.Result, error) {
+		agent.ToolFunc("hide", "Hidden for one call.", func(context.Context, struct{}) (agent.Result, error) {
 			return agent.TextResult("ok"), nil
 		}),
 	}
@@ -1023,7 +1023,7 @@ func TestPreInferHooksChain(t *testing.T) {
 // offered the field.
 func TestAPreInferHookEditsTheAgentsHalfOfTheRequest(t *testing.T) {
 	weather := agent.ToolFunc("weather", "Look up the weather.",
-		func(_ context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+		func(_ context.Context, _ struct{}) (agent.Result, error) {
 			return agent.TextResult("fine"), nil
 		})
 
@@ -1435,7 +1435,7 @@ func TestATruncatedAnswerSaysSo(t *testing.T) {
 // message is the tool results, not the model's.
 func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 	stop := agent.ToolFunc("finish", "Finish the task.",
-		func(_ context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+		func(_ context.Context, _ struct{}) (agent.Result, error) {
 			return agent.Result{Content: ai.TextContent("done"), Terminate: true}, nil
 		})
 
@@ -1532,7 +1532,7 @@ func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
 func TestAConcurrentExchangeIsRefused(t *testing.T) {
 	release := make(chan struct{})
 	blocking := agent.ToolFunc("wait", "Wait.",
-		func(ctx context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+		func(ctx context.Context, _ struct{}) (agent.Result, error) {
 			<-release
 			return agent.TextResult("done"), nil
 		})
@@ -1575,7 +1575,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 // boundary, which is the only place changing what the model sees is safe.
 func TestInjectedMessagesJoinTheExchange(t *testing.T) {
 	echo := agent.ToolFunc("echo", "Echo.",
-		func(_ context.Context, _ struct{}, _ func(agent.Result)) (agent.Result, error) {
+		func(_ context.Context, _ struct{}) (agent.Result, error) {
 			return agent.TextResult("echoed"), nil
 		})
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
+	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 // Recorder turns an agent's events into stored entries.
@@ -36,9 +37,6 @@ func (r *Recorder) Handle(e agent.Event) {
 		r.mu.Lock()
 		r.turn = v.Turn
 		r.mu.Unlock()
-
-	case agent.MessagesReplaced:
-		r.write(Entry{Type: EntrySnapshot, Snapshot: v.Messages})
 
 	case agent.MessageAdded:
 		msg := v.Message
@@ -99,6 +97,17 @@ func (r *Recorder) Handle(e agent.Event) {
 		}
 		r.write(Entry{Type: EntryTurn, Turn: &rec})
 	}
+}
+
+// Snapshot records the conversation as it stands, so a fold starts from here
+// rather than from everything appended before.
+//
+// Call it after SetMessages: compaction and restore replace the conversation,
+// and a session told only what was appended would give back what the agent
+// threw away. Nothing on the event stream carries this, because the agent does
+// not know its history was replaced — the caller who replaced it does.
+func (r *Recorder) Snapshot(msgs []ai.Message) {
+	r.write(Entry{Type: EntrySnapshot, Snapshot: msgs})
 }
 
 // Err reports the first write that failed.

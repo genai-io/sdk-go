@@ -38,7 +38,7 @@ func options(req *ai.Request) []ai.Option {
 //
 // The response rather than its message, because the caller needs both halves:
 // what the model said, and why it stopped saying it.
-func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai.Usage, error) {
+func (x *exchange) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai.Usage, error) {
 	var spent ai.Usage
 	var lastErr error
 
@@ -47,21 +47,21 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai
 	// streamIdle between events once it has. Zero means never — a duration no
 	// timer reaches, so nothing below has a case for it.
 	first, idle := never, never
-	if a.streamFirst > 0 {
-		first = a.streamFirst
+	if x.a.streamFirst > 0 {
+		first = x.a.streamFirst
 	}
-	if a.streamIdle > 0 {
-		idle = a.streamIdle
+	if x.a.streamIdle > 0 {
+		idle = x.a.streamIdle
 	}
 
-	for attempt := 1; attempt <= a.maxAttempts; attempt++ {
+	for attempt := 1; attempt <= x.a.maxAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
 		// refusal returns before anything is announced.
-		req := a.request()
-		if err := a.preInfer(ctx, req); err != nil {
+		req := x.a.request()
+		if err := x.a.preInfer(ctx, req); err != nil {
 			return nil, spent, err
 		}
-		a.emit(MessageStart{Attempt: attempt, Request: req})
+		x.emit(MessageStart{Attempt: attempt, Request: req})
 
 		// The stream gets a context of its own so a stall can end it without
 		// ending the turn.
@@ -74,7 +74,7 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai
 
 		var resp *ai.Response
 		var err error
-		for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, append(options(req), opts...)...) {
+		for evt, streamErr := range x.a.client.Stream(streamCtx, req.Messages, append(options(req), opts...)...) {
 			quiet.Reset(idle)
 			if streamErr != nil {
 				// A failed call still spent tokens and may have produced text.
@@ -85,7 +85,7 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai
 			// conclusion, announced below once PostInfer has had it.
 			switch evt.Type {
 			case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd:
-				a.emit(MessageUpdate{Delta: evt})
+				x.emit(MessageUpdate{Delta: evt})
 			case ai.EventDone:
 				resp = evt.Response
 			}
@@ -102,7 +102,7 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai
 		if ctx.Err() != nil {
 			// Abandoned, not failed — but the span still closes, because the
 			// reader that saw it open has not gone anywhere.
-			a.emit(MessageEnd{Response: resp, Err: ctx.Err()})
+			x.emit(MessageEnd{Response: resp, Err: ctx.Err()})
 			return nil, spent, ctx.Err()
 		}
 
@@ -117,10 +117,10 @@ func (a *Agent) reason(ctx context.Context, opts ...ai.Option) (*ai.Response, ai
 		// the call earns another go, an objection to the answer does not.
 		retry := err != nil && ai.IsRetryable(err)
 		if err == nil {
-			err = a.postInfer(ctx, resp)
+			err = x.a.postInfer(ctx, resp)
 		}
 
-		a.emit(MessageEnd{Response: resp, Err: err})
+		x.emit(MessageEnd{Response: resp, Err: err})
 
 		switch {
 		case retry:
@@ -150,9 +150,9 @@ type call struct {
 
 // act runs the tools a model asked for: vet the batch, run what survives,
 // close each as it lands, reply.
-func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, bool) {
+func (x *exchange) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, bool) {
 	batch := make([]call, len(calls))
-	messages := a.Messages()
+	messages := x.a.Messages()
 
 	// Vet: decided before anything runs, because the batch cannot choose a
 	// concurrency until it knows every tool. One at a time on this goroutine,
@@ -160,9 +160,9 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 	for i := range calls {
 		batch[i] = call{ToolCall: calls[i]}
 		c := &batch[i]
-		a.emit(ToolStart{ID: c.ID, Name: c.Name, Args: c.Input})
+		x.emit(ToolStart{ID: c.ID, Name: c.Name, Args: c.Input})
 
-		tool, ok := a.toolNamed(c.Name)
+		tool, ok := x.a.toolNamed(c.Name)
 		if !ok {
 			c.err = fmt.Errorf("no tool named %q is available", c.Name)
 			continue
@@ -178,7 +178,7 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 
 		// First refusal is final: a gate that gets weaker as you add to it is
 		// not a gate.
-		for _, h := range a.hookSet() {
+		for _, h := range x.a.hookSet() {
 			if h.PreTool == nil {
 				continue
 			}
@@ -208,10 +208,10 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 	// Closing a call: its span, the after-hooks, its vote. Refused above or
 	// finished below, a call closes the same way.
 	finish := func(c *call) {
-		a.emit(ToolEnd{ID: c.ID, Result: c.result, Err: c.err})
+		x.emit(ToolEnd{ID: c.ID, Result: c.result, Err: c.err})
 
 		// Chained: each hook is handed what the one before it produced.
-		for _, h := range a.hookSet() {
+		for _, h := range x.a.hookSet() {
 			if h.PostTool == nil {
 				continue
 			}
@@ -311,7 +311,7 @@ func (a *Agent) act(ctx context.Context, calls []ai.ToolCall) ([]ai.ToolResult, 
 // alive, which is what Interrupt does. Reporting does not go through it —
 // emitting asks the run whether anyone is listening, and an interrupted turn
 // still has a reader.
-func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
+func (x *exchange) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 	// The turn's own context, so Interrupt can end this exchange without
 	// ending whatever called it. Derived here rather than by the callers,
 	// because two of them deriving it separately is two chances to disagree
@@ -319,26 +319,26 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 	turnCtx, stopTurn := context.WithCancel(ctx)
 	defer stopTurn()
 
-	a.mu.Lock()
-	a.stopTurn = stopTurn
-	a.mu.Unlock()
+	x.a.mu.Lock()
+	x.a.stopTurn = stopTurn
+	x.a.mu.Unlock()
 
-	a.turnCount.Add(1)
-	a.emit(TurnStart{Turn: int(a.turnCount.Load())})
+	x.a.turnCount.Add(1)
+	x.emit(TurnStart{Turn: int(x.a.turnCount.Load())})
 
 	// The count is read again rather than pinned: only this function advances
 	// it, so both ends of the turn carry the same number.
 	defer func() {
-		out.Turn = int(a.turnCount.Load())
-		a.emit(out)
+		out.Turn = int(x.a.turnCount.Load())
+		x.emit(out)
 	}()
 
 	for _, m := range in {
-		a.add(m)
+		x.add(m)
 	}
 
 	for step := 0; ; step++ {
-		if a.maxSteps > 0 && step >= a.maxSteps {
+		if x.a.maxSteps > 0 && step >= x.a.maxSteps {
 			return out.stopped(StopMaxSteps)
 		}
 
@@ -348,11 +348,11 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 
 		// Anything added while the last tools ran enters here rather than
 		// mid-stream, and is reported here rather than where it was added.
-		for _, m := range a.taken() {
-			a.add(m)
+		for _, m := range x.a.taken() {
+			x.add(m)
 		}
 
-		resp, spent, err := a.reason(turnCtx)
+		resp, spent, err := x.reason(turnCtx)
 		out.Usage.Add(spent)
 		switch {
 		case turnCtx.Err() != nil:
@@ -363,7 +363,7 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 
 		msg := resp.Message()
 		out.Message = msg
-		a.add(msg)
+		x.add(msg)
 
 		calls := msg.ToolCalls()
 		if len(calls) == 0 {
@@ -376,8 +376,8 @@ func (a *Agent) turn(ctx context.Context, in []ai.Message) (out TurnEnd) {
 			return out.stopped(StopEndTurn)
 		}
 
-		results, terminate := a.act(turnCtx, calls)
-		a.add(ai.ToolResultsMessage(results...))
+		results, terminate := x.act(turnCtx, calls)
+		x.add(ai.ToolResultsMessage(results...))
 		if terminate {
 			return out.stopped(StopTerminated)
 		}

@@ -9,8 +9,8 @@ import (
 )
 
 // Compaction replaces the conversation, and a session that only folded what was
-// appended would restore what the agent threw away. The next exchange reports
-// the replacement, and the fold starts over from it.
+// appended would restore what the agent threw away. A snapshot is the reset the
+// fold needs: everything before one is what the agent no longer has.
 func TestCompactionSurvivesARestore(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
@@ -22,7 +22,12 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 	}
 	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
 
-	a.SetMessages([]ai.Message{ai.UserMessage("(summary of the above)")})
+	// Compaction replaces the conversation, and the caller who replaced it is
+	// the one who knows: it tells the session in the same breath.
+	summary := []ai.Message{ai.UserMessage("(summary of the above)")}
+	a.SetMessages(summary)
+	rec.Snapshot(summary)
+
 	converse(t, a, rec, ai.UserMessage("third"))
 
 	restored, err := session.Messages(ctx, st, rec.ID())

@@ -80,7 +80,7 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 
 ## 事件
 
-agent 干的每件事都以 9 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
+agent 干的每件事都以 8 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
 
 ```
 MessageAdded                              一条消息进了对话
@@ -268,9 +268,8 @@ type Store interface {
 ```
 pkg/agent/
   agent.go     agent 是什么:状态、构造选项、能读能改的东西
-  run.go       一次运转:Run、emit、add
-  turn.go      一次交换:reason、act,以及它们之间的循环
-  event.go     11 个事件
+  run.go       一次交换:Run,以及它背后 reason/act 的循环
+  event.go     8 个事件
   hook.go      4 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   session/     事件 → 持久条目,以及折回来

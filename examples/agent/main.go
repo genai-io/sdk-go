@@ -108,7 +108,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("\n%v", err)
 		}
-		rec.Handle(e)
+		rec.Handle(ctx, e)
 		render(e)
 		switch v := e.(type) {
 		case agent.MessageStart:

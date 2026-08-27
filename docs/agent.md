@@ -121,13 +121,13 @@ other thing, and ends everything.
 
 ## Events
 
-Everything the agent does arrives as one of nine types. Two things have a life
+Everything the agent does arrives as one of ten types. Two things have a life
 worth following — a message and a tool call — and each is reported the same
 way: it starts, it may report as it goes, it ends.
 
 ```
-MessageAdded                              a message entered the conversation
-MessageStart  MessageUpdate  MessageEnd   the model producing one
+MessageAdded  MessagesReplaced            the conversation changing
+MessageStart  MessageUpdate  MessageEnd   the model producing a message
 ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
 TurnStart                    TurnEnd      the exchange around them
 ```
@@ -135,9 +135,16 @@ TurnStart                    TurnEnd      the exchange around them
 The set is closed — the `event()` method is unexported, so no other package can
 add to it — and a consumer switches over it knowing that list is all there is.
 
-**The conversation is the fold of `MessageAdded`.** That is the one rule a
-consumer needs: replay those in order and you have exactly what the agent
-holds. Everything else reports work in progress.
+**The conversation is the fold of the first row.** Replay `MessageAdded` in
+order and you have what the agent holds; a `MessagesReplaced` starts the fold
+over, because everything announced before one is what the agent threw away.
+Everything else reports work in progress.
+
+Every event that belongs to a turn carries its number, and every event that
+closes a span carries what opened it — `MessageEnd` its request, `ToolEnd` its
+name and arguments. A consumer reads what happened off the event rather than
+rebuilding it from what came before, which is why recording one is a
+translation and not a state machine.
 
 One exchange, from the outside:
 
@@ -320,7 +327,7 @@ rec, history, err := session.Open(ctx, store, resume)   // "" starts a new one
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.Handle(e)   // write first
+    rec.Handle(ctx, e)   // write first
     render(e)       // then paint
 }
 ```
@@ -343,18 +350,21 @@ become one inference entry, `ToolStart`+`ToolEnd` one tool entry. `MessageAdded`
 is stored on its own, and folding those back is what restore is. Fragments are
 not stored — the closing event already carried the whole value.
 
-**`SetMessages` is outside the fold.** Compaction and restore swap the
-conversation whole, and nothing on the stream says so, because the agent does
-not know its history was replaced — the caller who replaced it does:
+**Replacing the conversation is an event too.** Compaction swaps the whole
+history, and a fold over `MessageAdded` alone would hand back what was thrown
+away. So `SetMessages` is announced — as `MessagesReplaced`, at the start of
+the next exchange, which is when the agent next has anywhere to say it — and
+the recorder stores it as the point a fold starts from:
 
 ```go
 summary := compact(a.Messages())
-a.SetMessages(summary)
-rec.Snapshot(summary)   // the fold starts here now
+a.SetMessages(summary)   // that is the whole of it
 ```
 
-Forget the second line and the session gives back what the agent threw away, so
-the next restore is the conversation you compacted away.
+There is no second line to forget. Announcing it at the next exchange rather
+than at the call means a process that dies between the two restores the
+conversation as it stood before compaction — which is a lost optimisation, not
+a broken history.
 
 `Store` is four methods, and deliberately no more:
 

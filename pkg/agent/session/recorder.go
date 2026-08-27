@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -10,53 +11,72 @@ import (
 )
 
 // Recorder turns an agent's events into stored entries.
+//
+// It holds no state machine. Every event says which turn it belongs to and
+// carries what opened it, so recording one is a translation and not a
+// reconstruction — which is also why Handle must not be called concurrently
+// for a session and needs no lock to say so.
 type Recorder struct {
 	store Store
 	id    string
 
-	mu       sync.Mutex
-	open     agent.MessageStart
-	openTool map[string]agent.ToolStart
-	turn     int // the turn now running, from the last TurnStart
-	err      error
+	// turnsBefore is how many exchanges this session already held when it was
+	// opened. The agent counts from one per run; entries are numbered from
+	// the session's beginning.
+	turnsBefore int
+
+	// restored is the conversation Open handed back, held until the agent
+	// announces it, so that resuming does not record a copy of what it read.
+	restored []ai.Message
+
+	mu  sync.Mutex
+	err error
 }
 
 // NewRecorder returns a recorder writing into one session.
 func NewRecorder(store Store, id string) *Recorder {
-	return &Recorder{store: store, id: id, openTool: map[string]agent.ToolStart{}}
+	return &Recorder{store: store, id: id}
 }
 
-// Handle records one event. Call it from your event loop before anything that
-// might be slow: a session that falls behind the agent is a session that loses
-// the last thing that happened.
-func (r *Recorder) Handle(e agent.Event) {
-	switch v := e.(type) {
-	case agent.TurnStart:
-		// Messages carry no turn number of their own: the events arrive in
-		// order, so the turn is whichever one started last.
-		r.mu.Lock()
-		r.turn = v.Turn
-		r.mu.Unlock()
+// Handle records one event. Call it from your event loop, in order, before
+// anything that might be slow: a session that falls behind the agent is a
+// session that loses the last thing that happened.
+//
+// The context is the store's — a store that is not the local filesystem can
+// block, and this sits on the loop delivering events.
+//
+// After the first failed write it does nothing. A session is read back by
+// folding it, and a fold with a hole in it is not a shorter conversation but a
+// broken one: drop the message carrying a tool call and the results answering
+// it are orphaned, which is a conversation no provider will accept. Stopping
+// leaves a prefix that still folds; carrying on does not. Err says whether
+// that happened.
+func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
+	if r.Err() != nil {
+		return
+	}
 
+	switch v := e.(type) {
 	case agent.MessageAdded:
 		msg := v.Message
-		r.write(Entry{Type: EntryMessage, Message: &msg})
+		r.write(ctx, Entry{Type: EntryMessage, Message: &msg})
 
-	case agent.MessageStart:
-		r.mu.Lock()
-		r.open = v
-		r.mu.Unlock()
+	case agent.MessagesReplaced:
+		// The one Open handed over is not news: it was read from here.
+		if r.restored != nil {
+			same := reflect.DeepEqual(r.restored, v.Messages)
+			r.restored = nil
+			if same {
+				return
+			}
+		}
+		r.write(ctx, Entry{Type: EntrySnapshot, Snapshot: v.Messages})
 
 	case agent.MessageEnd:
-		r.mu.Lock()
-		started, turn := r.open, r.turn
-		r.open = agent.MessageStart{}
-		r.mu.Unlock()
-
-		rec := Inference{Turn: turn, Attempt: started.Attempt}
-		if req := started.Request; req != nil {
-			rec.System = req.System
-			for _, t := range req.Tools {
+		rec := Inference{Turn: r.turn(v.Turn), Attempt: v.Attempt}
+		if v.Request != nil {
+			rec.System = v.Request.System
+			for _, t := range v.Request.Tools {
 				rec.Tools = append(rec.Tools, t.Schema.Name)
 			}
 		}
@@ -68,57 +88,40 @@ func (r *Recorder) Handle(e agent.Event) {
 		if v.Err != nil {
 			rec.Error = v.Err.Error()
 		}
-		r.write(Entry{Type: EntryInference, Inference: &rec})
-
-	case agent.ToolStart:
-		r.mu.Lock()
-		r.openTool[v.ID] = v
-		r.mu.Unlock()
+		r.write(ctx, Entry{Type: EntryInference, Inference: &rec})
 
 	case agent.ToolEnd:
-		r.mu.Lock()
-		started := r.openTool[v.ID]
-		delete(r.openTool, v.ID)
-		r.mu.Unlock()
-
 		// The same text the model was told, from the same function, so the
 		// record cannot come to disagree with the conversation.
-		rec := Tool{ID: v.ID, Name: started.Name, Args: started.Args,
-			Content: agent.Told(v.Result, v.Err), IsError: v.Err != nil}
-		r.write(Entry{Type: EntryTool, Tool: &rec})
+		r.write(ctx, Entry{Type: EntryToolRun, ToolRun: &ToolRun{
+			Turn: r.turn(v.Turn), ID: v.ID, Name: v.Name, Args: v.Args,
+			Content: agent.Told(v.Result, v.Err), IsError: v.Err != nil,
+		}})
 
 	case agent.TurnEnd:
-		rec := Turn{Turn: v.Turn, StopReason: v.StopReason, Usage: v.Usage}
+		rec := Exchange{Turn: r.turn(v.Turn), StopReason: v.StopReason, Usage: v.Usage}
 		if v.Err != nil {
 			rec.Err = v.Err.Error()
 		}
-		r.write(Entry{Type: EntryTurn, Turn: &rec})
+		r.write(ctx, Entry{Type: EntryExchange, Exchange: &rec})
 	}
 }
 
-// Snapshot records the conversation as it stands, so a fold starts from here
-// rather than from everything appended before.
-//
-// Call it after SetMessages: compaction and restore replace the conversation,
-// and a session told only what was appended would give back what the agent
-// threw away. Nothing on the event stream carries this, because the agent does
-// not know its history was replaced — the caller who replaced it does.
-func (r *Recorder) Snapshot(msgs []ai.Message) {
-	r.write(Entry{Type: EntrySnapshot, Snapshot: msgs})
-}
+// turn maps the agent's per-run number onto this session's.
+func (r *Recorder) turn(n int) int { return r.turnsBefore + n }
 
-// Err reports the first write that failed.
+// Err reports the write that stopped recording, if one did.
 func (r *Recorder) Err() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.err
 }
 
-func (r *Recorder) write(e Entry) {
+func (r *Recorder) write(ctx context.Context, e Entry) {
 	if e.At.IsZero() {
 		e.At = time.Now().UTC()
 	}
-	if err := r.store.Append(context.Background(), r.id, e); err != nil {
+	if err := r.store.Append(ctx, r.id, e); err != nil {
 		r.mu.Lock()
 		if r.err == nil {
 			r.err = err

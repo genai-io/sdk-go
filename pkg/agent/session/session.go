@@ -10,6 +10,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"slices"
 	"time"
@@ -51,10 +52,10 @@ const (
 	// EntryInference is one model call: what was asked, what it cost, how it
 	// ended. Not needed to resume; needed to explain and to bill.
 	EntryInference EntryType = "inference"
-	// EntryTool is one tool execution.
-	EntryTool EntryType = "tool"
-	// EntryTurn closes one exchange with its outcome.
-	EntryTurn EntryType = "turn"
+	// EntryToolRun is one tool execution.
+	EntryToolRun EntryType = "tool"
+	// EntryExchange closes one exchange with its outcome.
+	EntryExchange EntryType = "exchange"
 )
 
 // Entry is one durable record. Seq orders it within its session and is
@@ -67,8 +68,28 @@ type Entry struct {
 	Message   *ai.Message  `json:"message,omitempty"`
 	Snapshot  []ai.Message `json:"snapshot,omitempty"`
 	Inference *Inference   `json:"inference,omitempty"`
-	Tool      *Tool        `json:"tool,omitempty"`
-	Turn      *Turn        `json:"turn,omitempty"`
+	ToolRun   *ToolRun     `json:"tool,omitempty"`
+	Exchange  *Exchange    `json:"exchange,omitempty"`
+}
+
+// Payload reports whether the entry carries the thing its Type says it does.
+// A store is a wire format, and a wire format can be given anything: an entry
+// whose type and payload disagree is a record of nothing, and folding one
+// silently is how a conversation comes back with a hole in it.
+func (e Entry) Payload() bool {
+	switch e.Type {
+	case EntryMessage:
+		return e.Message != nil
+	case EntrySnapshot:
+		return e.Snapshot != nil
+	case EntryInference:
+		return e.Inference != nil
+	case EntryToolRun:
+		return e.ToolRun != nil
+	case EntryExchange:
+		return e.Exchange != nil
+	}
+	return false
 }
 
 // Inference is one model call as it is kept.
@@ -83,9 +104,12 @@ type Inference struct {
 	Error      string        `json:"error,omitempty"`
 }
 
-// Tool is one tool execution as it is kept. Details is dropped: it is for an
-// interface that is no longer running.
-type Tool struct {
+// ToolRun is one tool execution as it is kept. It is not called Tool: a tool
+// is a thing that can be run, and ai and agent both have that type already —
+// this is the record of one having been. Result.Details is dropped, being for
+// an interface that is no longer running.
+type ToolRun struct {
+	Turn    int    `json:"turn"`
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Args    string `json:"args,omitempty"`
@@ -93,10 +117,12 @@ type Tool struct {
 	IsError bool   `json:"is_error,omitempty"`
 }
 
-// Turn is one exchange as it is kept. How many inferences it took and how many
-// tools ran are not fields: the Inference and Tool entries of this same session
-// are where those are counted from.
-type Turn struct {
+// Exchange is one turn as it is kept — the word the agent's own TurnStart and
+// TurnEnd bracket. It is not called Turn, because Turn.Turn is not a name.
+// How many inferences it took and how many tools ran are not fields: the
+// Inference and ToolRun entries of this same session are where those are
+// counted from.
+type Exchange struct {
 	Turn       int              `json:"turn"`
 	StopReason agent.StopReason `json:"stop_reason,omitempty"`
 	Usage      ai.Usage         `json:"usage"`
@@ -126,19 +152,36 @@ type Store interface {
 // append, and a snapshot starts it over, because what came before one of those
 // is what the agent threw away.
 func Messages(ctx context.Context, store Store, id string) ([]ai.Message, error) {
+	msgs, _, err := fold(ctx, store, id)
+	return msgs, err
+}
+
+// fold reads a session once and answers both questions asked of it: what the
+// conversation is, and how many exchanges it has held. The second is not
+// derivable from the first — a snapshot resets the conversation and not the
+// history — and reading the entries twice to learn it would be reading them
+// twice.
+func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error) {
 	var msgs []ai.Message
+	var turns int
 	for entry, err := range store.Entries(ctx, id) {
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		switch {
-		case entry.Type == EntrySnapshot:
+		if !entry.Payload() {
+			return nil, 0, fmt.Errorf("session: %s entry %d says %q and carries nothing",
+				id, entry.Seq, entry.Type)
+		}
+		switch entry.Type {
+		case EntrySnapshot:
 			msgs = slices.Clone(entry.Snapshot)
-		case entry.Type == EntryMessage && entry.Message != nil:
+		case EntryMessage:
 			msgs = append(msgs, *entry.Message)
+		case EntryExchange:
+			turns++
 		}
 	}
-	return msgs, nil
+	return msgs, turns, nil
 }
 
 // Open starts a session or resumes one, returning a Recorder to feed events to
@@ -163,9 +206,20 @@ func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message,
 	if _, err := store.Meta(ctx, id); err != nil {
 		return nil, nil, err
 	}
-	msgs, err := Messages(ctx, store, id)
+	msgs, turns, err := fold(ctx, store, id)
 	if err != nil {
 		return nil, nil, err
 	}
-	return NewRecorder(store, id), msgs, nil
+
+	rec := NewRecorder(store, id)
+	// The agent numbers turns from one every time it runs, because what came
+	// back from storage was someone else's counting. The session is the one
+	// place that knows both numbers, so it is where they are reconciled —
+	// without which a resumed session holds two exchanges both called turn 1.
+	rec.turnsBefore = turns
+	// And this is the history the agent is about to be handed. It will
+	// announce it as replaced, correctly and unavoidably; recording it would
+	// write a copy of what was just read, once per resume, forever.
+	rec.restored = msgs
+	return rec, msgs, nil
 }

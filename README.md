@@ -22,7 +22,7 @@ protocols, and an agent runtime that runs the loop around it.
 **`pkg/agent` — the loop around it**
 
 - **Reason and act** — call the model, run the tools it asks for, call it again.
-- **Everything as events** — nine types on one sequence, and the conversation is the fold of one of them.
+- **Everything as events** — ten types on one sequence, and the conversation is the fold of two of them.
 - **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
 - **Sessions** — record what an agent did, restore the conversation from it.
@@ -279,7 +279,7 @@ Four ideas carry the design:
 
 | Idea | What it means |
 | --- | --- |
-| **Everything is an event** | Nine types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
+| **Everything is an event** | Ten types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
 | **The conversation is a fold** | Replay `MessageAdded` in order and you have exactly what the agent holds. That is all a session stores, and all a restore reads. |
 | **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
 | **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
@@ -296,7 +296,7 @@ budgets would multiply rather than add. `WithRetry` turns on a second one for
 what the client cannot replay.
 
 Sessions consume that stream rather than living inside the agent:
-`rec.Handle(e)` in your own loop records what happened, and `session.Open`
+`rec.Handle(ctx, e)` in your own loop records what happened, and `session.Open`
 folds it back into a conversation to resume from.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition

@@ -49,6 +49,11 @@ type Agent struct {
 	// a second Run while one is in flight is ErrBusy, not a queue.
 	running atomic.Bool
 
+	// replaced records that SetMessages threw the conversation away, so the
+	// next exchange can say so. Nothing else changes the conversation without
+	// announcing it.
+	replaced bool
+
 	// pending is what AddMessages queued, taken at the next step boundary.
 	pending []ai.Message
 
@@ -101,8 +106,16 @@ func WithHooks(hooks ...Hook) Option {
 
 // WithMessages seeds the conversation, e.g. from a restored session. Change it
 // later with SetMessages.
+//
+// Seeded messages are announced as MessagesReplaced at the start of the first
+// exchange, for the same reason SetMessages is: they entered the conversation
+// without ever being appended to it, so nothing folding what was appended
+// would otherwise have them.
 func WithMessages(msgs []ai.Message) Option {
-	return func(a *Agent) { a.messages = slices.Clone(msgs) }
+	return func(a *Agent) {
+		a.messages = slices.Clone(msgs)
+		a.replaced = len(msgs) > 0
+	}
 }
 
 // WithMaxSteps caps model calls per exchange. Zero means no cap.
@@ -119,7 +132,17 @@ func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
 // Running out is reported as a network failure, because it is one, and is
 // retried like any other.
 func WithStreamTimeout(first, idle time.Duration) Option {
-	return func(a *Agent) { a.streamFirst, a.streamIdle = first, idle }
+	return func(a *Agent) { a.streamFirst, a.streamIdle = orNever(first), orNever(idle) }
+}
+
+// orNever turns "off" into a duration no timer reaches, so that a disabled
+// timeout is a timer that does not fire rather than a branch every reader of
+// these fields has to remember.
+func orNever(d time.Duration) time.Duration {
+	if d <= 0 {
+		return never
+	}
+	return d
 }
 
 // WithRetry has the agent replay a failed model call, at most attempts times
@@ -194,7 +217,27 @@ func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.messages = slices.Clone(msgs)
+	// Replacing a conversation is not appending to it, and anything watching
+	// has to be told which happened. There is nowhere to say so from here —
+	// no exchange is running — so it is said at the start of the next one.
+	a.replaced = true
 }
+
+// takeReplaced reports whether the conversation was replaced since the last
+// exchange, and hands back what it was replaced with.
+func (a *Agent) takeReplaced() (bool, []ai.Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.replaced {
+		return false, nil
+	}
+	a.replaced = false
+	return true, slices.Clone(a.messages)
+}
+
+// turnNow is the exchange being held, for events that say which one they
+// belong to. Only turn advances it, so every event in one agrees.
+func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 
 // AddMessages puts messages into the conversation from outside an exchange —
 // something that arrived while one is already running, routed in from

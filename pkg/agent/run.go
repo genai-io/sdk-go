@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"iter"
 	"math"
-	"sync/atomic"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -80,7 +79,7 @@ func (a *Agent) add(emit func(Event), msg ai.Message) {
 	a.messages = append(a.messages, msg)
 	a.mu.Unlock()
 
-	emit(MessageAdded{Message: msg})
+	emit(MessageAdded{Turn: a.turnNow(), Message: msg})
 }
 
 // never is longer than any process runs, so a timer set to it is one that does
@@ -114,18 +113,6 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 	var spent ai.Usage
 	var lastErr error
 
-	// A stream that says nothing is the one failure that looks like work, so a
-	// timer ends it: streamFirst before the endpoint says anything at all,
-	// streamIdle between events once it has. Zero means never — a duration no
-	// timer reaches, so nothing below has a case for it.
-	first, idle := never, never
-	if a.streamFirst > 0 {
-		first = a.streamFirst
-	}
-	if a.streamIdle > 0 {
-		idle = a.streamIdle
-	}
-
 	wait := a.retryBackoff
 	for attempt := 1; attempt <= a.maxAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
@@ -134,60 +121,21 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		if err := a.preInfer(ctx, req); err != nil {
 			return nil, spent, err
 		}
-		emit(MessageStart{Attempt: attempt, Request: req})
+		emit(MessageStart{Turn: a.turnNow(), Attempt: attempt, Request: req})
 
-		// The stream gets a context of its own so a stall can end it without
-		// ending the turn.
-		streamCtx, stopStream := context.WithCancel(ctx)
-		var silent atomic.Bool
-		quiet := time.AfterFunc(first, func() {
-			silent.Store(true)
-			stopStream()
-		})
-
-		var resp *ai.Response
-		var err error
-		for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, options(req)...) {
-			quiet.Reset(idle)
-			if streamErr != nil {
-				// A failed call still spent tokens and may have produced text.
-				resp, err = evt.Response, streamErr
-				continue
-			}
-			// Only fragments go out from here. The finished response is a
-			// conclusion, announced below once PostInfer has had it.
-			switch evt.Type {
-			case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd:
-				emit(MessageUpdate{Delta: evt})
-			case ai.EventDone:
-				resp = evt.Response
-			}
-		}
-		quiet.Stop()
-		stopStream()
-
-		// A stall reads as a cancelled stream, which says nothing about why.
-		// Naming it makes the attempt retryable, which is what it should be.
-		if silent.Load() {
-			err = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream went silent"}
-		}
+		resp, err := a.stream(ctx, emit, req)
 
 		if ctx.Err() != nil {
 			// Abandoned, not failed — but the span still closes, because the
 			// reader that saw it open has not gone anywhere.
-			emit(MessageEnd{Response: resp, Err: ctx.Err()})
+			emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Request: req,
+				Response: resp, Err: ctx.Err()})
 			return nil, spent, ctx.Err()
 		}
 
 		// A failed call is paid for too: the tokens are spent either way.
 		if resp != nil {
 			spent.Add(resp.Usage)
-		} else if err == nil {
-			// Classified, not bare: five lines down this is handed to
-			// ai.IsRetryable, and a plain error there is a permanent one.
-			// ai.Collect calls the same failure retryable; so does this.
-			err = &ai.Error{Kind: ai.KindNetwork,
-				Message: "agent: the stream ended without a response"}
 		}
 
 		// Read before PostInfer can put a different error in err: a failure of
@@ -197,7 +145,8 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 			err = a.postInfer(ctx, resp)
 		}
 
-		emit(MessageEnd{Response: resp, Err: err})
+		emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Request: req,
+			Response: resp, Err: err})
 
 		switch {
 		case retry:
@@ -216,6 +165,61 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		}
 	}
 	return nil, spent, lastErr
+}
+
+// errStalled is a stream that has stopped saying anything: the connection is
+// open, nothing is arriving, and nobody has raised an error. It is a network
+// failure because that is what it is, and it is one value rather than one
+// minted per stall so that what ended a call is compared, not parsed.
+var errStalled = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream went silent"}
+
+// errNoResponse is a stream that ended without ever finishing. ai.Collect
+// calls the same failure retryable, and so does this — a bare error here would
+// be read as permanent by ai.IsRetryable.
+var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream ended without a response"}
+
+// stream makes one model call and returns what it produced.
+//
+// Silence is bounded at both ends: streamFirst before the endpoint says
+// anything at all, streamIdle between events once it has. Running out cancels
+// the stream — and only the stream, so the turn survives it — with errStalled
+// as the cause. Why a call ended is then read off the context that ended it,
+// rather than inferred from a flag set beside it.
+func (a *Agent) stream(ctx context.Context, emit func(Event), req *ai.Request) (*ai.Response, error) {
+	streamCtx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+
+	quiet := time.AfterFunc(a.streamFirst, func() { stop(errStalled) })
+	defer quiet.Stop()
+
+	var resp *ai.Response
+	var err error
+	for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, options(req)...) {
+		quiet.Reset(a.streamIdle)
+		if streamErr != nil {
+			// A failed call still spent tokens and may have produced text.
+			resp, err = evt.Response, streamErr
+			continue
+		}
+		// Only fragments go out from here. The finished response is a
+		// conclusion, announced by the caller once PostInfer has had it.
+		switch evt.Type {
+		case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd:
+			emit(MessageUpdate{Delta: evt})
+		case ai.EventDone:
+			resp = evt.Response
+		}
+	}
+
+	switch {
+	case errors.Is(context.Cause(streamCtx), errStalled):
+		return resp, errStalled
+	case err != nil:
+		return resp, err
+	case resp == nil:
+		return nil, errNoResponse
+	}
+	return resp, nil
 }
 
 // call is one tool call and what became of it, kept in the model's order.
@@ -244,7 +248,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 	for i := range calls {
 		batch[i] = call{ToolCall: calls[i]}
 		c := &batch[i]
-		emit(ToolStart{ID: c.ID, Name: c.Name, Args: c.Input})
+		emit(ToolStart{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input})
 
 		tool, ok := a.toolNamed(c.Name)
 		if !ok {
@@ -292,7 +296,8 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 	// Closing a call: its span, the after-hooks, its vote. Refused above or
 	// finished below, a call closes the same way.
 	finish := func(c *call) {
-		emit(ToolEnd{ID: c.ID, Result: c.result, Err: c.err})
+		emit(ToolEnd{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input,
+			Result: c.result, Err: c.err})
 
 		// Chained: each hook is handed what the one before it produced.
 		for _, h := range a.hookSet() {
@@ -373,7 +378,8 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		for remaining := len(pending); remaining > 0; {
 			u := <-ch
 			if u.partial != nil {
-				emit(ToolUpdate{ID: batch[u.index].ID, Partial: *u.partial})
+				emit(ToolUpdate{Turn: a.turnNow(), ID: batch[u.index].ID,
+					Name: batch[u.index].Name, Partial: *u.partial})
 				continue
 			}
 			remaining--
@@ -426,12 +432,20 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 	a.mu.Unlock()
 
 	a.turnCount.Add(1)
-	emit(TurnStart{Turn: int(a.turnCount.Load())})
+	emit(TurnStart{Turn: a.turnNow()})
+
+	// A history replaced between exchanges is announced here, where there is
+	// finally somewhere to announce it. Doing it at SetMessages would need a
+	// callback; doing it never is what made a compacted session hand back
+	// what the agent threw away.
+	if replaced, msgs := a.takeReplaced(); replaced {
+		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
+	}
 
 	// The count is read again rather than pinned: only this function advances
 	// it, so both ends of the turn carry the same number.
 	defer func() {
-		out.Turn = int(a.turnCount.Load())
+		out.Turn = a.turnNow()
 		emit(out)
 	}()
 

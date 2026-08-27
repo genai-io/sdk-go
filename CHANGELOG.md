@@ -11,6 +11,24 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
+- **The session package is renamed where a name was ambiguous.** `session.Tool`
+  is `session.ToolRun` — a tool is a thing that can be run, and `ai` and `agent`
+  both have that type, where this is the record of one having been. `session.Turn`
+  is `session.Exchange`, because `Turn.Turn` is not a name. The entry constants
+  follow: `EntryTool` is `EntryToolRun`, `EntryTurn` is `EntryExchange`, and
+  `Entry.Tool`/`Entry.Turn` are `Entry.ToolRun`/`Entry.Exchange`.
+- **`Recorder.Handle` takes a context.** `Store` is context-aware in every
+  method and the recorder passed `context.Background()` to all of them, so a
+  store that was not the local filesystem could block the loop delivering
+  events with no way to cancel it.
+- **`Recorder.Snapshot` is gone**, and nothing replaces it — see below.
+- **Agent events carry what a consumer used to rebuild.** Every event in a turn
+  has its `Turn`; `MessageEnd` carries the `Request` and `Attempt` its
+  `MessageStart` opened with, and `ToolEnd` the `Name` and `Args` of its
+  `ToolStart`. `ToolUpdate` gained `Name`. The `Recorder` was the first
+  consumer and needed a mutex, two maps and a counter to pair spans back up;
+  none of that is left.
+
 - **`ai.Tool` is now a schema and a function.** `Name`, `Description` and
   `Parameters` are gone; the three of them were a `Schema` written out longhand,
   which is the type the package already had for exactly this — a named,
@@ -25,6 +43,7 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Added
 
+- **`agent.MessagesReplaced`**, the event `SetMessages` was missing. See below.
 - **`ai.ToolCall.UnmarshalArgs`** decodes a call's arguments into a Go value —
   the function `ToolCall.Input` has always been documented as decoding with.
   An argument the schema does not have is an error rather than a silent drop.
@@ -33,6 +52,28 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Fixed
 
+- **A compacted conversation survives a restore without the caller doing
+  anything.** The session is the fold of what the agent announced, and
+  `SetMessages` announced nothing — so a session restored the history that
+  compaction had just thrown away, growing the context the caller was trying to
+  shrink. It is now announced as `MessagesReplaced` at the start of the next
+  exchange, which is when the agent next has anywhere to report it, and the
+  recorder folds it as the point a fold starts from. `Recorder.Snapshot` was
+  the workaround and is removed: a step a caller must remember is a step a
+  caller forgets. Messages passed to `WithMessages` enter the fold the same
+  way, which they previously never did.
+- **Recording stops at the first failed write.** It used to carry on, and a
+  fold with a hole in it is not a shorter conversation but a broken one — lose
+  the message carrying a tool call and the results answering it are orphaned,
+  which no provider accepts and `ai.Repair` silently deletes. A prefix still
+  folds; a log with a gap does not.
+- **Turns are numbered from the session's beginning.** The agent counts from
+  one on every run, deliberately, and the session stored that number as its
+  own — so a resumed session held two exchanges both called turn 1.
+- **Resuming no longer records a copy of the conversation it just read.**
+- **A malformed entry is an error, not a silent skip.** `Entry` is a tagged
+  union that nothing validated, so one whose type and payload disagreed was
+  dropped while folding, taking a message out of the conversation with it.
 - **An agent no longer retries by default, and honours `Retry-After` when it
   does.** Retry belongs on the client, where `ai.Retry` implements it; a second
   budget on the agent multiplied rather than added, so the setup both READMEs

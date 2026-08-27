@@ -2,7 +2,9 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,12 +61,13 @@ func newAgent(t *testing.T, history []ai.Message, scripts ...[]ai.Delta) *agent.
 func converse(t *testing.T, a *agent.Agent, rec *session.Recorder, msgs ...ai.Message) {
 	t.Helper()
 
+	ctx := context.Background()
 	for _, m := range msgs {
-		for e, err := range a.Run(context.Background(), m) {
+		for e, err := range a.Run(ctx, m) {
 			if err != nil {
 				t.Fatalf("stream: %v", err)
 			}
-			rec.Handle(e)
+			rec.Handle(ctx, e)
 		}
 	}
 }
@@ -153,8 +156,8 @@ func TestFragmentsAreNotPersistedButTheSpansThatCloseThemAre(t *testing.T) {
 	if counts[session.EntryInference] != 1 {
 		t.Errorf("inference entries = %d, want 1", counts[session.EntryInference])
 	}
-	if counts[session.EntryTurn] != 1 {
-		t.Errorf("turn entries = %d, want 1", counts[session.EntryTurn])
+	if counts[session.EntryExchange] != 1 {
+		t.Errorf("exchange entries = %d, want 1", counts[session.EntryExchange])
 	}
 	if total := len(counts); total != 3 {
 		t.Errorf("entry types = %d, want 3 — a fragment was persisted", total)
@@ -343,5 +346,135 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	}
 	if got := final[0].Text(); got != "hello" {
 		t.Errorf("the first message is %q; the second process overwrote history", got)
+	}
+}
+
+// flaky fails one append and works for everything else.
+type flaky struct {
+	session.Store
+	failOn  int
+	appends int
+}
+
+func (f *flaky) Append(ctx context.Context, id string, e ...session.Entry) error {
+	f.appends++
+	if f.appends == f.failOn {
+		return errors.New("the disk, briefly")
+	}
+	return f.Store.Append(ctx, id, e...)
+}
+
+// A conversation is read back by folding it, so a hole in the middle is not a
+// shorter conversation — it is a broken one. Drop the message carrying a tool
+// call and the result answering it is orphaned, which is a shape no provider
+// accepts and ai.Repair silently deletes. Recording therefore stops at the
+// first failure: a prefix still folds.
+func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
+	ctx := context.Background()
+	st := &flaky{Store: store(t), failOn: 3}
+
+	a := newAgent(t, nil,
+		[]ai.Delta{
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})},
+			{StopReason: ai.StopToolUse},
+		},
+		text("done"))
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	converse(t, a, rec, ai.UserMessage("go"))
+
+	if rec.Err() == nil {
+		t.Fatal("a failed write was not reported")
+	}
+	restored, err := session.Messages(ctx, st, rec.ID())
+	if err != nil {
+		t.Fatalf("the session no longer folds: %v", err)
+	}
+	// Whatever survived must be a conversation, not a fragment of one: every
+	// tool result answers a call that is still there.
+	if repaired := ai.Repair(restored); len(repaired) != len(restored) {
+		t.Errorf("Repair dropped %d of %d restored messages — the fold has a hole",
+			len(restored)-len(repaired), len(restored))
+	}
+	// And nothing was written after the failure.
+	if st.appends != 3 {
+		t.Errorf("the store saw %d appends, want 3 — recording carried on past the failure", st.appends)
+	}
+}
+
+// The agent numbers turns from one every run. A session that stored that
+// number as its own would hold two exchanges both called turn 1 after a
+// resume, and no consumer could group by it.
+func TestTurnsAreNumberedFromTheSessionsBeginning(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+
+	a := newAgent(t, nil, text("one"), text("two"))
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
+
+	// A second run, resuming: the agent starts counting at one again.
+	b := newAgent(t, nil, text("three"))
+	rec2, history, err := session.Open(ctx, st, rec.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.SetMessages(history)
+	converse(t, b, rec2, ai.UserMessage("third"))
+
+	var turns []int
+	for e, err := range st.Entries(ctx, rec.ID()) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Type == session.EntryExchange {
+			turns = append(turns, e.Exchange.Turn)
+		}
+	}
+	if want := []int{1, 2, 3}; !slices.Equal(turns, want) {
+		t.Errorf("exchange numbers = %v, want %v", turns, want)
+	}
+}
+
+// Resuming hands the agent the history it just read, and the agent announces
+// it — correctly, it did replace its conversation. Storing that would write a
+// copy of the whole conversation on every resume, forever.
+func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+
+	a := newAgent(t, nil, text("one"))
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	converse(t, a, rec, ai.UserMessage("first"))
+
+	for range 5 {
+		b := newAgent(t, nil, text("again"))
+		rec2, history, err := session.Open(ctx, st, rec.ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.SetMessages(history)
+		converse(t, b, rec2, ai.UserMessage("more"))
+	}
+
+	snapshots := 0
+	for e, err := range st.Entries(ctx, rec.ID()) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Type == session.EntrySnapshot {
+			snapshots++
+		}
+	}
+	if snapshots != 0 {
+		t.Errorf("%d snapshots written by resuming alone; the conversation was never replaced", snapshots)
 	}
 }

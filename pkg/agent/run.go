@@ -93,17 +93,6 @@ const never = time.Duration(math.MaxInt64)
 // options is what a request contributes to a call: the prompt and the toolset.
 // Everything else — temperature, token ceilings, effort — belongs to the
 // client, and a second place to configure the same call would only drift.
-func options(req *ai.Request) []ai.Option {
-	opts := make([]ai.Option, 0, 2)
-	if req.System != "" {
-		opts = append(opts, ai.WithSystem(req.System))
-	}
-	if len(req.Tools) > 0 {
-		opts = append(opts, ai.WithTools(req.Tools...))
-	}
-	return opts
-}
-
 // reason asks the model what to do next: one call, returning what came back
 // and what it cost, retrying a stream that failed retryably.
 //
@@ -117,18 +106,18 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 	for attempt := 1; attempt <= a.maxAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
 		// refusal returns before anything is announced.
-		req := a.request()
-		if err := a.preInfer(ctx, req); err != nil {
+		inf := a.inference()
+		if err := a.preInfer(ctx, inf); err != nil {
 			return nil, spent, err
 		}
-		emit(MessageStart{Turn: a.turnNow(), Attempt: attempt, Request: req})
+		emit(MessageStart{Turn: a.turnNow(), Attempt: attempt, Inference: inf})
 
-		resp, err := a.stream(ctx, emit, req)
+		resp, err := a.stream(ctx, emit, inf)
 
 		if ctx.Err() != nil {
 			// Abandoned, not failed — but the span still closes, because the
 			// reader that saw it open has not gone anywhere.
-			emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Request: req,
+			emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 				Response: resp, Err: ctx.Err()})
 			return nil, spent, ctx.Err()
 		}
@@ -145,7 +134,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 			err = a.postInfer(ctx, resp)
 		}
 
-		emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Request: req,
+		emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 			Response: resp, Err: err})
 
 		switch {
@@ -185,7 +174,7 @@ var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream 
 // the stream — and only the stream, so the turn survives it — with errStalled
 // as the cause. Why a call ended is then read off the context that ended it,
 // rather than inferred from a flag set beside it.
-func (a *Agent) stream(ctx context.Context, emit func(Event), req *ai.Request) (*ai.Response, error) {
+func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*ai.Response, error) {
 	streamCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 
@@ -194,7 +183,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), req *ai.Request) (
 
 	var resp *ai.Response
 	var err error
-	for evt, streamErr := range a.client.Stream(streamCtx, req.Messages, options(req)...) {
+	for evt, streamErr := range a.client.Stream(streamCtx, inf.Messages, inf.options()...) {
 		quiet.Reset(a.streamIdle)
 		if streamErr != nil {
 			// A failed call still spent tokens and may have produced text.

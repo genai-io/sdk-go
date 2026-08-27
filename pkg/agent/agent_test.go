@@ -773,8 +773,8 @@ func TestPreInferRunsOnEveryStep(t *testing.T) {
 	a, err := agent.New(client,
 		agent.WithTools(echo),
 		agent.WithHooks(agent.Hook{
-			PreInfer: func(_ context.Context, req *ai.Request) error {
-				sizes = append(sizes, len(req.Messages))
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				sizes = append(sizes, len(inf.Messages))
 				return nil
 			},
 		}))
@@ -804,16 +804,16 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 		}),
 	}
 
-	var sent *ai.Request
+	var sent *agent.Inference
 	client := ai.NewClientWithDriver(&scripted{scripts: [][]ai.Delta{text("fine")}}, ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client,
 		agent.WithSystem("the agent's own prompt"),
 		agent.WithTools(tools...),
 		agent.WithHooks(agent.Hook{
-			PreInfer: func(_ context.Context, req *ai.Request) error {
-				req.System += "\n\nand a line true only right now"
-				req.Tools = req.Tools[:1] // hide the second for this call
-				req.Messages = append(req.Messages, ai.UserMessage("injected"))
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				inf.System += "\n\nand a line true only right now"
+				inf.Tools = inf.Tools[:1] // hide the second for this call
+				inf.Messages = append(inf.Messages, ai.UserMessage("injected"))
 				return nil
 			},
 		}))
@@ -827,7 +827,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	}
 	for _, e := range events {
 		if v, ok := e.(agent.MessageStart); ok {
-			sent = v.Request
+			sent = v.Inference
 		}
 	}
 
@@ -866,10 +866,10 @@ func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
 
 	var second bool
 	a, err := agent.New(client, agent.WithHooks(
-		agent.Hook{PreInfer: func(context.Context, *ai.Request) error {
+		agent.Hook{PreInfer: func(context.Context, *agent.Inference) error {
 			return errors.New("the context is too large to send")
 		}},
-		agent.Hook{PreInfer: func(context.Context, *ai.Request) error {
+		agent.Hook{PreInfer: func(context.Context, *agent.Inference) error {
 			second = true
 			return nil
 		}},
@@ -920,13 +920,13 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 		ai.Model{ID: "stub", API: "stub"},
 		ai.WithMaxTokens(4096)) // a client default, applied after the hook
 
-	var seen *ai.Request
+	var seen *agent.Inference
 	a, err := agent.New(client,
 		agent.WithSystem("mine"),
 		agent.WithMessages([]ai.Message{ai.UserMessage("earlier")}),
 		agent.WithHooks(agent.Hook{
-			PreInfer: func(_ context.Context, req *ai.Request) error {
-				seen = req
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				seen = inf
 				return nil
 			},
 		}))
@@ -948,10 +948,10 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 		t.Errorf("the hook saw %d messages, want the agent's 2", len(seen.Messages))
 	}
 
-	var sent *ai.Request
+	var sent *agent.Inference
 	for _, e := range events {
 		if v, ok := e.(agent.MessageStart); ok {
-			sent = v.Request
+			sent = v.Inference
 		}
 	}
 	if sent != seen {
@@ -974,11 +974,11 @@ func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 		agent.WithSystem("base"),
 		agent.WithRetry(3, 0),
 		agent.WithHooks(agent.Hook{
-			PreInfer: func(_ context.Context, req *ai.Request) error {
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
 				attempts++
 				// An edit that would compound if the request were reused.
-				req.System += " · attempt"
-				prompts = append(prompts, req.System)
+				inf.System += " · attempt"
+				prompts = append(prompts, inf.System)
 				return nil
 			},
 		}))
@@ -1008,15 +1008,15 @@ func TestPreInferHooksChain(t *testing.T) {
 	a, err := agent.New(client,
 		agent.WithSystem("one"),
 		agent.WithHooks(
-			agent.Hook{PreInfer: func(_ context.Context, req *ai.Request) error {
-				req.System += " two"
+			agent.Hook{PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				inf.System += " two"
 				return nil
 			}},
-			agent.Hook{PreInfer: func(_ context.Context, req *ai.Request) error {
-				if req.System != "one two" {
-					t.Errorf("the second hook saw %q, want the first hook's edit", req.System)
+			agent.Hook{PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				if inf.System != "one two" {
+					t.Errorf("the second hook saw %q, want the first hook's edit", inf.System)
 				}
-				req.System += " three"
+				inf.System += " three"
 				return nil
 			}},
 		))
@@ -1029,41 +1029,41 @@ func TestPreInferHooksChain(t *testing.T) {
 		t.Fatalf("turn failed: %v", err)
 	}
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok && v.Request.System != "one two three" {
-			t.Errorf("sent %q, want every hook's edit", v.Request.System)
+		if v, ok := e.(agent.MessageStart); ok && v.Inference.System != "one two three" {
+			t.Errorf("sent %q, want every hook's edit", v.Inference.System)
 		}
 	}
 }
 
 // A hook edits what the agent contributes — prompt, conversation, toolset —
-// and all three reach the endpoint. It does not edit the client underneath:
-// temperature, token ceilings and the rest were set when the client was built,
-// and writing them here does nothing. Both halves are pinned, because a seam
-// that silently ignores what is written to it is worse than one that never
-// offered the field.
-func TestAPreInferHookEditsTheAgentsHalfOfTheRequest(t *testing.T) {
+// directly, and reaches everything else by appending an option. Both halves
+// are pinned, and the second is the point: a seam that silently ignores what
+// is written to it is worse than one that never offered the field, and writing
+// inf.MaxTokens used to be exactly that.
+func TestAPreInferHookEditsTheCallItIsGiven(t *testing.T) {
 	weather := agent.ToolFunc("weather", "Look up the weather.",
 		func(_ context.Context, _ struct{}) (agent.Result, error) {
-			return agent.TextResult("fine"), nil
+			return agent.TextResult("mild"), nil
 		})
 
 	driver := &scripted{scripts: [][]ai.Delta{text("ok")}}
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
-		ai.WithMaxTokens(4096)) // the client's setting, not the agent's
+		ai.WithMaxTokens(4096), ai.WithEffort(ai.EffortLow))
 
 	temp := 0.25
 	a, err := agent.New(client,
 		agent.WithSystem("original"),
 		agent.WithTools(weather),
 		agent.WithHooks(agent.Hook{
-			PreInfer: func(_ context.Context, req *ai.Request) error {
-				req.System = "set by the hook"
-				req.Tools = nil
-				req.Messages = append(req.Messages, ai.UserMessage("and this"))
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				inf.System = "set by the hook"
+				inf.Tools = nil
+				inf.Messages = append(inf.Messages, ai.UserMessage("and this"))
 
-				// The client's business, not the agent's: written here, ignored.
-				req.MaxTokens = 99
-				req.Temperature = &temp
+				// Everything else is a layer, and layers are unambiguous:
+				// present means asked for, absent means left alone.
+				inf.Options = append(inf.Options,
+					ai.WithMaxTokens(99), ai.WithTemperature(temp))
 				return nil
 			},
 		}))
@@ -1094,12 +1094,42 @@ func TestAPreInferHookEditsTheAgentsHalfOfTheRequest(t *testing.T) {
 			len(sent.Messages))
 	}
 
-	// What the client owns, as it was built.
-	if sent.MaxTokens != 4096 {
-		t.Errorf("MaxTokens = %d, want the client's 4096 — a hook reconfigured it", sent.MaxTokens)
+	// What the hook asked for by option, which used to be dropped in silence.
+	if sent.MaxTokens != 99 {
+		t.Errorf("MaxTokens = %d, want the hook's 99", sent.MaxTokens)
 	}
-	if sent.Temperature != nil {
-		t.Errorf("Temperature = %v, want unset — a hook reconfigured it", *sent.Temperature)
+	if sent.Temperature == nil || *sent.Temperature != temp {
+		t.Errorf("Temperature = %v, want the hook's %v", sent.Temperature, temp)
+	}
+
+	// And what nobody touched is still the client's.
+	if sent.Effort != ai.EffortLow {
+		t.Errorf("Effort = %q, want the client's — an untouched setting was overwritten", sent.Effort)
+	}
+}
+
+// An agent with no tools offers none, whatever the client was built with. The
+// toolset is the agent's, not a suggestion — and until Tools went out
+// unconditionally there was no way for it to say so.
+func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
+	stray := ai.ToolFunc("stray", "configured on the client",
+		func(context.Context, struct{}) (string, error) { return "", nil })
+	driver := &scripted{scripts: [][]ai.Delta{text("ok")}}
+	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
+		ai.WithTools(stray))
+
+	a, err := agent.New(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+	if n := len(driver.got[0].Tools); n != 0 {
+		t.Errorf("the endpoint was offered %d tools; the agent has none", n)
 	}
 }
 
@@ -1111,7 +1141,7 @@ func TestARefusedCallEmitsNeitherHalfOfTheSpan(t *testing.T) {
 		ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
-		PreInfer: func(context.Context, *ai.Request) error {
+		PreInfer: func(context.Context, *agent.Inference) error {
 			return errors.New("this conversation is too large to send")
 		},
 	}))
@@ -1151,8 +1181,8 @@ func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
 	a, err := agent.New(client,
 		agent.WithSystem("base"),
 		agent.WithHooks(agent.Hook{
-			PreInfer: func(_ context.Context, req *ai.Request) error {
-				req.System += " · edited"
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				inf.System += " · edited"
 				return nil
 			},
 		}))
@@ -1166,10 +1196,10 @@ func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
 	}
 	var announced int
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok && v.Request != nil {
+		if v, ok := e.(agent.MessageStart); ok && v.Inference != nil {
 			announced++
-			if v.Request.System != "base · edited" {
-				t.Errorf("announced %q, want the edited prompt", v.Request.System)
+			if v.Inference.System != "base · edited" {
+				t.Errorf("announced %q, want the edited prompt", v.Inference.System)
 			}
 		}
 	}
@@ -1301,7 +1331,7 @@ func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
-		PreInfer: func(context.Context, *ai.Request) error {
+		PreInfer: func(context.Context, *agent.Inference) error {
 			return &ai.Error{Kind: ai.KindOverloaded, Message: "not while the queue is deep"}
 		},
 	}))

@@ -74,9 +74,9 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 
 	case agent.MessageEnd:
 		rec := Inference{Turn: r.turn(v.Turn), Attempt: v.Attempt}
-		if v.Request != nil {
-			rec.System = v.Request.System
-			for _, t := range v.Request.Tools {
+		if v.Inference != nil {
+			rec.System = v.Inference.System
+			for _, t := range v.Inference.Tools {
 				rec.Tools = append(rec.Tools, t.Schema.Name)
 			}
 		}

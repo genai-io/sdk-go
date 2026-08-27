@@ -50,10 +50,10 @@ type MessageStart struct {
 	// Attempt rises on a retry — how a consumer knows the partial output it
 	// drew is about to be replaced.
 	Attempt int
-	// Request is what the agent is sending, PreInfer's edits included. The
-	// client merges its defaults and repairs the history after this, so it is
-	// what was asked for, not the finished wire request.
-	Request *ai.Request
+	// Inference is the call going out, PreInfer's edits included. The client
+	// merges its defaults and repairs the history after this, so it is what
+	// was asked for, not the finished wire request.
+	Inference *Inference
 }
 
 func (MessageStart) event() {}
@@ -72,11 +72,11 @@ func (MessageUpdate) event() {}
 type MessageEnd struct {
 	Turn    int
 	Attempt int
-	// Request is the one MessageStart opened this span with, carried again so
-	// that closing a span needs nothing but the event that closes it.
-	Request  *ai.Request
-	Response *ai.Response
-	Err      error
+	// Inference is the one MessageStart opened this span with, carried again
+	// so that closing a span needs nothing but the event that closes it.
+	Inference *Inference
+	Response  *ai.Response
+	Err       error
 }
 
 func (MessageEnd) event() {}

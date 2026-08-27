@@ -10,7 +10,7 @@ import (
 // several, and they run in the order they were added.
 //
 //	           in                                     out
-//	PreInfer   the request, about to go               edits it in place
+//	PreInfer   the call, about to go                  edits it in place
 //	PostInfer  the response, on a call that worked    edits it in place
 //	PreTool    the call, its tool, the conversation   Decision
 //	PostTool   the call, its tool, what it produced   *Result (nil keeps it)
@@ -20,12 +20,12 @@ import (
 // goroutine one at a time, so none needs locking of its own, and an error from
 // any of them ends the exchange.
 type Hook struct {
-	// PreInfer runs before every model call, on the request this agent is
-	// about to send. Edit it in place, for that one call: prune the history,
-	// narrow the toolset for one question, add a line to the prompt that is
-	// only true right now. To change the agent itself, use SetMessages,
-	// SetTools, SetSystem.
-	PreInfer func(ctx context.Context, req *ai.Request) error
+	// PreInfer runs before every model call, on the call this agent is about
+	// to make. Edit it in place, for that one call: prune the history, narrow
+	// the toolset for one question, add a line to the prompt that is only true
+	// right now. To change the agent itself, use SetMessages, SetTools,
+	// SetSystem.
+	PreInfer func(ctx context.Context, inf *Inference) error
 
 	// PostInfer runs after every model call that succeeded, on what came back.
 	// Edit the response in place — redact, annotate, normalise. An error ends
@@ -83,14 +83,14 @@ func (a *Agent) hookSet() []Hook {
 	return a.hooks
 }
 
-// preInfer runs the hooks on the request, chaining them: each sees what the
-// one before it edited.
-func (a *Agent) preInfer(ctx context.Context, req *ai.Request) error {
+// preInfer runs the hooks on the call, chaining them: each sees what the one
+// before it edited.
+func (a *Agent) preInfer(ctx context.Context, inf *Inference) error {
 	for _, h := range a.hookSet() {
 		if h.PreInfer == nil {
 			continue
 		}
-		if err := h.PreInfer(ctx, req); err != nil {
+		if err := h.PreInfer(ctx, inf); err != nil {
 			return err
 		}
 	}
@@ -109,4 +109,50 @@ func (a *Agent) postInfer(ctx context.Context, resp *ai.Response) error {
 		}
 	}
 	return nil
+}
+
+// Inference is one model call, as the agent is about to make it. It is what
+// PreInfer is handed, and what MessageStart and MessageEnd carry.
+//
+// The three fields are what an agent owns and a hook may rewrite for one call.
+// Everything else a model call can carry — a forced tool for this step, a
+// schema for this answer, a cap on these tokens, a protocol's own setting —
+// is reached by appending to Options.
+//
+// That split is not arbitrary. An ai.Request handed over half-filled cannot
+// say which fields were meant: for every value type on it, "left alone" and
+// "deliberately set to zero" are the same bytes, which is the ambiguity
+// ai.Request.Temperature is a pointer to avoid. An appended option has no such
+// problem — it is there or it is not — and it is how pkg/ai composes a call in
+// the first place, in layers, the last of which wins.
+//
+//	PreInfer: func(_ context.Context, inf *agent.Inference) error {
+//	    if len(inf.Messages) > 200 {
+//	        inf.Messages = inf.Messages[len(inf.Messages)-200:]
+//	    }
+//	    inf.Options = append(inf.Options, ai.WithForceTool("search"))
+//	    return nil
+//	},
+type Inference struct {
+	// System is the prompt this call goes out with. The agent's, unless a hook
+	// changed it.
+	System string
+	// Messages is the conversation as this call will see it.
+	Messages []ai.Message
+	// Tools is what the model is offered. Empty means none, and says so — the
+	// agent's toolset is the toolset, not a suggestion the client may override.
+	Tools []ai.Tool
+
+	// Options are layered onto this call last, over the client's own defaults.
+	// Anything ai.Option can express belongs here.
+	Options []ai.Option
+}
+
+// options renders the call as the layer pkg/ai composes from. System and Tools
+// go unconditionally: an agent with no tools is an agent that offers none, and
+// an empty ai.WithTools is documented to say exactly that.
+func (inf *Inference) options() []ai.Option {
+	opts := make([]ai.Option, 0, len(inf.Options)+2)
+	opts = append(opts, ai.WithSystem(inf.System), ai.WithTools(inf.Tools...))
+	return append(opts, inf.Options...)
 }

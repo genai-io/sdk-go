@@ -6,9 +6,22 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Result is what running a tool produced.
+// Result is what running a tool produced, for the two audiences a tool has.
 type Result struct {
+	// Content is what the model is told. It is the only field that reaches it.
 	Content ai.Content
+
+	// Details is for your interface, and goes nowhere else: not to the model,
+	// and not into a session, which drops it as belonging to a program that is
+	// no longer running. Put the structured form of the answer here — the rows
+	// behind a count, the paths behind a total — so that formatting it for a
+	// person is not paid for on every turn thereafter.
+	//
+	// It is any rather than a type parameter because a type parameter would
+	// have to be on Tool, and an agent's tools are a heterogeneous list: one
+	// Result type for all of them is no type at all, and one per tool is not a
+	// list. The producer and the consumer of a Details agree out of band, the
+	// way they do with a context value.
 	Details any
 
 	// Terminate ends the turn after this batch, with StopTerminated. It is a
@@ -62,6 +75,14 @@ type reporter struct{}
 // It is reached through the context rather than a parameter so that a tool with
 // nothing to report pays nothing for it — no argument to declare, no interface
 // to satisfy. Outside a tool, or when nobody is listening, it does nothing.
+//
+// What is reported is handed over. It leaves the tool's goroutine for whoever
+// is ranging over the exchange, so a tool must not keep writing to anything
+// inside it — the slice behind a Content block, the value in Details — after
+// passing it here. Build the next report; do not edit the last one.
+//
+// A report is also droppable, and dropped rather than stalling a tool that has
+// nobody listening. ToolEnd carries the finished result either way.
 //
 //	agent.Report(ctx, agent.TextResult(line))
 func Report(ctx context.Context, partial Result) {

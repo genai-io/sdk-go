@@ -206,7 +206,7 @@ told; hooks are *asked* — that is why they share no word with the event stream
 
 ```mermaid
 flowchart LR
-    A[assemble request] --> B{{PreInfer}}
+    A[assemble the call] --> B{{PreInfer}}
     B --> C[model call]
     C --> D{{PostInfer}}
     D --> E[message]
@@ -217,7 +217,7 @@ flowchart LR
 
 | | in | out |
 | --- | --- | --- |
-| `PreInfer` | the request, about to go | edits it in place |
+| `PreInfer` | the call, about to go | edits it in place |
 | `PostInfer` | the response, on a call that worked | edits it in place |
 | `PreTool` | the call, its tool, the conversation | a `Decision` |
 | `PostTool` | the call, its tool, what it produced | a `*Result` (nil keeps it) |
@@ -247,15 +247,33 @@ different concerns and should not have to be the same function.
 
 ### What `PreInfer` may change
 
-`PreInfer` is handed the request this agent assembled — its prompt, its
-conversation, its tools — and edits last for that one call. Prune the history,
-narrow the toolset for one question, add a line to the prompt that is only true
-right now. To change the agent itself, use `SetMessages`, `SetTools`,
-`SetSystem`.
+`PreInfer` is handed an `Inference` — the call this agent is about to make —
+and edits last, for that one call:
 
-The client's own settings — temperature, token ceilings, effort — belong to the
-`ai.Client` it was built on, and writing them here changes nothing. One call,
-one place to configure it.
+```go
+PreInfer: func(_ context.Context, inf *agent.Inference) error {
+    if len(inf.Messages) > 200 {
+        inf.Messages = inf.Messages[len(inf.Messages)-200:]
+    }
+    inf.Options = append(inf.Options, ai.WithForceTool("search"))
+    return nil
+},
+```
+
+`System`, `Messages` and `Tools` are what the agent contributes, and the hook
+owns them for the call. Everything else a model call can carry — a forced tool
+for this step, a schema for this answer, a cap on these tokens, a protocol's
+own setting — is reached by appending to `Options`, which is layered on last,
+over the client's.
+
+It is that shape and not an `ai.Request` for a reason. A request handed over
+half-filled cannot say which fields were meant: for every value type on it,
+*left alone* and *deliberately set to zero* are the same bytes — the ambiguity
+`ai.Request.Temperature` is a pointer to avoid. An appended option has no such
+problem, and layering is how `pkg/ai` composes a call to begin with.
+
+To change the agent itself rather than one call, use `SetMessages`, `SetTools`,
+`SetSystem`.
 
 ## Tools
 

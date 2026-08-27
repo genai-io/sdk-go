@@ -320,14 +320,14 @@ func (a *Agent) String() string {
 	return fmt.Sprintf("agent(%s)", name)
 }
 
-// request is what this agent would send. One lock, not three: a prompt read
-// before SetTools and a toolset read after it would describe an agent that
-// never existed.
-func (a *Agent) request() *ai.Request {
+// inference is the call this agent would make. One lock, not three: a prompt
+// read before SetTools and a toolset read after it would describe an agent
+// that never existed.
+func (a *Agent) inference() *Inference {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	return &ai.Request{
+	return &Inference{
 		System:   a.system,
 		Messages: slices.Clone(a.messages),
 		Tools:    a.definitions(),

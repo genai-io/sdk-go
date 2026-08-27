@@ -154,7 +154,7 @@ Hook 是应用插进"循环与模型之间"的地方。**事件是通知,hook �
 
 ```mermaid
 flowchart LR
-    A[组装 request] --> B{{PreInfer}}
+    A[组装这次调用] --> B{{PreInfer}}
     B --> C[模型调用]
     C --> D{{PostInfer}}
     D --> E[消息]
@@ -165,7 +165,7 @@ flowchart LR
 
 | | 收到 | 交回 |
 | --- | --- | --- |
-| `PreInfer` | 即将发出的 request | 原地修改 |
+| `PreInfer` | 即将发出的那次调用 | 原地修改 |
 | `PostInfer` | 成功调用返回的 response | 原地修改 |
 | `PreTool` | 这次调用、它的工具、对话 | 一个 `Decision` |
 | `PostTool` | 这次调用、它的工具、产出 | 一个 `*Result`(nil 表示保持原样) |
@@ -192,9 +192,23 @@ agent.WithHooks(agent.Hook{
 
 ### `PreInfer` 能改什么
 
-`PreInfer` 拿到的是这个 agent 组装出来的 request——它的 prompt、它的对话、它的工具——**改动只对这一次调用生效**。可以裁剪历史、为某一个问题收窄工具集、加一句只在此刻成立的提示。想改 agent 本身,用 `SetMessages` / `SetTools` / `SetSystem`。
+`PreInfer` 拿到的是一个 `Inference`——这个 agent 即将发起的那次调用——**改动只对这一次生效**:
 
-client 自己的设置——temperature、token 上限、effort——属于构造它的那个 `ai.Client`,在这里写它们不会生效。**同一次调用只有一个地方能配置。**
+```go
+PreInfer: func(_ context.Context, inf *agent.Inference) error {
+    if len(inf.Messages) > 200 {
+        inf.Messages = inf.Messages[len(inf.Messages)-200:]
+    }
+    inf.Options = append(inf.Options, ai.WithForceTool("search"))
+    return nil
+},
+```
+
+`System`、`Messages`、`Tools` 是 agent 贡献的那部分,这一次调用里归 hook 支配。**其余一切**——为这一步强制某个工具、为这一次答案指定 schema、给这一次调用设上限、某个协议独有的设置——都通过**追加 `Options`** 达成,它是最后叠上去的一层,盖在 client 自己的设置之上。
+
+用这个形状而不用 `ai.Request` 是有原因的:一个**半填的** request 说不清哪些字段是有意为之——对它上面每一个值类型,"没动过"和"特意设成零"是同一串字节,而这正是 `ai.Request.Temperature` 用指针要避开的歧义。追加一个 option 没有这个问题(在就是在,不在就是不在),而且分层本来就是 `pkg/ai` 组装一次调用的方式。
+
+想改 agent 本身而不是某一次调用,用 `SetMessages` / `SetTools` / `SetSystem`。
 
 ## 工具
 

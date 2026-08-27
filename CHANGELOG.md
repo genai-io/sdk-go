@@ -22,6 +22,20 @@ Each such change is listed under **Changed** with what to write instead.
   store that was not the local filesystem could block the loop delivering
   events with no way to cancel it.
 - **`Recorder.Snapshot` is gone**, and nothing replaces it — see below.
+- **`PreInfer` is handed an `agent.Inference`, not an `*ai.Request`.** It has
+  the three things an agent contributes — `System`, `Messages`, `Tools` — and
+  an `Options []ai.Option` layered on last for everything else, so
+  `ai.WithForceTool`, `ai.WithSchema`, `ai.WithMaxTokens` and the rest now
+  reach the wire. They did not before: the agent projected two fields of the
+  request it handed over and dropped the other nine in silence. The shape
+  changed rather than the projection widening because a half-filled request
+  cannot distinguish a field left alone from one set to zero, which is the
+  ambiguity `ai.Request.Temperature` is a pointer to avoid. `MessageStart` and
+  `MessageEnd` carry `Inference` in place of `Request`.
+- **An agent's toolset is now authoritative.** `System` and `Tools` go out on
+  every call, so an agent with no tools offers none even on a client built with
+  some. Previously an empty toolset was projected as no instruction at all, and
+  there was no way for an agent to say "none".
 - **Agent events carry what a consumer used to rebuild.** Every event in a turn
   has its `Turn`; `MessageEnd` carries the `Request` and `Attempt` its
   `MessageStart` opened with, and `ToolEnd` the `Name` and `Args` of its

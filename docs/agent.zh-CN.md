@@ -88,18 +88,20 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 
 ## 事件
 
-agent 干的每件事都以 9 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
+agent 干的每件事都以 10 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
 
 ```
-MessageAdded                              一条消息进了对话
-MessageStart  MessageUpdate  MessageEnd   模型正在产生一条
+MessageAdded  MessagesReplaced            对话本身发生变化
+MessageStart  MessageUpdate  MessageEnd   模型正在产生一条消息
 ToolStart     ToolUpdate     ToolEnd      一次工具调用,从提出到答复
 TurnStart                    TurnEnd      包住它们的那一轮
 ```
 
 这个集合是**封闭**的——`event()` 方法不可导出,别的包加不进来——所以消费者 switch 的时候可以确信上面这张表就是全部。
 
-**对话是 `MessageAdded` 的折叠。** 这是消费者唯一需要记住的规则:把它们按顺序重放,得到的就是 agent 手里那份。其余事件报告的都是过程。
+**对话是第一行的折叠。** 把 `MessageAdded` 按顺序重放,得到的就是 agent 手里那份;遇到 `MessagesReplaced` 则从头开始折——在它之前播报过的一切,都是 agent 已经扔掉的。其余事件报告的都是过程。
+
+**每个属于某一轮的事件都带着轮次号,每个收尾事件都带着开启它的东西**——`MessageEnd` 带着它的 request,`ToolEnd` 带着名字和参数。消费者是从事件上**读出**发生了什么,而不是靠记住之前发生过什么再拼回来;这也是为什么记录一个事件是翻译,不是状态机。
 
 一次交换,从外面看:
 
@@ -243,7 +245,7 @@ rec, history, err := session.Open(ctx, store, resume)   // "" 表示新开一个
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.Handle(e)   // 先写盘
+    rec.Handle(ctx, e)   // 先写盘
     render(e)       // 再画屏
 }
 ```
@@ -262,15 +264,14 @@ flowchart LR
 
 `Recorder` 在 span 收尾时写一次:`MessageStart`+`MessageEnd` 合成一条推理记录,`ToolStart`+`ToolEnd` 合成一条工具记录。`MessageAdded` 单独存,把它们折回来就是恢复。片段不存——收尾事件已经带了完整值。
 
-**`SetMessages` 在折叠之外。** 压缩和恢复都是把对话整体换掉,而事件流上没有任何东西说这件事——因为 **agent 不知道自己的历史被换过,换它的那个人知道**:
+**换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——recorder 把它存成折叠的新起点:
 
 ```go
 summary := compact(a.Messages())
-a.SetMessages(summary)
-rec.Snapshot(summary)   // 折叠从这里重新开始
+a.SetMessages(summary)   // 就这一行
 ```
 
-忘了第二行,会话就会把 agent 扔掉的东西还给你——下次恢复读到的正是你压缩掉的那份。
+**没有第二行可以忘。** 之所以推迟到下一轮而不是当场播报:进程如果死在这两者之间,恢复出来的是压缩前的那份对话——那是丢了一次优化,不是坏了一段历史。
 
 `Store` 只有四个方法,而且是刻意的:
 

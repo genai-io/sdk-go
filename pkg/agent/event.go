@@ -9,21 +9,44 @@ import "github.com/genai-io/sdk-go/pkg/ai"
 // which is never called and exists only to be that gate — a consumer switching
 // over Event knows this list is all there is.
 //
-//	MessageAdded                              a message entered the conversation
-//	MessageStart  MessageUpdate  MessageEnd   the model producing one
+//	MessageAdded  MessagesReplaced            the conversation changing
+//	MessageStart  MessageUpdate  MessageEnd   the model producing a message
 //	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
 //	TurnStart                    TurnEnd      the exchange around them
+//
+// Every event that belongs to a turn carries its number, and every event that
+// belongs to a span carries what opened it. A consumer reads what happened off
+// the event; it never has to rebuild it by remembering what came before.
 type Event interface{ event() }
 
 // MessageAdded says something entered the conversation — the only event that
 // changes what the model sees next. The conversation is the fold of these.
-type MessageAdded struct{ Message ai.Message }
+type MessageAdded struct {
+	Turn    int
+	Message ai.Message
+}
 
 func (MessageAdded) event() {}
+
+// MessagesReplaced says the conversation was thrown away and another put in
+// its place — what SetMessages did, reported at the start of the next
+// exchange, because that is when the agent next has anywhere to report it.
+//
+// It is the other event that changes what the model sees, and the reason a
+// fold over MessageAdded alone is not the conversation: everything announced
+// before one of these is gone. Compaction is the case that matters — a
+// consumer that ignores this hands back the history the agent just discarded.
+type MessagesReplaced struct {
+	Turn     int
+	Messages []ai.Message
+}
+
+func (MessagesReplaced) event() {}
 
 // MessageStart says the model has been asked and a message is on its way.
 // Only a message the model produces has a span; the rest arrive whole.
 type MessageStart struct {
+	Turn int
 	// Attempt rises on a retry — how a consumer knows the partial output it
 	// drew is about to be replaced.
 	Attempt int
@@ -47,6 +70,11 @@ func (MessageUpdate) event() {}
 // follow at all when Err is set — that absence is what tells a consumer the
 // partial output it drew was discarded.
 type MessageEnd struct {
+	Turn    int
+	Attempt int
+	// Request is the one MessageStart opened this span with, carried again so
+	// that closing a span needs nothing but the event that closes it.
+	Request  *ai.Request
 	Response *ai.Response
 	Err      error
 }
@@ -56,6 +84,7 @@ func (MessageEnd) event() {}
 // ToolStart opens one tool execution, before the gate runs. Args is what the
 // model sent, before any hook rewrote it.
 type ToolStart struct {
+	Turn int
 	ID   string
 	Name string
 	Args string
@@ -68,7 +97,9 @@ func (ToolStart) event() {}
 // message fragment it replaces rather than appends — a tool sends what it has,
 // not what changed — and ToolEnd carries the finished result.
 type ToolUpdate struct {
+	Turn    int
 	ID      string
+	Name    string
 	Partial Result
 }
 
@@ -78,7 +109,12 @@ func (ToolUpdate) event() {}
 // before PostTool runs so a reader is not waiting on hooks — a hook that
 // replaces the result changes what the model is told, not this.
 type ToolEnd struct {
-	ID     string
+	Turn int
+	ID   string
+	// Name and Args are the ones ToolStart opened with, carried again for the
+	// same reason MessageEnd carries its request.
+	Name   string
+	Args   string
 	Result Result
 	Err    error
 }

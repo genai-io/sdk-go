@@ -8,9 +8,11 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Compaction replaces the conversation, and a session that only folded what was
-// appended would restore what the agent threw away. A snapshot is the reset the
-// fold needs: everything before one is what the agent no longer has.
+// Compaction replaces the conversation, and a session that only folded what
+// was appended would restore what the agent threw away. Nothing here says so:
+// replacing the conversation is an event like any other, and the recorder
+// consuming the stream already has it. That is the point of the test — a
+// caller who forgets a step cannot exist if there is no step to forget.
 func TestCompactionSurvivesARestore(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
@@ -22,11 +24,8 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 	}
 	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
 
-	// Compaction replaces the conversation, and the caller who replaced it is
-	// the one who knows: it tells the session in the same breath.
 	summary := []ai.Message{ai.UserMessage("(summary of the above)")}
 	a.SetMessages(summary)
-	rec.Snapshot(summary)
 
 	converse(t, a, rec, ai.UserMessage("third"))
 

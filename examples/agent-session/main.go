@@ -8,10 +8,11 @@
 //
 //	rec, history, _ := session.Open(ctx, store, id)   // restore
 //	a.SetMessages(history)                            // seed
-//	rec.Handle(e)                                     // record, in your loop
+//	rec.Handle(ctx, e)                                     // record, in your loop
 //
-// — and one more matters the first time you compact: SetMessages is outside
-// the fold, so a replaced history has to be announced. See compact below.
+// — and nothing more, compaction included: replacing the conversation is an
+// event too, so a session that consumed the stream already knows. See compact
+// below.
 //
 //	export ANTHROPIC_API_KEY=...
 //	go run ./examples/agent-session "what is a goroutine?"
@@ -112,7 +113,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) e
 	a.SetMessages(history)
 
 	if keep > 0 {
-		compact(a, rec, keep)
+		compact(a, keep)
 	}
 
 	// One loop, and it owns the order: record first, then draw. Handle is
@@ -123,7 +124,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) e
 		if err != nil {
 			return err
 		}
-		rec.Handle(e)
+		rec.Handle(ctx, e)
 		render(e)
 		if v, ok := e.(agent.TurnEnd); ok {
 			end = v
@@ -139,21 +140,20 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) e
 	return nil
 }
 
-// compact is the case worth knowing about. A session is the fold of the
-// messages that were announced, and SetMessages announces nothing — the agent
-// cannot tell being compacted from being handed a history in the first place.
-// So the caller who replaced it says so. Forget the second line and the next
-// restore hands back everything this one threw away.
-func compact(a *agent.Agent, rec *session.Recorder, keep int) {
+// compact throws most of the conversation away, and tells the session nothing
+// — there is nothing to tell it. Replacing a conversation is an event like any
+// other: the agent reports it as MessagesReplaced at the start of the next
+// exchange, and the recorder stores it as the point a fold starts from. Get
+// this wrong and the next restore hands back everything you just discarded,
+// which is why it is not something a caller is asked to remember.
+func compact(a *agent.Agent, keep int) {
 	msgs := a.Messages()
 	if len(msgs) <= keep {
 		return
 	}
 	// A real one summarises with a model call; this one just drops the middle.
 	kept := msgs[len(msgs)-keep:]
-
 	a.SetMessages(kept)
-	rec.Snapshot(kept) // the fold starts here now
 
 	fmt.Printf("\033[2mcompacted %d messages to %d\033[0m\n", len(msgs), len(kept))
 }

@@ -53,6 +53,11 @@ type MessageStart struct {
 	// Inference is the call going out, PreInfer's edits included. The client
 	// merges its defaults and repairs the history after this, so it is what
 	// was asked for, not the finished wire request.
+	//
+	// Read it; do not write it. Hooks are asked and events are told, and this
+	// is an event — the pointer is the one the loop is about to send, so
+	// editing it here would change the call from the side that is only
+	// supposed to be watching. PreInfer is where a call is edited.
 	Inference *Inference
 }
 

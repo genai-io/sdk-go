@@ -1951,3 +1951,172 @@ func TestAnAgentDoesNotRetryUnlessAsked(t *testing.T) {
 		t.Errorf("the driver was called %d times, want 1 — retry is the client's", d.calls)
 	}
 }
+
+// SetTools, SetSystem and AddHook all promise the same thing: the change lands
+// on the next inference, not mid-stream. A turn holds several inferences, so
+// "next" is a real moment inside one — and nothing pinned it.
+func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
+	d := &scripted{scripts: [][]ai.Delta{
+		toolCall("1", "before", "{}"),
+		text("done"),
+	}}
+	before := agent.ToolFunc("before", "the tool it starts with",
+		func(context.Context, struct{}) (agent.Result, error) { return agent.TextResult("ok"), nil })
+	after := agent.ToolFunc("after", "the tool it is given mid-turn",
+		func(context.Context, struct{}) (agent.Result, error) { return agent.TextResult("ok"), nil })
+
+	a := newAgent(t, d, agent.WithSystem("first prompt"), agent.WithTools(before))
+
+	var hookSaw []string
+	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Between the first inference and the second, change everything.
+		if _, ok := e.(agent.ToolEnd); ok {
+			a.SetTools(after)
+			a.SetSystem("second prompt")
+			a.AddHooks(agent.Hook{
+				PreInfer: func(_ context.Context, inf *agent.Inference) error {
+					hookSaw = append(hookSaw, inf.System)
+					return nil
+				},
+			})
+		}
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.got) != 2 {
+		t.Fatalf("the driver saw %d calls, want 2", len(d.got))
+	}
+	if d.got[0].System != "first prompt" {
+		t.Errorf("call 1 system = %q, want the original", d.got[0].System)
+	}
+	if d.got[1].System != "second prompt" {
+		t.Errorf("call 2 system = %q, want the replacement", d.got[1].System)
+	}
+	if n := len(d.got[0].Tools); n != 1 || d.got[0].Tools[0].Schema.Name != "before" {
+		t.Errorf("call 1 offered %v, want the original toolset", toolNames(d.got[0].Tools))
+	}
+	if n := len(d.got[1].Tools); n != 1 || d.got[1].Tools[0].Schema.Name != "after" {
+		t.Errorf("call 2 offered %v, want the replacement", toolNames(d.got[1].Tools))
+	}
+	// The hook was added after the first call, so it saw only the second.
+	if len(hookSaw) != 1 || hookSaw[0] != "second prompt" {
+		t.Errorf("the added hook ran %d times %v, want once on the second call", len(hookSaw), hookSaw)
+	}
+}
+
+func toolNames(tools []ai.Tool) []string {
+	out := make([]string, len(tools))
+	for i, t := range tools {
+		out[i] = t.Schema.Name
+	}
+	return out
+}
+
+// FromAI is the bridge that lets a tool written against pkg/ai run in an
+// agent without being rewritten. Its schema and its answer both have to
+// survive the crossing, and a failing one has to fail the agent's way — as a
+// result the model can read, not as a turn that dies.
+func TestAToolWrittenForTheClientRunsInAnAgent(t *testing.T) {
+	type args struct {
+		City string `json:"city" description:"which city"`
+	}
+	plain := ai.ToolFunc("weather", "Look up the weather.",
+		func(_ context.Context, a args) (string, error) {
+			if a.City == "" {
+				return "", errors.New("no city given")
+			}
+			return "mild in " + a.City, nil
+		})
+
+	lifted := agent.FromAI(plain)
+	if got := lifted.Schema(); got.Name != "weather" || got.Description != "Look up the weather." {
+		t.Errorf("Schema = %+v, want the ai.Tool's", got)
+	}
+	if _, ok := lifted.Schema().DefinitionMap()["properties"]; !ok {
+		t.Error("the derived schema did not cross over")
+	}
+
+	got, err := lifted.Run(context.Background(),
+		ai.ToolCall{ID: "1", Name: "weather", Input: `{"city":"Delhi"}`})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Text() != "mild in Delhi" {
+		t.Errorf("Run = %q, want what the ai.Tool returned", got.Text())
+	}
+
+	// A tool offered with nothing to run it is a configuration mistake, and
+	// says so rather than panicking.
+	empty := agent.FromAI(ai.Tool{Schema: ai.Schema{Name: "hollow"}})
+	if _, err := empty.Run(context.Background(), ai.ToolCall{Name: "hollow"}); err == nil {
+		t.Error("a tool with no Run was called without complaint")
+	}
+}
+
+// A tool is the caller's code, but it runs on a goroutine this package
+// created — the one place a panic cannot be recovered by whoever wrote it.
+// Unrecovered it takes the whole process down mid-conversation. A failing tool
+// already has a way to fail, so a panic becomes that: the model is told, and
+// the turn carries on.
+func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
+	boom := agent.ToolFunc("boom", "panics",
+		func(context.Context, struct{}) (agent.Result, error) {
+			var m map[string]int
+			m["nil map write"] = 1 // panics
+			return agent.TextResult("unreachable"), nil
+		})
+	fine := agent.ToolFunc("fine", "works",
+		func(context.Context, struct{}) (agent.Result, error) {
+			return agent.TextResult("still here"), nil
+		})
+
+	d := &scripted{scripts: [][]ai.Delta{
+		{
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "boom", Input: "{}"})},
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "fine", Input: "{}"})},
+			{StopReason: ai.StopToolUse},
+		},
+		text("carried on"),
+	}}
+	a := newAgent(t, d, agent.WithTools(boom, fine))
+
+	var failed *agent.PanicError
+	ended := map[string]bool{}
+	for e, err := range a.Run(context.Background(), ai.UserMessage("run both")) {
+		if err != nil {
+			t.Fatalf("the turn died: %v", err)
+		}
+		if v, ok := e.(agent.ToolEnd); ok {
+			ended[v.Name] = true
+			if v.Name == "boom" {
+				if !errors.As(v.Err, &failed) {
+					t.Fatalf("boom ended with %v, want a *agent.PanicError", v.Err)
+				}
+			}
+		}
+	}
+
+	if !ended["boom"] || !ended["fine"] {
+		t.Errorf("tools that ended: %v, want both — one panic stalled the batch", ended)
+	}
+	if failed == nil {
+		t.Fatal("the panic was never reported")
+	}
+	if len(failed.Stack) == 0 {
+		t.Error("the stack was not kept; a recovered panic with no stack is undebuggable")
+	}
+	// The model is told one line, not a stack trace.
+	if got := agent.ResultText(agent.Result{}, failed); strings.Contains(got, "goroutine") {
+		t.Errorf("the model was told %q — that is a stack trace", got)
+	}
+
+	// And the conversation went on: the model answered after the tool results.
+	last := a.Messages()[len(a.Messages())-1]
+	if last.Text() != "carried on" {
+		t.Errorf("the conversation ended at %q, want the model's answer", last.Text())
+	}
+}

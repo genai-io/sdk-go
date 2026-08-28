@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"runtime/debug"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -154,6 +155,19 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		}
 	}
 	return nil, spent, lastErr
+}
+
+// PanicError is a tool that panicked. Error is deliberately one line, because
+// it is what the model is told and a stack trace is neither useful to it nor
+// cheap to send; Stack is the whole thing, for whoever is watching ToolEnd.
+type PanicError struct {
+	Tool  string
+	Value any
+	Stack []byte
+}
+
+func (e *PanicError) Error() string {
+	return fmt.Sprintf("tool %s panicked: %v", e.Tool, e.Value)
 }
 
 // errStalled is a stream that has stopped saying anything: the connection is
@@ -341,6 +355,20 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 
 		run := func(i int) {
 			c := &batch[i]
+			// A tool is the caller's code on a goroutine this package
+			// created, which is the one place a panic cannot be recovered by
+			// the person who wrote it. Left alone it takes the process down
+			// mid-conversation. A failing tool already has a way to fail —
+			// an error the model is shown and can correct — so a panic
+			// becomes one of those, and the turn carries on.
+			defer func() {
+				if p := recover(); p != nil {
+					c.result, c.err = Result{}, &PanicError{
+						Tool: c.Name, Value: p, Stack: debug.Stack(),
+					}
+					ch <- update{index: i}
+				}
+			}()
 			rctx := context.WithValue(ctx, reporter{}, func(partial Result) {
 				select {
 				case ch <- update{index: i, partial: &partial}:
@@ -384,7 +412,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		results[i] = ai.ToolResult{
 			ToolCallID: c.ID,
 			ToolName:   c.Name,
-			Content:    Told(c.result, c.err),
+			Content:    ResultText(c.result, c.err),
 			IsError:    c.err != nil,
 		}
 		terminate = terminate && c.stop

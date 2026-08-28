@@ -95,7 +95,7 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 		// record cannot come to disagree with the conversation.
 		r.write(ctx, v.Turn, Entry{Type: EntryToolRun, ToolRun: &ToolRun{
 			ID: v.ID, Name: v.Name, Args: v.Args,
-			Content: agent.Told(v.Result, v.Err), IsError: v.Err != nil,
+			Content: agent.ResultText(v.Result, v.Err), IsError: v.Err != nil,
 		}})
 
 	case agent.TurnEnd:

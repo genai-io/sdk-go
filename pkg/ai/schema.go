@@ -65,10 +65,7 @@ func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts 
 
 // DefinitionMap returns an independent JSON-object representation of the
 // schema, or nil when Definition cannot be represented as a JSON object.
-func (s *Schema) DefinitionMap() map[string]any {
-	if s == nil {
-		return nil
-	}
+func (s Schema) DefinitionMap() map[string]any {
 	return jsonSchemaObject(s.Definition)
 }
 
@@ -99,8 +96,8 @@ func (s Schema) Validate(input string) error {
 
 // WireName is the identifier to send for a protocol that requires a schema to
 // be named. It is the schema's own Name, or "response" when it states none.
-func (s *Schema) WireName() string {
-	if s == nil || s.Name == "" {
+func (s Schema) WireName() string {
+	if s.Name == "" {
 		return "response"
 	}
 	return s.Name

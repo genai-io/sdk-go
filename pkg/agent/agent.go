@@ -19,8 +19,6 @@ import (
 type Agent struct {
 	client *ai.Client
 
-	id       string
-	name     string
 	system   string
 	messages []ai.Message
 	tools    []Tool
@@ -71,22 +69,6 @@ const (
 // parameter is what it cannot be built without; everything else is named at
 // the site that wanted it, so a plain agent is agent.New(client).
 type Option func(*Agent)
-
-// WithID identifies the agent in the events it emits, for when more than one
-// runs. Machines read this.
-func WithID(id string) Option { return func(a *Agent) { a.id = id } }
-
-// WithName gives the agent a name for a person to read. Separate from the id
-// because a name can be renamed and an id cannot.
-func WithName(name string) Option { return func(a *Agent) { a.name = name } }
-
-// Name returns the agent's human-readable name, or its id if it has none.
-func (a *Agent) Name() string {
-	if a.name != "" {
-		return a.name
-	}
-	return a.id
-}
 
 // WithSystem sets the system prompt, verbatim. A string, because assembling
 // one is the application's business and this package needs no opinion on it.
@@ -274,7 +256,7 @@ func (a *Agent) Tools() []Tool {
 
 // SetTools replaces what the model may call. It takes effect on the next
 // inference, not mid-stream.
-func (a *Agent) SetTools(tools []Tool) {
+func (a *Agent) SetTools(tools ...Tool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.tools = slices.Clone(tools)
@@ -295,12 +277,12 @@ func (a *Agent) System() string {
 	return a.system
 }
 
-// AddHook registers another hook. It takes effect on the next inference, and
+// AddHooks registers more hooks. They take effect on the next inference, and
 // hooks run in the order they were added.
-func (a *Agent) AddHook(h Hook) {
+func (a *Agent) AddHooks(hooks ...Hook) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.hooks = append(a.hooks, h)
+	a.hooks = append(a.hooks, hooks...)
 }
 
 // SetSystem replaces the system prompt. It takes effect on the next inference,
@@ -312,13 +294,9 @@ func (a *Agent) SetSystem(prompt string) {
 	a.system = prompt
 }
 
-func (a *Agent) String() string {
-	name := a.Name()
-	if name == "" {
-		name = a.client.Model().ID
-	}
-	return fmt.Sprintf("agent(%s)", name)
-}
+// String names the agent by the model it is bound to, which is the one thing
+// about it that is both stable and worth reading in a log.
+func (a *Agent) String() string { return fmt.Sprintf("agent(%s)", a.client.Model().ID) }
 
 // inference is the call this agent would make. One lock, not three: a prompt
 // read before SetTools and a toolset read after it would describe an agent

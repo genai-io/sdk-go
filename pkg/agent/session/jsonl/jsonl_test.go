@@ -128,7 +128,7 @@ func TestMessagesFoldsOnlyMessageEntries(t *testing.T) {
 	meta := create(t, s)
 	if err := s.Append(ctx(), meta.ID,
 		msg("hello"),
-		session.Entry{Type: session.EntryInference, Inference: &session.Inference{Turn: 1, Attempt: 1}},
+		session.Entry{Type: session.EntryInference, Turn: 1, Inference: &session.Inference{Attempt: 1}},
 		msg("again"),
 	); err != nil {
 		t.Fatalf("Append: %v", err)

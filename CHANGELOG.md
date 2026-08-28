@@ -11,12 +11,17 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
+- **`Entry` carries the turn, and the payloads no longer do.** Which exchange
+  an entry belongs to says where it sits, which is what `Seq` and `At` say too,
+  so it is `Entry.Turn` rather than a field repeated inside three payload
+  types. Message and snapshot entries gain it, having previously had no turn at
+  all.
 - **The session package is renamed where a name was ambiguous.** `session.Tool`
   is `session.ToolRun` — a tool is a thing that can be run, and `ai` and `agent`
-  both have that type, where this is the record of one having been. `session.Turn`
-  is `session.Exchange`, because `Turn.Turn` is not a name. The entry constants
-  follow: `EntryTool` is `EntryToolRun`, `EntryTurn` is `EntryExchange`, and
-  `Entry.Tool`/`Entry.Turn` are `Entry.ToolRun`/`Entry.Exchange`.
+  both have that type, where this is the record of one having been.
+  `session.Turn` is `session.Outcome`, holding how a turn ended rather than
+  restating which turn it was; `EntryTool` is `EntryToolRun` and `EntryTurn` is
+  `EntryOutcome`.
 - **`Recorder.Handle` takes a context.** `Store` is context-aware in every
   method and the recorder passed `context.Background()` to all of them, so a
   store that was not the local filesystem could block the loop delivering

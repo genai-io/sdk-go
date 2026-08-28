@@ -59,7 +59,7 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 	switch v := e.(type) {
 	case agent.MessageAdded:
 		msg := v.Message
-		r.write(ctx, Entry{Type: EntryMessage, Message: &msg})
+		r.write(ctx, v.Turn, Entry{Type: EntryMessage, Message: &msg})
 
 	case agent.MessagesReplaced:
 		// The one Open handed over is not news: it was read from here.
@@ -70,10 +70,10 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 				return
 			}
 		}
-		r.write(ctx, Entry{Type: EntrySnapshot, Snapshot: v.Messages})
+		r.write(ctx, v.Turn, Entry{Type: EntrySnapshot, Snapshot: v.Messages})
 
 	case agent.MessageEnd:
-		rec := Inference{Turn: r.turn(v.Turn), Attempt: v.Attempt}
+		rec := Inference{Attempt: v.Attempt}
 		if v.Inference != nil {
 			rec.System = v.Inference.System
 			for _, t := range v.Inference.Tools {
@@ -88,27 +88,24 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 		if v.Err != nil {
 			rec.Error = v.Err.Error()
 		}
-		r.write(ctx, Entry{Type: EntryInference, Inference: &rec})
+		r.write(ctx, v.Turn, Entry{Type: EntryInference, Inference: &rec})
 
 	case agent.ToolEnd:
 		// The same text the model was told, from the same function, so the
 		// record cannot come to disagree with the conversation.
-		r.write(ctx, Entry{Type: EntryToolRun, ToolRun: &ToolRun{
-			Turn: r.turn(v.Turn), ID: v.ID, Name: v.Name, Args: v.Args,
+		r.write(ctx, v.Turn, Entry{Type: EntryToolRun, ToolRun: &ToolRun{
+			ID: v.ID, Name: v.Name, Args: v.Args,
 			Content: agent.Told(v.Result, v.Err), IsError: v.Err != nil,
 		}})
 
 	case agent.TurnEnd:
-		rec := Exchange{Turn: r.turn(v.Turn), StopReason: v.StopReason, Usage: v.Usage}
+		rec := Outcome{StopReason: v.StopReason, Usage: v.Usage}
 		if v.Err != nil {
 			rec.Err = v.Err.Error()
 		}
-		r.write(ctx, Entry{Type: EntryExchange, Exchange: &rec})
+		r.write(ctx, v.Turn, Entry{Type: EntryOutcome, Outcome: &rec})
 	}
 }
-
-// turn maps the agent's per-run number onto this session's.
-func (r *Recorder) turn(n int) int { return r.turnsBefore + n }
 
 // Err reports the write that stopped recording, if one did.
 func (r *Recorder) Err() error {
@@ -117,7 +114,12 @@ func (r *Recorder) Err() error {
 	return r.err
 }
 
-func (r *Recorder) write(ctx context.Context, e Entry) {
+// write stores one entry, stamping the turn it belongs to. The agent numbers
+// turns from one on every run; the mapping onto the session's own numbering
+// happens here, once, rather than at each of the five call sites where
+// forgetting it would be silent.
+func (r *Recorder) write(ctx context.Context, turn int, e Entry) {
+	e.Turn = r.turnsBefore + turn
 	if e.At.IsZero() {
 		e.At = time.Now().UTC()
 	}

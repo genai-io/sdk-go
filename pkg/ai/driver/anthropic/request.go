@@ -131,8 +131,10 @@ func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewPa
 	}
 	// Structured output shares output_config with the effort level, so it is
 	// set on the same struct rather than replacing it.
-	if def := req.Schema.DefinitionMap(); def != nil {
-		params.OutputConfig.Format = sdk.JSONOutputFormatParam{Schema: def}
+	if req.Schema != nil {
+		if def := req.Schema.DefinitionMap(); def != nil {
+			params.OutputConfig.Format = sdk.JSONOutputFormatParam{Schema: def}
+		}
 	}
 	return params, nil
 }

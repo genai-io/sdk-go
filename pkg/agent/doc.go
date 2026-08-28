@@ -99,7 +99,8 @@
 //
 //	event.go   what an exchange reports
 //	tool.go    a tool: defined from a Go type, offered, run
-//	hook.go    the four places a caller gets between the loop and the model
+//	hook.go    the four places a caller gets between the loop and the model,
+//	           and the things each one is handed
 //
 // # What is deliberately not here
 //

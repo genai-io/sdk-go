@@ -37,11 +37,12 @@ func TextResult(text string) Result { return Result{Content: ai.TextContent(text
 // Text returns the result's text in block order.
 func (r Result) Text() string { return r.Content.Text() }
 
-// Told is what a tool call comes to say: the result's text, or the error when
-// it failed, or a placeholder when it produced neither — several endpoints
+// ResultText is what a tool call comes to say: the result's text, or the error
+// when it failed, or a placeholder when it produced neither — several endpoints
 // reject a tool result with no content at all. It is one function because the
-// model and the session must be told the same thing.
-func Told(r Result, err error) string {
+// model and the session must be told the same thing, and two implementations
+// of the same fallback had already come to disagree.
+func ResultText(r Result, err error) string {
 	if text := r.Text(); text != "" {
 		return text
 	}

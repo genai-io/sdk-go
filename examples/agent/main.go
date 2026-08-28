@@ -59,7 +59,6 @@ func main() {
 		})
 
 	a, err := agent.New(client,
-		agent.WithID("example"),
 		agent.WithSystem(system),
 		agent.WithTools(shell),
 		agent.WithMaxSteps(12),

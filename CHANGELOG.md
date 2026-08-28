@@ -27,6 +27,18 @@ Each such change is listed under **Changed** with what to write instead.
   store that was not the local filesystem could block the loop delivering
   events with no way to cancel it.
 - **`Recorder.Snapshot` is gone**, and nothing replaces it — see below.
+- **`agent.Told` is `agent.ResultText`**, a name that says what it returns.
+- **`SetTools` and `AddHooks` are variadic**, matching `WithTools` and
+  `WithHooks`; `AddHook` is `AddHooks`. Messages keep their existing split — a
+  conversation is handed over as a slice (`WithMessages`, `SetMessages`) and
+  added to as items (`AddMessages`).
+- **`ai.Schema.DefinitionMap` and `WireName` take a value receiver**, matching
+  `Validate`. They could not be called on a `Schema` returned by value, which
+  is what `agent.Tool.Schema()` returns.
+- **`WithID`, `WithName` and `Agent.Name` are gone.** `WithID` documented
+  itself as identifying the agent in the events it emits, which no event ever
+  carried; between them the two fields fed nothing but `String`. `String`
+  remains, naming the agent by its model.
 - **`PreInfer` is handed an `agent.Inference`, not an `*ai.Request`.** It has
   the three things an agent contributes — `System`, `Messages`, `Tools` — and
   an `Options []ai.Option` layered on last for everything else, so
@@ -71,6 +83,14 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Fixed
 
+- **A panicking tool no longer takes the process down.** Tools run on
+  goroutines this package creates, which is the one place a panic cannot be
+  recovered by whoever wrote the code — so one nil-map write in one tool killed
+  the caller's program mid-conversation, with no way to prevent it. A panic is
+  now the failure a tool already has a way to express: the model is told, the
+  batch finishes, and the turn carries on. `agent.PanicError` carries the stack
+  for whoever is watching `ToolEnd`, while its `Error` stays one line, because
+  that line is what the model reads.
 - **A compacted conversation survives a restore without the caller doing
   anything.** The session is the fold of what the agent announced, and
   `SetMessages` announced nothing — so a session restored the history that

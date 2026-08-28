@@ -54,22 +54,27 @@ const (
 	EntryInference EntryType = "inference"
 	// EntryToolRun is one tool execution.
 	EntryToolRun EntryType = "tool"
-	// EntryExchange closes one exchange with its outcome.
-	EntryExchange EntryType = "exchange"
+	// EntryOutcome closes a turn with how it ended.
+	EntryOutcome EntryType = "outcome"
 )
 
 // Entry is one durable record. Seq orders it within its session and is
 // assigned by the store, so two writers cannot invent the same position.
 type Entry struct {
-	Seq  int64     `json:"seq"`
-	At   time.Time `json:"at"`
+	Seq int64     `json:"seq"`
+	At  time.Time `json:"at"`
+	// Turn is the exchange this entry belongs to, numbered from the session's
+	// beginning. It is here rather than on each payload because it says where
+	// the entry sits, which is what Seq and At say too — and because three
+	// payloads each carrying the same field is one field, written three times.
+	Turn int       `json:"turn"`
 	Type EntryType `json:"type"`
 
 	Message   *ai.Message  `json:"message,omitempty"`
 	Snapshot  []ai.Message `json:"snapshot,omitempty"`
 	Inference *Inference   `json:"inference,omitempty"`
 	ToolRun   *ToolRun     `json:"tool,omitempty"`
-	Exchange  *Exchange    `json:"exchange,omitempty"`
+	Outcome   *Outcome     `json:"outcome,omitempty"`
 }
 
 // Payload reports whether the entry carries the thing its Type says it does.
@@ -86,15 +91,15 @@ func (e Entry) Payload() bool {
 		return e.Inference != nil
 	case EntryToolRun:
 		return e.ToolRun != nil
-	case EntryExchange:
-		return e.Exchange != nil
+	case EntryOutcome:
+		return e.Outcome != nil
 	}
 	return false
 }
 
-// Inference is one model call as it is kept.
+// Inference is one model call as it is kept. Which turn it belongs to is on
+// the Entry carrying it.
 type Inference struct {
-	Turn       int           `json:"turn"`
 	Attempt    int           `json:"attempt"`
 	Model      string        `json:"model,omitempty"`
 	System     string        `json:"system,omitempty"`
@@ -109,7 +114,6 @@ type Inference struct {
 // this is the record of one having been. Result.Details is dropped, being for
 // an interface that is no longer running.
 type ToolRun struct {
-	Turn    int    `json:"turn"`
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Args    string `json:"args,omitempty"`
@@ -117,13 +121,17 @@ type ToolRun struct {
 	IsError bool   `json:"is_error,omitempty"`
 }
 
-// Exchange is one turn as it is kept — the word the agent's own TurnStart and
-// TurnEnd bracket. It is not called Turn, because Turn.Turn is not a name.
+// Outcome is how a turn ended: the loop's own reason for stopping, what the
+// turn cost, and the error if it failed.
+//
+// StopReason is why this entry exists. It is not the model's reason — that is
+// on each Inference — but the loop's, and three of its values happen nowhere
+// else: max_steps, terminated, and canceled. Without this entry a session that
+// was interrupted just stops, with nothing saying why.
+//
 // How many inferences it took and how many tools ran are not fields: the
-// Inference and ToolRun entries of this same session are where those are
-// counted from.
-type Exchange struct {
-	Turn       int              `json:"turn"`
+// Inference and ToolRun entries of the same turn are where those are counted.
+type Outcome struct {
 	StopReason agent.StopReason `json:"stop_reason,omitempty"`
 	Usage      ai.Usage         `json:"usage"`
 	Err        string           `json:"err,omitempty"`
@@ -177,7 +185,7 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 			msgs = slices.Clone(entry.Snapshot)
 		case EntryMessage:
 			msgs = append(msgs, *entry.Message)
-		case EntryExchange:
+		case EntryOutcome:
 			turns++
 		}
 	}

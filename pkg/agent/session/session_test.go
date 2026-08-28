@@ -156,8 +156,8 @@ func TestFragmentsAreNotPersistedButTheSpansThatCloseThemAre(t *testing.T) {
 	if counts[session.EntryInference] != 1 {
 		t.Errorf("inference entries = %d, want 1", counts[session.EntryInference])
 	}
-	if counts[session.EntryExchange] != 1 {
-		t.Errorf("exchange entries = %d, want 1", counts[session.EntryExchange])
+	if counts[session.EntryOutcome] != 1 {
+		t.Errorf("outcome entries = %d, want 1", counts[session.EntryOutcome])
 	}
 	if total := len(counts); total != 3 {
 		t.Errorf("entry types = %d, want 3 — a fragment was persisted", total)
@@ -432,12 +432,12 @@ func TestTurnsAreNumberedFromTheSessionsBeginning(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if e.Type == session.EntryExchange {
-			turns = append(turns, e.Exchange.Turn)
+		if e.Type == session.EntryOutcome {
+			turns = append(turns, e.Turn)
 		}
 	}
 	if want := []int{1, 2, 3}; !slices.Equal(turns, want) {
-		t.Errorf("exchange numbers = %v, want %v", turns, want)
+		t.Errorf("turn numbers = %v, want %v", turns, want)
 	}
 }
 
@@ -476,5 +476,47 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 	}
 	if snapshots != 0 {
 		t.Errorf("%d snapshots written by resuming alone; the conversation was never replaced", snapshots)
+	}
+}
+
+// Which turn an entry belongs to is a property of where it sits, like Seq and
+// At, so it is on the Entry rather than repeated inside three payloads. That
+// also gives it to the two that never had it: a message entry could not say
+// which exchange it came from, and now every entry can.
+func TestEveryEntryCarriesItsTurn(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+
+	a := newAgent(t, nil,
+		[]ai.Delta{
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})},
+			{StopReason: ai.StopToolUse},
+		},
+		text("first done"),
+		text("second done"))
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	converse(t, a, rec, ai.UserMessage("one"), ai.UserMessage("two"))
+
+	seen := map[session.EntryType]bool{}
+	for e, err := range st.Entries(ctx, rec.ID()) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Turn == 0 {
+			t.Errorf("entry %d (%s) belongs to no turn", e.Seq, e.Type)
+		}
+		seen[e.Type] = true
+	}
+	// Including the kinds that used to carry no turn at all.
+	for _, want := range []session.EntryType{
+		session.EntryMessage, session.EntryInference,
+		session.EntryToolRun, session.EntryOutcome,
+	} {
+		if !seen[want] {
+			t.Errorf("no %s entry was written; the test proves less than it claims", want)
+		}
 	}
 }

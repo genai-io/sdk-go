@@ -25,6 +25,10 @@ type Agent struct {
 	maxSteps      int
 	retryAttempts int
 	retryBackoff  time.Duration
+	// resumeTries and resumePrompt carry WithContinuation: how many times a
+	// cut-off answer may be asked to carry on, and what to ask with.
+	resumeTries  int
+	resumePrompt string
 	// streamFirst bounds how long the endpoint may say nothing at all,
 	// streamIdle how long it may pause once it has started. WithStreamTimeout
 	// normalises "off" to never, so neither is ever zero here and nothing
@@ -128,6 +132,30 @@ func orNever(d time.Duration) time.Duration {
 		return never
 	}
 	return d
+}
+
+// WithContinuation asks the model to carry on when the output cap cut its
+// answer off, at most attempts times in one exchange, by putting prompt into
+// the conversation and taking another step.
+//
+// A model stopped by max_tokens did not finish: it was interrupted. The loop
+// knows when that happened and has budget left, but what to say about it — and
+// whether to pay for more tokens at all — is the application's, so this is off
+// by default and the words are yours.
+//
+//	agent.WithContinuation(2, "Your answer was cut off by the output limit. "+
+//	    "Carry on from exactly where you stopped, and do not repeat anything.")
+//
+// The prompt enters the conversation as an ordinary message and is reported as
+// MessageAdded, so a session records what was asked and a restore replays it.
+// Running out of attempts ends the exchange with StopMaxTokens, the same as
+// never asking: the answer is still cut off.
+func WithContinuation(attempts int, prompt string) Option {
+	return func(a *Agent) {
+		if attempts > 0 && prompt != "" {
+			a.resumeTries, a.resumePrompt = attempts, prompt
+		}
+	}
 }
 
 // WithRetry replays a failed model call, at most attempts times, waiting

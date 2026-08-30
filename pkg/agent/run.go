@@ -18,26 +18,20 @@ import (
 var ErrBusy = errors.New("agent: an exchange is already running")
 
 // Run advances the conversation one exchange and reports what it does as it
-// goes. Range over it; the last event is TurnEnd, which carries how it went
-// and the answer it came to.
-//
-// One exchange, not the agent's whole life — the same shape exec.Cmd.Run has,
-// where running means doing this thing and being done.
+// goes. The last event is TurnEnd, which says how it went.
 //
 //	for e, err := range a.Run(ctx, ai.UserMessage("what changed?")) {
 //	    render(e)
 //	}
 //
-// Breaking out of the range ends the exchange, the same as Interrupt: a
-// consumer that stopped reading has stopped caring about this turn.
+// Breaking out of the range ends the exchange, the same as Interrupt. Events
+// arrive on the ranging goroutine, so a caller who needs the agent to run
+// ahead of a slow reader forwards them to a buffer of its own — how deep, and
+// what to drop, being decisions only the caller can make.
 //
-// The events arrive on the ranging goroutine, so a caller who needs the agent
-// to run ahead of a slow reader forwards them to a buffer of its own — where
-// how deep it is, and what to drop when it fills, are the caller's to decide.
-//
-// Repeating it is a for loop, and the loop is the caller's: how messages are
-// batched into exchanges, what happens when one fails, and when to stop are
-// all things the application knows and this package does not.
+// Repeating it is a for loop, and that loop is the caller's: how messages are
+// batched, what a failure means and when to stop are things the application
+// knows and this package does not.
 //
 //	for batch := range myMessages {
 //	    for e, err := range a.Run(ctx, batch...) { render(e) }
@@ -91,14 +85,9 @@ const never = time.Duration(math.MaxInt64)
 // model stops asking for tools. It holds as many inferences as the tools
 // require — that is the difference between the two words.
 
-// options is what a request contributes to a call: the prompt and the toolset.
-// Everything else — temperature, token ceilings, effort — belongs to the
-// client, and a second place to configure the same call would only drift.
-// reason asks the model what to do next: one call, returning what came back
-// and what it cost, retrying a stream that failed retryably.
-//
-// The response rather than its message, because the caller needs both halves:
-// what the model said, and why it stopped saying it.
+// reason asks the model what to do next: one call, retrying a stream that
+// failed retryably. It returns the response and not its message, because the
+// caller needs both halves — what the model said, and why it stopped.
 func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.Usage, error) {
 	var spent ai.Usage
 	var lastErr error
@@ -181,13 +170,10 @@ var errStalled = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream wen
 // be read as permanent by ai.IsRetryable.
 var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream ended without a response"}
 
-// stream makes one model call and returns what it produced.
-//
-// Silence is bounded at both ends: streamFirst before the endpoint says
-// anything at all, streamIdle between events once it has. Running out cancels
-// the stream — and only the stream, so the turn survives it — with errStalled
-// as the cause. Why a call ended is then read off the context that ended it,
-// rather than inferred from a flag set beside it.
+// stream makes one model call. Silence is bounded at both ends — streamFirst
+// before the endpoint says anything, streamIdle between events once it has —
+// and running out cancels the stream, only the stream, with errStalled as the
+// cause. Why a call ended is then read off the context that ended it.
 func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*ai.Response, error) {
 	streamCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
@@ -355,12 +341,10 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 
 		run := func(i int) {
 			c := &batch[i]
-			// A tool is the caller's code on a goroutine this package
-			// created, which is the one place a panic cannot be recovered by
-			// the person who wrote it. Left alone it takes the process down
-			// mid-conversation. A failing tool already has a way to fail —
-			// an error the model is shown and can correct — so a panic
-			// becomes one of those, and the turn carries on.
+			// The caller's code on a goroutine this package created: the one
+			// place a panic cannot be recovered by whoever wrote it, and
+			// unrecovered it takes the process down mid-conversation. A tool
+			// already has a way to fail, so a panic becomes that.
 			defer func() {
 				if p := recover(); p != nil {
 					c.result, c.err = Result{}, &PanicError{
@@ -422,10 +406,9 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 
 // turn runs one exchange: the input goes in, then reason and act alternate
 // until the model stops asking for tools or the step budget runs out.
-// ctx is this turn's own: cancelling it ends the exchange and leaves the run
-// alive, which is what Interrupt does. Reporting does not go through it —
-// emitting asks the run whether anyone is listening, and an interrupted turn
-// still has a reader.
+//
+// ctx is this turn's own, so cancelling it is what Interrupt does. Reporting
+// does not go through it: an interrupted turn still has a reader.
 func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (out TurnEnd) {
 	// The turn's own context, so Interrupt can end this exchange without
 	// ending whatever called it. Derived here rather than by the callers,

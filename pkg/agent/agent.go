@@ -109,14 +109,12 @@ func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
 
 // WithStreamTimeout bounds how long a model stream may say nothing: first is
 // how long the endpoint has to say anything at all, idle how long it may pause
-// once it has started. Either at zero is that half turned off, independently.
+// once it has started. Either at zero turns that half off.
 //
 // A stalled stream is the one failure that looks like work, so this is on by
-// default — five minutes and one minute. A model that reasons silently for
-// longer than idle needs a longer one, or none.
-//
-// Running out is reported as a network failure, because it is one, and is
-// retried like any other.
+// default at five minutes and one minute; a model that reasons silently for
+// longer needs a longer idle, or none. Running out is a network failure,
+// because it is one.
 func WithStreamTimeout(first, idle time.Duration) Option {
 	return func(a *Agent) { a.streamFirst, a.streamIdle = orNever(first), orNever(idle) }
 }
@@ -131,21 +129,18 @@ func orNever(d time.Duration) time.Duration {
 	return d
 }
 
-// WithRetry has the agent replay a failed model call, at most attempts times
-// in total, waiting backoff before the second and doubling it after each
-// further failure — the same rule, and the same arguments, as ai.Retry.
+// WithRetry replays a failed model call, at most attempts times, waiting
+// backoff before the second and doubling after each further failure — the same
+// rule and arguments as ai.Retry.
 //
-// It is off by default, and that is the point: retry belongs on the client,
-// where ai.Retry already implements it, and two budgets do not compose. An
-// agent set to three attempts on a client wrapped in ai.Retry(3, …) is nine
-// model calls for one step, and neither loop can see the other's count.
+// Off by default, and that is the point: retry belongs on the client, and two
+// budgets multiply rather than add. Three attempts here on a client wrapped in
+// ai.Retry(3, …) is nine model calls for one step, with neither loop able to
+// see the other's count.
 //
-//	client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second)), model)
-//
-// Turn this on for what the client cannot retry: ai.Retry gives up once a
-// stream has yielded output, because its caller has already seen it, where
-// this loop discards the attempt and opens a new message. A stalled stream is
-// the same case — ending one cancels the context ai.Retry would wait on.
+// Turn it on for what the client cannot replay: a stream that already yielded
+// output, which ai.Retry gives up on because its caller has seen it, and a
+// stalled one, since ending a stall cancels the context ai.Retry would wait on.
 func WithRetry(attempts int, backoff time.Duration) Option {
 	return func(a *Agent) {
 		if attempts > 0 {
@@ -189,16 +184,13 @@ func (a *Agent) Messages() []ai.Message {
 	return slices.Clone(a.messages)
 }
 
-// SetMessages replaces the conversation. This is how compaction and session
-// restore work: both hand over a history built somewhere else. To add to it
-// rather than replace it, use AddMessages — building on Messages and setting
-// the result back races with the exchange that may be running.
+// SetMessages replaces the conversation — how compaction and session restore
+// both work, each handing over a history built somewhere else. To add to it
+// instead, use AddMessages: reading Messages and setting the result back races
+// with the exchange that may be running.
 //
-// Nothing on the event stream says this happened, because nothing here knows
-// it did until it is done — and whoever calls it does. A consumer folding
-// MessageAdded would go on holding what the agent threw away, so tell it:
-// session.Recorder.Snapshot is that for a session, and a caller keeping its
-// own view of the conversation resets it the same way.
+// The next exchange announces this as MessagesReplaced, so a consumer folding
+// the stream learns the history it holds is gone.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -226,16 +218,11 @@ func (a *Agent) takeReplaced() (bool, []ai.Message) {
 func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 
 // AddMessages puts messages into the conversation from outside an exchange —
-// something that arrived while one is already running, routed in from
-// elsewhere or typed while the model worked.
+// typed while the model worked, or routed in from elsewhere.
 //
-// They enter at the next step boundary: the model sees them at its next call,
-// and each is reported as MessageAdded there. Changing what the model is about
-// to see is safe exactly once per call, and that is where — which is also the
-// first moment there is a goroutine allowed to report it.
-//
-// Between exchanges, pass them to Run instead. This is for the ones that could
-// not wait.
+// They enter at the next step boundary, reported as MessageAdded there:
+// changing what the model is about to see is safe exactly once per call, and
+// that is where. Between exchanges, pass them to Run instead.
 func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

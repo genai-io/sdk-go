@@ -39,18 +39,13 @@ func NewRecorder(store Store, id string) *Recorder {
 }
 
 // Handle records one event. Call it from your event loop, in order, before
-// anything that might be slow: a session that falls behind the agent is a
-// session that loses the last thing that happened.
+// anything slow. The context is the store's: one that is not the local
+// filesystem can block, and this sits on the loop delivering events.
 //
-// The context is the store's — a store that is not the local filesystem can
-// block, and this sits on the loop delivering events.
-//
-// After the first failed write it does nothing. A session is read back by
-// folding it, and a fold with a hole in it is not a shorter conversation but a
-// broken one: drop the message carrying a tool call and the results answering
-// it are orphaned, which is a conversation no provider will accept. Stopping
-// leaves a prefix that still folds; carrying on does not. Err says whether
-// that happened.
+// After the first failed write it does nothing, and Err says so. A fold with a
+// hole in it is not a shorter conversation but a broken one — drop the message
+// carrying a tool call and the results answering it are orphaned — so stopping
+// leaves a prefix that still folds where carrying on would not.
 func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 	if r.Err() != nil {
 		return

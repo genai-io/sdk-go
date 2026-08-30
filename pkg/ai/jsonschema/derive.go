@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// Deriving a JSON Schema from a Go type.
-
 // The tag key is the JSON Schema keyword it sets.
 //
 //	type Order struct {

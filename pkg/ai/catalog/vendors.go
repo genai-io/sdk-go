@@ -4,7 +4,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// The directory itself: one entry per vendor.
+// Adding an OpenAI-compatible endpoint is an entry here and nothing else.
 
 // verified is the date this file's figures were last checked against the
 // vendors' own documentation. Every entry carries its own Verified field so

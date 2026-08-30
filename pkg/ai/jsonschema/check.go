@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-// Checking a decoded value against a schema.
-
 // validateAgainst checks a decoded JSON value against a schema. An empty
 // schema constrains nothing, which is what a tool declaring no parameters
 // wants.

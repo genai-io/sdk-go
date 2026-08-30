@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// What a caller gets when a model reference does not resolve.
-
 // UnknownModelError reports a bare model ID no vendor lists. Qualify it with a
 // vendor ("deepseek/some-new-model") to use a model the catalog has not caught
 // up with.

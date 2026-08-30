@@ -8,8 +8,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
 )
 
-// Reading a key-based vendor's settings out of the environment.
-
 // Key returns the first non-empty value among a vendor's credential
 // variables, and the name of the variable it came from.
 func Key(v catalog.Vendor) (key, envVar string) {

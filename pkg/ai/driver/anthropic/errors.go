@@ -10,8 +10,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Classifying this protocol's failures into ai.Error kinds.
-
 func (d *Driver) wrap(err error) error {
 	if err == nil {
 		return nil

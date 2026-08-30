@@ -5,8 +5,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
 )
 
-// Resolving a model reference into something that can talk to a model.
-
 // Available reports the vendors that have a usable credential in the
 // environment, in display order. A vendor needing no credential — a local
 // Ollama — counts as available.

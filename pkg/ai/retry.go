@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// Retry is the one execution policy this package ships, because it is the one
-// with a rule that is dangerous to get wrong.
-
 // Retry replays a failed call, at most attempts times in total, waiting
 // backoff before the second try and doubling it after each further failure.
+//
+// It is the one execution policy this package ships, because it is the one
+// whose rule is dangerous to get wrong.
 //
 //	client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second)), model)
 func Retry(attempts int, backoff time.Duration) Middleware {

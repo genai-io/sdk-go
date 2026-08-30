@@ -9,8 +9,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/provider"
 )
 
-// A vendor is a row, not a package.
-
 // Vendor is one endpoint of models.
 type Vendor struct {
 	// ID is the short lowercase key used in a "vendor/model" reference.

@@ -6,9 +6,6 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 )
 
-// Building a request: the neutral ai.Request translated into
-// what this protocol wants on the wire.
-
 func (d *Driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatCompletionNewParams {
 	params := sdk.ChatCompletionNewParams{
 		Model:    d.model.ID,

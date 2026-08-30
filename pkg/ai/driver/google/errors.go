@@ -11,8 +11,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Classifying this protocol's failures into ai.Error kinds.
-
 // readAPIError turns a failed response into the driver's own error, keeping
 // the response so a 429's Retry-After is honoured.
 func readAPIError(res *http.Response) error {

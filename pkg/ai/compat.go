@@ -6,9 +6,6 @@ import (
 	"sync"
 )
 
-// Protocol dialects: where one endpoint states how it differs from the
-// protocol owner's own behaviour.
-
 // CompatOf returns a model's protocol compatibility flags, or the zero value
 // when it carries none or carries a different protocol's.
 //

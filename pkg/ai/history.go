@@ -5,8 +5,6 @@ import (
 	"unicode/utf8"
 )
 
-// History repair: making a real conversation acceptable to every protocol.
-
 // Repair returns a conversation every protocol will accept: tool calls and
 // their results paired, invalid UTF-8 replaced.
 func Repair(msgs []Message) []Message {

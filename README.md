@@ -27,18 +27,24 @@ protocols, and an agent runtime that runs the loop around it.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
 - **Sessions** — record what an agent did, restore the conversation from it.
 
-[Installation](#installation) ·
+[Installation](#installation) · [中文文档](README.zh-CN.md)
+
+**[The client](#the-client--pkgai)** —
 [Quickstart](#quickstart) ·
 [Streaming](#streaming) ·
 [Tool use](#tool-use) ·
-[Agents](#agents) ·
 [Structured outputs](#structured-outputs) ·
 [Request options](#request-options) ·
 [Messages](#messages-and-content) ·
 [Errors](#errors-and-execution-policy) ·
 [Credentials](#credentials) ·
-[Protocols](#supported-protocols) ·
-[中文文档](README.zh-CN.md)
+[Protocols](#supported-protocols)
+
+**[The agent](#the-agent--pkgagent)** —
+[The loop](#the-loop) ·
+[Events](#everything-is-an-event) ·
+[Hooks](#hooks) ·
+[Sessions](#sessions)
 
 ## Installation
 
@@ -48,7 +54,12 @@ go get github.com/genai-io/sdk-go
 
 Requires Go 1.24 or later.
 
-## Quickstart
+## The client — `pkg/ai`
+
+One model call, over any of five protocols. Everything in this half works
+without `pkg/agent`.
+
+### Quickstart
 
 ```go
 package main
@@ -91,7 +102,7 @@ you need to — a server that must not read ambient credentials stops at
 `ai.New`, middleware stops at `ai.NewDriver`. See
 [Constructing a client](docs/clients.md).
 
-### Switching providers
+#### Switching providers
 
 Change the reference. Nothing else changes.
 
@@ -106,7 +117,7 @@ client, err := auth.Client(ref)
 Runnable examples are in [`examples/`](examples) — one per vendor, plus
 [`tools/`](examples/tools) and [`structured/`](examples/structured).
 
-## Streaming
+### Streaming
 
 `Stream` returns an iterator of events. Every kind of content — text, thinking,
 tool calls, images — uses the same start/delta/end lifecycle, so one loop
@@ -145,7 +156,7 @@ for event, err := range client.Stream(ctx, messages) {
 Every block that opens is closed, including on failure. Abandoning the iterator
 cancels the request.
 
-## Tool use
+### Tool use
 
 A tool is a name, a description, and a function. The struct is exactly what the
 model may send.
@@ -242,70 +253,7 @@ Write the turn loop yourself with `Complete` and `RunTools` when the turns are
 your business — to stream as it arrives, to stop on a condition, to bill each
 one.
 
-## Agents
-
-`pkg/ai` makes one model call. `pkg/agent` runs the loop around it: call the
-model, run the tools it asks for, call it again, until the model answers
-without asking for anything more.
-
-`Run` advances the conversation one exchange and reports what it does as it
-goes. The last event is `TurnEnd`, which carries how it went and the message
-the model produced.
-
-```go
-a, err := agent.New(client,
-    agent.WithSystem("You are a careful assistant."),
-    agent.WithTools(readFile, listDir),
-)
-if err != nil {
-    log.Fatal(err)
-}
-
-for e, err := range a.Run(ctx, ai.UserMessage("what does main.go do?")) {
-    render(e)
-}
-```
-
-Repeating it is a `for` loop, and the loop is yours — how messages are batched
-into exchanges, what a failure means, and when to stop:
-
-```go
-for batch := range myMessages {
-    for e, err := range a.Run(ctx, batch...) { render(e) }
-}
-```
-
-Four ideas carry the design:
-
-| Idea | What it means |
-| --- | --- |
-| **Everything is an event** | Ten types on one sequence. A message and a tool call each start, stream and end; the turn brackets them. The set is closed, so a consumer knows the list is all there is. |
-| **The conversation is a fold** | Replay `MessageAdded` in order and you have exactly what the agent holds. That is all a session stores, and all a restore reads. |
-| **Hooks are asked; events are told** | `PreInfer` and `PostInfer` sit either side of the model call, `PreTool` and `PostTool` either side of a tool. A permission system is a `PreTool` returning `Decision{Block: true}`. |
-| **A tool answers two audiences** | `Content` goes to the model, `Details` to your interface — so formatting for a person is not paid for on every turn thereafter. |
-
-A CLI reads stdin, an interface reads keys, a server reads requests, and none
-of those is a shape a library should guess — which is why repeating an exchange
-is your loop, not a method here. `AddMessages` puts something into the exchange
-in flight; `Interrupt`, or simply breaking out of the range, ends it.
-
-A batch of tool calls runs concurrently unless a tool declares it cannot. A
-stream that goes silent is bounded rather than hung on. Retry belongs to the
-client — `ai.Retry` wraps the driver — so the agent adds none by default; two
-budgets would multiply rather than add. `WithRetry` turns on a second one for
-what the client cannot replay.
-
-Sessions consume that stream rather than living inside the agent:
-`rec.Handle(ctx, e)` in your own loop records what happened, and `session.Open`
-folds it back into a conversation to resume from.
-
-See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
-rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
-[`examples/agent-progress`](examples/agent-progress),
-[`examples/agent-session`](examples/agent-session) and
-[`examples/agent`](examples/agent) for programs that run.
-
-## Structured outputs
+### Structured outputs
 
 ```go
 type Person struct {
@@ -324,7 +272,7 @@ is prompt text. Schemas are derived to be *accepted*, not merely valid, which
 is a stricter target than the specification. See
 [`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema).
 
-## Request options
+### Request options
 
 The conversation is an ordinary `[]ai.Message`. Everything else is an `Option`,
 and the same option is a default at construction and an override at the call:
@@ -347,7 +295,7 @@ defaults, then client defaults, then call overrides.
 whatever its endpoint wants — a token budget, a level string, an enable flag —
 and snaps to the nearest rung it offers.
 
-## Messages and content
+### Messages and content
 
 A message carries an ordered sequence of typed blocks rather than parallel
 fields, because that order is what the next request has to replay.
@@ -367,7 +315,7 @@ Append `response.Message()`, not `ai.AssistantMessage(response.Text())` — the
 first carries thinking and reasoning state forward, which is what lets a
 reasoning model resume instead of starting over.
 
-## Errors and execution policy
+### Errors and execution policy
 
 Failures are classified, so the answer to "what now" is in the type rather than
 in the message text:
@@ -396,7 +344,7 @@ client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costM
 `Retry` is the only policy shipped, and every driver disables its vendor SDK's
 own — so without it you get none. Caching, logging and metering stay yours.
 
-## Credentials
+### Credentials
 
 `pkg/ai` never reads an environment variable or a file, which is what makes it
 safe in a server holding several tenants' keys:
@@ -412,7 +360,7 @@ client, err := ai.NewClient(ai.Config{
 catalog row and a client: one configured host and the models on it, where
 reading the list and fetching it are separate verbs.
 
-## Supported protocols
+### Supported protocols
 
 | Protocol | Package | Vendors in the catalog |
 | --- | --- | --- |
@@ -424,6 +372,130 @@ reading the list and fetching it are separate verbs.
 
 A vendor is a catalog row, not a package: most ship an endpoint speaking
 somebody else's protocol, so adding one is a data change.
+
+## The agent — `pkg/agent`
+
+The loop around that call: ask the model, run the tools it asks for, ask
+again. Everything in this half is built on the half above and adds nothing
+to it — an agent holds an `ai.Client` and calls `Stream`.
+
+### The loop
+
+`pkg/ai` makes one model call. `pkg/agent` runs the loop around it: ask the
+model, run the tools it asks for, ask again, until the model answers without
+asking for anything more. That whole thing is one **turn**, and it holds as
+many model calls as the tools require.
+
+```mermaid
+flowchart LR
+    run(["Run(ctx, msg)"]) --> reason
+    reason{{"reason<br/><i>ask the model</i>"}} -->|"it asked for tools"| act{{"act<br/><i>run them</i>"}}
+    act -->|"results go back"| reason
+    reason -->|"it answered"| done(["TurnEnd"])
+```
+
+`Run` advances the conversation by exactly one turn and reports what it does as
+it goes. The last event is `TurnEnd`, which says how it went.
+
+```go
+a, err := agent.New(client,
+    agent.WithSystem("You are a careful assistant."),
+    agent.WithTools(readFile, listDir),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+for e, err := range a.Run(ctx, ai.UserMessage("what does main.go do?")) {
+    render(e)
+}
+```
+
+**Repeating it is your `for` loop.** A CLI reads stdin, an interface reads keys,
+a server reads requests, and none of those is a shape a library should guess —
+so how messages are batched into turns, what a failure means and when to stop
+are all yours:
+
+```go
+for batch := range myMessages {
+    for e, err := range a.Run(ctx, batch...) { render(e) }
+}
+```
+
+`AddMessages` puts something into the turn already running; `Interrupt`, or
+simply breaking out of the range, ends it.
+
+### Everything is an event
+
+Ten types on one sequence, and the set is closed — a consumer switching over it
+knows the list is all there is. Two things have a life worth following, and
+each reports the same way: it starts, it may report as it goes, it ends.
+
+```
+MessageAdded  MessagesReplaced            the conversation changing
+MessageStart  MessageUpdate  MessageEnd   the model producing a message
+ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
+TurnStart                    TurnEnd      the turn around them
+```
+
+**The conversation is the fold of the first row.** Replay `MessageAdded` in
+order and you have what the agent holds; a `MessagesReplaced` starts the fold
+over, because everything before one is what the agent threw away. That is all a
+session stores and all a restore reads.
+
+Every event carries the turn it belongs to, and every closing event carries
+what opened it — so reading one is reading, not remembering.
+
+### Hooks
+
+Four places to get between the loop and the model. **Hooks are asked; events
+are told.**
+
+```mermaid
+flowchart LR
+    A["assemble<br/>the call"] --> B{{PreInfer}} --> C["model call"] --> D{{PostInfer}}
+    D --> E["the message"] --> F{{PreTool}} --> G["tool runs"] --> H{{PostTool}}
+```
+
+A permission system is a `PreTool` returning `Decision{Block: true}`. A batch of
+tool calls runs concurrently unless a tool declares it cannot, and a tool that
+panics fails the way any tool fails — the model is told and the turn carries on.
+
+Retry belongs to the client: `ai.Retry` wraps the driver, so the agent adds none
+by default, because two budgets multiply rather than add.
+
+### Sessions
+
+A session is a **consumer of the event stream**, not something living inside the
+agent. Your loop feeds it; the agent never learns storage exists.
+
+```mermaid
+flowchart LR
+    agent(["agent"]) -->|"Event"| loop["your loop"]
+    loop --> ui["your interface"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    rec -->|"Entry"| store[("Store")]
+    store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
+    hist -.->|"SetMessages"| agent
+```
+
+```go
+rec, history, _ := session.Open(ctx, store, id)   // restore
+a.SetMessages(history)                            // seed
+for e, err := range a.Run(ctx, ai.UserMessage(line)) {
+    rec.Handle(ctx, e)                            // record, in your loop
+    render(e)
+}
+```
+
+Compaction needs no fourth line: replacing the conversation is an event too, so
+a session that consumed the stream already knows.
+
+See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
+rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
+[`examples/agent-progress`](examples/agent-progress),
+[`examples/agent-session`](examples/agent-session) and
+[`examples/agent`](examples/agent) for programs that run.
 
 ## Documentation
 

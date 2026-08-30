@@ -64,19 +64,17 @@ type Agent struct {
 
 const (
 	// A stream that says nothing is the one failure that looks like work.
-	// These bound it; WithStreamTimeout replaces them.
 	defaultFirstChunk = 5 * time.Minute
 	defaultIdle       = time.Minute
 )
 
-// Option sets one thing an agent does not need in order to exist. New's
-// parameter is what it cannot be built without; everything else is named at
-// the site that wanted it, so a plain agent is agent.New(client).
+// Option sets one thing an agent does not need in order to exist — New's
+// parameter is what it cannot be built without, so a plain agent is
+// agent.New(client).
 type Option func(*Agent)
 
-// WithSystem sets the system prompt, verbatim. A string, because assembling
-// one is the application's business and this package needs no opinion on it.
-// Change it later with SetSystem.
+// WithSystem sets the system prompt, verbatim. Assembling one is the
+// application's business. Change it later with SetSystem.
 func WithSystem(prompt string) Option { return func(a *Agent) { a.system = prompt } }
 
 // WithTools sets what the model may call. Change it later with SetTools.
@@ -84,8 +82,8 @@ func WithTools(tools ...Tool) Option {
 	return func(a *Agent) { a.tools = slices.Clone(tools) }
 }
 
-// WithHooks adds hooks. Several may be registered — a permission gate and an
-// audit log are two different concerns and should not have to be one function.
+// WithHooks adds hooks. Several may be registered: a permission gate and an
+// audit log should not have to be one function.
 func WithHooks(hooks ...Hook) Option {
 	return func(a *Agent) { a.hooks = append(a.hooks, hooks...) }
 }
@@ -93,10 +91,8 @@ func WithHooks(hooks ...Hook) Option {
 // WithMessages seeds the conversation, e.g. from a restored session. Change it
 // later with SetMessages.
 //
-// Seeded messages are announced as MessagesReplaced at the start of the first
-// exchange, for the same reason SetMessages is: they entered the conversation
-// without ever being appended to it, so nothing folding what was appended
-// would otherwise have them.
+// The first exchange announces these as MessagesReplaced: they entered without
+// ever being appended, so a fold over what was appended would not have them.
 func WithMessages(msgs []ai.Message) Option {
 	return func(a *Agent) {
 		a.messages = slices.Clone(msgs)
@@ -176,8 +172,8 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 	return a, nil
 }
 
-// Messages returns a snapshot of the conversation. The slice is a copy; the
-// messages in it are shared and must not be mutated.
+// Messages returns a snapshot. The slice is a copy; the messages in it are
+// shared and must not be mutated.
 func (a *Agent) Messages() []ai.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -185,12 +181,10 @@ func (a *Agent) Messages() []ai.Message {
 }
 
 // SetMessages replaces the conversation — how compaction and session restore
-// both work, each handing over a history built somewhere else. To add to it
-// instead, use AddMessages: reading Messages and setting the result back races
-// with the exchange that may be running.
+// both work. To add to it instead use AddMessages: reading Messages and
+// setting the result back races with the exchange that may be running.
 //
-// The next exchange announces this as MessagesReplaced, so a consumer folding
-// the stream learns the history it holds is gone.
+// The next exchange announces this as MessagesReplaced.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -201,8 +195,7 @@ func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.replaced = true
 }
 
-// takeReplaced reports whether the conversation was replaced since the last
-// exchange, and hands back what it was replaced with.
+// takeReplaced reports a replacement since the last exchange, and what it left.
 func (a *Agent) takeReplaced() (bool, []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -213,16 +206,14 @@ func (a *Agent) takeReplaced() (bool, []ai.Message) {
 	return true, slices.Clone(a.messages)
 }
 
-// turnNow is the exchange being held, for events that say which one they
-// belong to. Only turn advances it, so every event in one agrees.
+// turnNow is the exchange being held. Only turn advances it, so every event
+// in one agrees.
 func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 
 // AddMessages puts messages into the conversation from outside an exchange —
-// typed while the model worked, or routed in from elsewhere.
-//
-// They enter at the next step boundary, reported as MessageAdded there:
-// changing what the model is about to see is safe exactly once per call, and
-// that is where. Between exchanges, pass them to Run instead.
+// typed while the model worked, or routed in from elsewhere. They enter at the
+// next step boundary, which is the one place it is safe to change what the
+// model is about to see. Between exchanges, pass them to Run instead.
 func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

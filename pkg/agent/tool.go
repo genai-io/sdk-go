@@ -8,35 +8,31 @@ import (
 
 // Result is what running a tool produced, for the two audiences a tool has.
 type Result struct {
-	// Content is what the model is told. It is the only field that reaches it.
+	// Content is the only field the model is told.
 	Content ai.Content
 
 	// Details is for your interface and goes nowhere else — not to the model,
-	// not into a session. Put the structured form of the answer here: the rows
-	// behind a count, the paths behind a total.
+	// not into a session. The structured form of the answer: the rows behind a
+	// count, the paths behind a total.
 	//
-	// It is any and not a type parameter because that parameter would land on
-	// Tool, and an agent's tools are a heterogeneous list. Producer and
-	// consumer agree out of band, the way they do with a context value.
+	// Not a type parameter, because that would land on Tool and an agent's
+	// tools are a heterogeneous list. Producer and consumer agree out of band.
 	Details any
 
-	// Terminate ends the turn after this batch, with StopTerminated. It is a
-	// vote: every call in the batch must ask, so one tool cannot cut short a
-	// turn whose others are still working. Set it on a failing result too, if
-	// the failure is the reason to stop.
+	// Terminate votes to end the turn after this batch, with StopTerminated.
+	// Every call in the batch must ask, so one tool cannot cut short a turn
+	// whose others are still working.
 	Terminate bool
 }
 
-// TextResult returns a result carrying one line of text for the model.
 func TextResult(text string) Result { return Result{Content: ai.TextContent(text)} }
 
-// Text returns the result's text in block order.
 func (r Result) Text() string { return r.Content.Text() }
 
-// ResultText is what a tool call comes to say: its text, or the error when it
+// ResultText is what a tool call comes to say: its text, the error when it
 // failed, or a placeholder when it produced neither, since several endpoints
-// reject a tool result with no content. One function, because the model and
-// the session must be told the same thing.
+// reject an empty tool result. One function, so the model and the session are
+// told the same thing.
 func ResultText(r Result, err error) string {
 	if text := r.Text(); text != "" {
 		return text
@@ -50,15 +46,13 @@ func ResultText(r Result, err error) string {
 // Tool is one thing an agent can do: what the model is told, and what answers
 // a call. The same two halves as ai.Tool, as an interface.
 type Tool interface {
-	// Schema is the tool's name, what it is for, and the shape of its arguments.
 	Schema() ai.Schema
 	// Run executes one call. An error is how a tool fails: the loop turns it
-	// into a tool error the model can see and correct, not a failed turn.
+	// into a tool error the model can correct, not a failed turn.
 	Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 
-// reporter carries a running tool's partial results, put in its context by the
-// exchange running it.
+// reporter is the context key the exchange puts a tool's Report channel under.
 type reporter struct{}
 
 // Report sends a partial result from inside a tool, arriving as ToolUpdate:
@@ -93,16 +87,15 @@ type sequential struct{ Tool }
 
 // isSequential reports whether a tool was marked. A type assertion on purpose:
 // a capability method would not survive an embedding decorator either, so the
-// rule documented on Sequential is the honest fix, not machinery that looks
-// like it lifts the rule.
+// rule on Sequential is the honest fix, not machinery that looks like it lifts
+// the rule.
 func isSequential(t Tool) bool {
 	_, ok := t.(sequential)
 	return ok
 }
 
-// ToolFunc builds a tool from a Go argument type, the way ai.ToolFunc does:
-// the schema and the decode target are the same struct, so they cannot come to
-// describe different things.
+// ToolFunc builds a tool from a Go argument type: the schema and the decode
+// target are the same struct, so they cannot describe different things.
 func ToolFunc[T any](name, description string,
 	run func(ctx context.Context, args T) (Result, error)) Tool {
 	return &funcTool{
@@ -117,8 +110,8 @@ func ToolFunc[T any](name, description string,
 	}
 }
 
-// FromAI lifts a plain ai.Tool, so anything already written against pkg/ai
-// works here without being rewritten.
+// FromAI lifts a plain ai.Tool, so anything written against pkg/ai runs here
+// unchanged.
 func FromAI(t ai.Tool) Tool {
 	return &funcTool{
 		schema: t.Schema,

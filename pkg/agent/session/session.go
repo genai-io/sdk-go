@@ -22,8 +22,8 @@ import (
 // ErrNotFound is returned for a session that does not exist.
 var ErrNotFound = errors.New("session: not found")
 
-// Meta is what a session is, apart from what happened in it. It is small on
-// purpose: it has to be listable without reading any session's entries.
+// Meta is what a session is, apart from what happened in it. Small on purpose:
+// it has to be listable without reading any session's entries.
 type Meta struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title,omitempty"`
@@ -45,12 +45,12 @@ const (
 	// EntryMessage is something that entered the conversation. Folding these
 	// is what restores a session.
 	EntryMessage EntryType = "message"
-	// EntrySnapshot is the conversation as it stood after being replaced —
-	// compaction, or a history handed in from elsewhere. A fold starts from
-	// the last one of these, because everything before it was thrown away.
+	// EntrySnapshot is the conversation after being replaced — compaction, or
+	// a history handed in from elsewhere. A fold starts from the last one,
+	// because everything before it was thrown away.
 	EntrySnapshot EntryType = "snapshot"
-	// EntryInference is one model call: what was asked, what it cost, how it
-	// ended. Not needed to resume; needed to explain and to bill.
+	// EntryInference is one model call. Not needed to resume; needed to
+	// explain and to bill.
 	EntryInference EntryType = "inference"
 	// EntryToolRun is one tool execution.
 	EntryToolRun EntryType = "tool"
@@ -64,9 +64,8 @@ type Entry struct {
 	Seq int64     `json:"seq"`
 	At  time.Time `json:"at"`
 	// Turn is the exchange this entry belongs to, numbered from the session's
-	// beginning. It is here rather than on each payload because it says where
-	// the entry sits, which is what Seq and At say too — and because three
-	// payloads each carrying the same field is one field, written three times.
+	// beginning. Here rather than on each payload because it says where the
+	// entry sits, which is what Seq and At say too.
 	Turn int       `json:"turn"`
 	Type EntryType `json:"type"`
 
@@ -77,10 +76,9 @@ type Entry struct {
 	Outcome   *Outcome     `json:"outcome,omitempty"`
 }
 
-// Payload reports whether the entry carries the thing its Type says it does.
-// A store is a wire format, and a wire format can be given anything: an entry
-// whose type and payload disagree is a record of nothing, and folding one
-// silently is how a conversation comes back with a hole in it.
+// Payload reports whether the entry carries what its Type says. A wire format
+// can be given anything, and folding a record of nothing silently is how a
+// conversation comes back with a hole in it.
 func (e Entry) Payload() bool {
 	switch e.Type {
 	case EntryMessage:
@@ -97,8 +95,7 @@ func (e Entry) Payload() bool {
 	return false
 }
 
-// Inference is one model call as it is kept. Which turn it belongs to is on
-// the Entry carrying it.
+// Inference is one model call as it is kept.
 type Inference struct {
 	Attempt    int           `json:"attempt"`
 	Model      string        `json:"model,omitempty"`
@@ -109,10 +106,9 @@ type Inference struct {
 	Error      string        `json:"error,omitempty"`
 }
 
-// ToolRun is one tool execution as it is kept. It is not called Tool: a tool
-// is a thing that can be run, and ai and agent both have that type already —
-// this is the record of one having been. Result.Details is dropped, being for
-// an interface that is no longer running.
+// ToolRun is one tool execution as it is kept — not Tool, which is the thing
+// that runs and which both ai and agent already have. Result.Details is
+// dropped, being for an interface that is no longer running.
 type ToolRun struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -124,12 +120,8 @@ type ToolRun struct {
 // Outcome is how a turn ended.
 //
 // StopReason is why this entry exists: not the model's reason, which is on
-// each Inference, but the loop's — and max_steps, terminated and canceled
-// happen nowhere else. Without it an interrupted session just stops, with
-// nothing saying why.
-//
-// How many inferences it took and how many tools ran are not fields; the
-// entries of the same turn are where those are counted.
+// each Inference, but the loop's — max_steps, terminated and canceled happen
+// nowhere else. Without it an interrupted session just stops, saying nothing.
 type Outcome struct {
 	StopReason agent.StopReason `json:"stop_reason,omitempty"`
 	Usage      ai.Usage         `json:"usage"`

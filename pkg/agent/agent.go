@@ -50,6 +50,11 @@ type Agent struct {
 	// stopTurn ends the turn in flight. Never nil: between turns it is a
 	// no-op, so Interrupt needs no case for having nothing to interrupt.
 	stopTurn context.CancelFunc
+	// stopped closes when the exchange in flight has finished — after the
+	// last event, and after the agent is free to run another. Between
+	// exchanges it is an already-closed channel, for the same reason stopTurn
+	// is a no-op there.
+	stopped chan struct{}
 
 	// Their own synchronisation, because they are read outside mu.
 	//
@@ -163,6 +168,7 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 		streamFirst:   defaultFirstChunk,
 		streamIdle:    defaultIdle,
 		stopTurn:      func() {},
+		stopped:       closed,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -306,14 +312,35 @@ func (a *Agent) toolNamed(name string) (Tool, bool) {
 	return nil, false
 }
 
-// Interrupt ends the turn in flight without ending the run: the exchange stops
-// with StopCanceled, and the agent goes back to waiting on In.
+// Interrupt ends the exchange in flight — it stops with StopCanceled, Run
+// returns, and the next one starts clean. This is what a user pressing escape
+// asks for; cancelling Run's own context is the other thing, and ends
+// everything.
 //
-// This is what a user pressing escape asks for. Cancelling Run's own context
-// is the other thing — it ends everything. Between turns there is nothing to
-// interrupt and this does nothing; watch TurnEnd to know it landed.
-func (a *Agent) Interrupt() {
+// The returned channel closes when that exchange has actually finished: after
+// its last event, and after the agent is free to run another. Wait on it when
+// something has to happen once the agent has stopped touching the
+// conversation, from a goroutine that is not the one ranging over Run — the
+// keystroke handler that asked for the interrupt, typically, which cannot see
+// the range end.
+//
+//	<-a.Interrupt()      // the turn is over; the agent is idle
+//	a.SetMessages(fresh)
+//
+// Between exchanges there is nothing to interrupt: the channel is already
+// closed and this does nothing.
+func (a *Agent) Interrupt() <-chan struct{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopTurn()
+	return a.stopped
 }
+
+// closed stands in for the exchange that is not running, so that Interrupt
+// between two of them returns something a caller can wait on without a case
+// for there being nothing to wait for.
+var closed = func() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()

@@ -84,7 +84,16 @@ turn 有五种结束方式,**每个出口都必须说出是哪一种**:
 
 `WithRetry(attempts, backoff)` 是**显式**再开一份预算,给的是 client replay 不了的两种失败:**已经吐过内容的流**——`ai.Retry` 在这里会放弃,因为它的调用方已经看见了,而这个循环会丢弃这次尝试、另开一条消息——以及**卡住的流**,因为结束一次卡住就会取消掉 `ai.Retry` 要等的那个 context。两种情况下,等待都先看端点给的 `Retry-After`,再退到自己的退避。
 
-`Interrupt()` 结束正在进行的交换,**但 agent 还活着**:这个 turn 以 `StopCanceled` 收尾,`Run` 返回,下一轮干净地开始。这就是用户按 ESC 想要的效果。取消 `Run` 自己的 context 是另一回事,那会结束一切。
+`Interrupt()` 结束正在进行的交换,**但 agent 还活着**:这个 turn 以 `StopCanceled` 收尾,`Run` 返回,下一轮干净地开始。这就是用户按 ESC 想要的效果。
+
+它**返回一个 channel**,在那一轮真正结束、agent 重新空闲时关闭。读到按键的那条 goroutine 不是 range `Run` 的那条,看不到循环结束——这就是它知道的方式。
+
+```go
+<-a.Interrupt()      // 这一轮结束了,agent 空闲
+a.SetMessages(fresh)
+```
+
+交换之间没有东西可中断:channel 已经是关闭的。取消 `Run` 自己的 context 是另一回事,那会结束一切。
 
 ## 事件
 

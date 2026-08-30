@@ -79,6 +79,11 @@ Each such change is listed under **Changed** with what to write instead.
   than the filesystem. The session package's own tests record into it now, so
   they exercise the contract rather than a directory; `TestStoreContract` runs
   the same assertions against both stores.
+- **`Agent.Interrupt` returns a channel** that closes once the exchange it
+  ended is actually over and the agent is idle again. The goroutine that read
+  the keystroke is not the one ranging over `Run`, so it could not see the
+  range end and had no way to know when the agent stopped touching the
+  conversation. Calling it as a statement is unchanged.
 - **`agent.MessagesReplaced`**, the event `SetMessages` was missing. See below.
 - **`ai.ToolCall.UnmarshalArgs`** decodes a call's arguments into a Go value —
   the function `ToolCall.Input` has always been documented as decoding with.

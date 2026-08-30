@@ -116,7 +116,18 @@ honours the endpoint's `Retry-After` before its own backoff.
 
 `Interrupt()` ends the exchange in flight and leaves the agent alive: the turn
 stops with `StopCanceled`, `Run` returns, and the next one starts clean. That
-is what a user pressing escape asks for. Cancelling `Run`'s own context is the
+is what a user pressing escape asks for.
+
+It returns a channel that closes once that exchange is actually over and the
+agent is idle again. The goroutine that read the keystroke is not the one
+ranging over `Run`, so it cannot see the range end; this is how it finds out.
+
+```go
+<-a.Interrupt()      // the turn is over, the agent is idle
+a.SetMessages(fresh)
+```
+
+Between exchanges there is nothing to interrupt: the channel is already closed. Cancelling `Run`'s own context is the
 other thing, and ends everything.
 
 ## Events

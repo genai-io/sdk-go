@@ -268,15 +268,43 @@ for e, err := range a.Run(ctx, msg) {
 
 ```mermaid
 flowchart LR
-    agent[agent] -->|事件| loop[你的循环]
-    loop --> rec[session.Recorder]
-    loop --> ui[你的界面]
-    rec --> store[(jsonl)]
-    store -->|折叠 MessageAdded| restore[SetMessages]
-    restore --> agent
+    agent(["agent"]) -->|"Event"| loop["你的循环"]
+    loop --> ui["你的界面"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    rec -->|"Entry"| store[("Store")]
+    store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
+    hist -.->|"SetMessages"| agent
 ```
 
-`Recorder` 在 span 收尾时写一次:`MessageStart`+`MessageEnd` 合成一条推理记录,`ToolStart`+`ToolEnd` 合成一条工具记录。`MessageAdded` 单独存,把它们折回来就是恢复。片段不存——收尾事件已经带了完整值。
+实线是写路径,虚线是读路径。**两条路在 agent 内部没有任何交点**:它拿到的只是一个 `[]ai.Message`,从头到尾不知道它从哪来。
+
+### 写进去什么
+
+一个 span 只在**收尾时**存一次——收尾事件已经带了完整值,所以不需要把开始事件挂着,片段也根本不存。
+
+| 事件 | 记录 | 为什么 |
+| --- | --- | --- |
+| `MessageAdded` | `message` | 对话,一次一条 |
+| `MessagesReplaced` | `snapshot` | 对话被整体扔掉换了一份 |
+| `MessageEnd` | `inference` | 一次模型调用:问了什么、花了多少 |
+| `ToolEnd` | `tool` | 一次工具执行 |
+| `TurnEnd` | `outcome` | 这一轮怎么结束的,以及为什么 |
+| `MessageStart` `MessageUpdate` `ToolStart` `ToolUpdate` `TurnStart` | —— | 收尾事件已经说完了 |
+
+### 读出来什么
+
+恢复就是把这些记录折回去。消息往后追加,**遇到 snapshot 则从头开始折**——因为在它之前播报过的一切,都是 agent 已经丢弃的:
+
+```
+seq   1         2         3          4         5         6
+      message   message   snapshot   message   message   outcome
+                          ▲
+                          └─ 折叠从这里开始。1 和 2 已经没了:
+                             把它们读回来,等于把压缩掉的历史
+                             又塞回给 agent。
+```
+
+除 `message` 和 `snapshot` 之外的记录**不参与恢复** —— 它们是用来解释和计费的。每条上面的轮次号是**会话自己的**,不是 agent 的:agent 每次运行都从 1 开始数,`session.Open` 把会话已有的轮数加上去,两边才对得齐。
 
 **换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——recorder 把它存成折叠的新起点:
 

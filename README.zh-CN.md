@@ -25,18 +25,24 @@
 - **并行工具** —— 一批默认并发，除非某个工具说它不能。
 - **会话** —— 记录 agent 做过什么，再从中恢复对话。
 
-[安装](#安装) ·
+[安装](#安装) · [English](README.md)
+
+**[客户端](#客户端--pkgai)** —
 [快速开始](#快速开始) ·
 [流式](#流式) ·
 [工具调用](#工具调用) ·
-[Agent](#agent) ·
 [结构化输出](#结构化输出) ·
 [请求选项](#请求选项) ·
 [消息与内容](#消息与内容) ·
 [错误](#错误与执行策略) ·
 [凭证](#凭证) ·
-[协议](#支持的协议) ·
-[English](README.md)
+[协议](#支持的协议)
+
+**[Agent](#agent--pkgagent)** —
+[循环](#循环) ·
+[事件](#一切皆事件) ·
+[Hook](#hook) ·
+[会话](#会话)
 
 ## 安装
 
@@ -46,7 +52,11 @@ go get github.com/genai-io/sdk-go
 
 需要 Go 1.24 或更高版本。
 
-## 快速开始
+## 客户端 —— `pkg/ai`
+
+一次模型调用，五种协议任选。这一半的所有内容都不依赖 `pkg/agent`。
+
+### 快速开始
 
 ```go
 package main
@@ -82,7 +92,7 @@ func main() {
 
 这是**一条链的最短端**：`auth.Client` 就是 `auth.Config` 加 `ai.New`，后者又是 `ai.NewDriver` 加 `ai.NewClientWithDriver`。需要的话就早点停——绝不能顺手读凭证的服务端停在 `ai.New`，要套 middleware 就停在 `ai.NewDriver`。见[构造客户端](docs/clients.zh-CN.md)。
 
-### 换一家服务
+#### 换一家服务
 
 **只改引用，其他什么都不用动。**
 
@@ -96,7 +106,7 @@ client, err := auth.Client(ref)
 
 可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`tools/`](examples/tools)、[`structured/`](examples/structured) 和四个 agent 例子。
 
-## 流式
+### 流式
 
 `Stream` 返回一个事件迭代器。**每一种内容**——文本、thinking、工具调用、图片——都走同一套 start/delta/end 生命周期，所以一个循环就能全部处理。
 
@@ -130,7 +140,7 @@ for event, err := range client.Stream(ctx, messages) {
 
 `EventBlockDelta` 带**片段**，`EventBlockEnd` 带**完整的块**，`EventDone` 带聚合好的 `Response`——和 `Complete` 返回的是同一个值。**开启的块一定会被关闭，出错时也一样**；中途放弃迭代器会取消请求。
 
-## 工具调用
+### 工具调用
 
 一个工具就是**一个名字、一句话、一个函数**。struct 里放的正好是模型可以发来的东西。
 
@@ -208,54 +218,7 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 
 轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），用 `Complete` 加 `RunTools` 自己写这个循环。
 
-## Agent
-
-`pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环：问模型、跑它要的工具、再问一次，直到模型不再要东西、直接作答。
-
-`Run` 把对话推进一轮，并把沿途做的事作为序列报出来；最后一个事件是 `TurnEnd`，它带着这一轮怎么结束的，以及模型产出的那条消息。
-
-```go
-a, err := agent.New(client,
-    agent.WithSystem("You are a careful assistant."),
-    agent.WithTools(readFile, listDir),
-)
-if err != nil {
-    log.Fatal(err)
-}
-
-for e, err := range a.Run(ctx, ai.UserMessage("main.go 是做什么的?")) {
-    render(e)
-}
-```
-
-四个想法撑起整个设计：
-
-| 想法 | 含义 |
-| --- | --- |
-| **一切皆事件** | 一段序列上 10 种类型。一条消息和一次工具调用各自有开始、流式、结束，turn 在外面标出边界。集合是封闭的，消费者可以确信这就是全部。 |
-| **对话是一次折叠** | 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份。会话要存的只有这些，恢复要读的也只有这些。 |
-| **hook 是征询，事件是通知** | `PreInfer` / `PostInfer` 分列模型调用两侧，`PreTool` / `PostTool` 分列工具两侧。一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。 |
-| **一个工具面对两个受众** | `Content` 给模型，`Details` 给你的界面——为人排版的东西，不必此后每一轮都为它付费。 |
-
-**重复它是一个 `for` 循环，而这个循环是你的**——消息怎么批成一轮、失败了算什么、什么时候停：
-
-```go
-for batch := range myMessages {
-    for e, err := range a.Run(ctx, batch...) { render(e) }
-}
-```
-
-CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到。`AddMessages` 把消息塞进正在跑的那一轮，`Interrupt`（或者直接 `break` 出 range）结束它。
-
-一批工具调用默认并发执行，除非某个工具声明自己不能。**静默的流有时限**，不会一直挂着。重试归 client——`ai.Retry` 包在 driver 外面——所以 agent 默认一次都不重试：两份预算是相乘不是相加。`WithRetry` 才是显式给 client 重放不了的那部分再开一份。
-
-会话是这条事件流的**消费者**，不住在 agent 内部：在你自己的循环里 `rec.Handle(ctx, e)` 记录发生了什么，`session.Open` 再把它折回成一段可以续上的对话。
-
-事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；
-能直接跑的程序见 [`examples/agent-chat`](examples/agent-chat)、[`examples/agent-progress`](examples/agent-progress)、
-[`examples/agent-session`](examples/agent-session) 和 [`examples/agent`](examples/agent)。
-
-## 结构化输出
+### 结构化输出
 
 ```go
 type Person struct {
@@ -270,7 +233,7 @@ person, err := ai.CompleteAs[Person](ctx, client, messages)
 
 **标签的 key 就是它要设的那个 JSON Schema 关键字**——共 11 个——而且每一个字都是 prompt 文本。schema 是按**"能被接受"**推导的，不只是"合法"，这比规范本身更严。见 [`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema)。
 
-## 请求选项
+### 请求选项
 
 对话就是一个普通的 `[]ai.Message`。其余一切都是 `Option`，而且**同一个 option 在构造时是默认值、在调用处是覆盖值**：
 
@@ -288,7 +251,7 @@ response, err := client.Complete(ctx, messages,
 
 `WithEffort` 是**归一化的档位**。每个模型自带一张梯子，映射到它端点想要的东西——token 预算、级别字符串、开关标志——没有那一档就**贴到最近的一档**。
 
-## 消息与内容
+### 消息与内容
 
 一条消息装的是**有序的、带类型的块序列**，而不是一堆平行字段——因为**下一次请求要重放的正是这个顺序**。
 
@@ -305,7 +268,7 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 **用 `response.Message()`，不要用 `ai.AssistantMessage(response.Text())`** —— 前者把 thinking 和 reasoning 状态带到下一轮，那正是让推理模型能接着想、而不是每轮从头想的东西。
 
-## 错误与执行策略
+### 错误与执行策略
 
 失败是**分类过的**，所以"现在该怎么办"的答案在**类型**里，而不在错误文本里：
 
@@ -328,7 +291,7 @@ client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costM
 
 `Retry` 是唯一自带的策略，而且**每个 driver 都关掉了厂商 SDK 自己的重试**——不加它就一次重试都没有。缓存、日志、成本统计都归你。
 
-## 凭证
+### 凭证
 
 **`pkg/ai` 永远不读环境变量、不读文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：
 
@@ -341,7 +304,7 @@ client, err := ai.NewClient(ai.Config{
 
 `pkg/ai/auth` 是那个**选择性开启**、确实会读环境的入口。`pkg/ai/provider` 夹在目录行和客户端之间：一个配好的 host 加上它上面的模型，其中**"读列表"和"拉列表"是两个动词**。
 
-## 支持的协议
+### 支持的协议
 
 | 协议 | 包 | 目录中的厂商数 |
 | --- | --- | --- |
@@ -352,6 +315,107 @@ client, err := ai.NewClient(ai.Config{
 | Google Gemini | `pkg/ai/driver/google` | 1 |
 
 **厂商是目录里的一行，不是一个包**：大多数提供的端点说的是别人的协议，所以加一家是改数据。
+
+## Agent —— `pkg/agent`
+
+围绕那一次调用的循环：问模型、跑它要的工具、再问一次。这一半建立在上面那一半之上，
+并且**不往里加任何东西**——一个 agent 持有一个 `ai.Client`，调它的 `Stream`。
+
+### 循环
+
+`pkg/ai` 负责一次模型调用。`pkg/agent` 负责它外面那圈循环：问模型、跑它要的工具、再问一次，直到模型不再要东西、直接作答。这整件事叫一个 **turn**，它内部有几次模型调用取决于工具要几轮。
+
+```mermaid
+flowchart LR
+    run(["Run(ctx, msg)"]) --> reason
+    reason{{"reason<br/><i>问模型</i>"}} -->|"它要工具"| act{{"act<br/><i>跑工具</i>"}}
+    act -->|"结果喂回去"| reason
+    reason -->|"它作答了"| done(["TurnEnd"])
+```
+
+`Run` 把对话**恰好推进一轮**，并把沿途做的事作为序列报出来；最后一个事件是 `TurnEnd`，它说明这一轮怎么结束的。
+
+```go
+a, err := agent.New(client,
+    agent.WithSystem("You are a careful assistant."),
+    agent.WithTools(readFile, listDir),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+for e, err := range a.Run(ctx, ai.UserMessage("main.go 是做什么的?")) {
+    render(e)
+}
+```
+
+**重复它是你的 `for` 循环。** CLI 读 stdin，界面读按键，服务端读请求——这些形状库猜不到，所以消息怎么批成一轮、失败了算什么、什么时候停，全都是你的：
+
+```go
+for batch := range myMessages {
+    for e, err := range a.Run(ctx, batch...) { render(e) }
+}
+```
+
+`AddMessages` 把消息塞进**正在跑的那一轮**，`Interrupt`（或者直接 `break` 出 range）结束它。
+
+### 一切皆事件
+
+一段序列上 10 种类型，而且集合是**封闭**的——消费者 switch 的时候可以确信这就是全部。有两样东西有值得跟踪的生命周期，它们的报告方式完全一致：开始、中途可能报告、结束。
+
+```
+MessageAdded  MessagesReplaced            对话本身发生变化
+MessageStart  MessageUpdate  MessageEnd   模型正在产生一条消息
+ToolStart     ToolUpdate     ToolEnd      一次工具调用，从提出到答复
+TurnStart                    TurnEnd      包住它们的那一轮
+```
+
+**对话是第一行的折叠。** 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份；遇到 `MessagesReplaced` 就从头开始折，因为在它之前的都是 agent 已经扔掉的。会话要存的只有这些，恢复要读的也只有这些。
+
+**每个事件都带着自己属于哪一轮，每个收尾事件都带着开启它的东西**——所以读一个事件是"读"，不是"回忆"。
+
+### Hook
+
+四个可以插进循环和模型之间的位置。**hook 是征询，事件是通知。**
+
+```mermaid
+flowchart LR
+    A["组装<br/>这次调用"] --> B{{PreInfer}} --> C["模型调用"] --> D{{PostInfer}}
+    D --> E["那条消息"] --> F{{PreTool}} --> G["工具执行"] --> H{{PostTool}}
+```
+
+一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。一批工具调用默认并发执行，除非某个工具声明自己不能；工具 panic 也按普通失败处理——告诉模型，这一轮继续。
+
+重试归 client：`ai.Retry` 包在 driver 外面，所以 agent 默认一次都不重试——两份预算是相乘不是相加。
+
+### 会话
+
+会话是这条事件流的**消费者**，不住在 agent 内部。你的循环喂给它，而 agent 从头到尾不知道有存储这回事。
+
+```mermaid
+flowchart LR
+    agent(["agent"]) -->|"Event"| loop["你的循环"]
+    loop --> ui["你的界面"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    rec -->|"Entry"| store[("Store")]
+    store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
+    hist -.->|"SetMessages"| agent
+```
+
+```go
+rec, history, _ := session.Open(ctx, store, id)   // 恢复
+a.SetMessages(history)                            // 喂给 agent
+for e, err := range a.Run(ctx, ai.UserMessage(line)) {
+    rec.Handle(ctx, e)                            // 记录，在你自己的循环里
+    render(e)
+}
+```
+
+压缩不需要第四行：**换掉对话本身也是一个事件**，消费了这条流的会话已经知道了。
+
+事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；
+能直接跑的程序见 [`examples/agent-chat`](examples/agent-chat)、[`examples/agent-progress`](examples/agent-progress)、
+[`examples/agent-session`](examples/agent-session) 和 [`examples/agent`](examples/agent)。
 
 ## 文档
 

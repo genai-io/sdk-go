@@ -355,18 +355,50 @@ the screen that is not in the file.
 
 ```mermaid
 flowchart LR
-    agent[agent] -->|events| loop[your loop]
-    loop --> rec[session.Recorder]
-    loop --> ui[your interface]
-    rec --> store[(jsonl)]
-    store -->|fold MessageAdded| restore[SetMessages]
-    restore --> agent
+    agent(["agent"]) -->|"Event"| loop["your loop"]
+    loop --> ui["your interface"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    rec -->|"Entry"| store[("Store")]
+    store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
+    hist -.->|"SetMessages"| agent
 ```
 
-A `Recorder` writes a span once, when it closes: `MessageStart`+`MessageEnd`
-become one inference entry, `ToolStart`+`ToolEnd` one tool entry. `MessageAdded`
-is stored on its own, and folding those back is what restore is. Fragments are
-not stored — the closing event already carried the whole value.
+Solid arrows are the write path, dotted the read path. They meet nowhere inside
+the agent: it is handed a `[]ai.Message` and never learns where it came from.
+
+### What is written
+
+A span is stored once, when it closes — the closing event already carried the
+whole value, so nothing needs to be held open and fragments are not stored at
+all.
+
+| event | entry | why |
+| --- | --- | --- |
+| `MessageAdded` | `message` | the conversation, one message at a time |
+| `MessagesReplaced` | `snapshot` | the conversation, thrown away and replaced |
+| `MessageEnd` | `inference` | one model call: what was asked, what it cost |
+| `ToolEnd` | `tool` | one tool execution |
+| `TurnEnd` | `outcome` | how the turn ended, and why |
+| `MessageStart` `MessageUpdate` `ToolStart` `ToolUpdate` `TurnStart` | — | the closing event says it all |
+
+### What is read
+
+Restoring folds the entries back. Messages append; **a snapshot starts the fold
+over**, because everything announced before one is what the agent discarded:
+
+```
+seq   1         2         3          4         5         6
+      message   message   snapshot   message   message   outcome
+                          ▲
+                          └─ the fold starts here. 1 and 2 are gone:
+                             reading them back would hand the agent
+                             the history compaction just removed.
+```
+
+Entries other than `message` and `snapshot` are not read to restore — they are
+there to explain and to bill. The turn number on each is the session's own, not
+the agent's: an agent counts from one on every run, and `session.Open` adds what
+the session already held so the two agree.
 
 **Replacing the conversation is an event too.** Compaction swaps the whole
 history, and a fold over `MessageAdded` alone would hand back what was thrown

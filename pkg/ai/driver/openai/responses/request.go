@@ -7,9 +7,6 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 )
 
-// Building a request: the neutral ai.Request translated into
-// what this protocol wants on the wire.
-
 func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 	native, err := ai.ProtocolOptionsAs[Options](req)
 	if err != nil {

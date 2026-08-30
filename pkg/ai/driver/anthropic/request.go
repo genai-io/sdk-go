@@ -11,9 +11,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Building a request: the neutral ai.Request translated into
-// what this protocol wants on the wire.
-
 // validToolID matches the tool_use ID shape the Messages API accepts.
 var validToolID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 

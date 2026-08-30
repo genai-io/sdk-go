@@ -8,9 +8,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Building a request: the neutral ai.Request translated into
-// what this protocol wants on the wire.
-
 // request assembles the body of a generate call.
 func (d *Driver) request(req *ai.Request) (*generateRequest, error) {
 	if err := ai.RejectProtocolOptions(req, Name); err != nil {

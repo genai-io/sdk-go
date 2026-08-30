@@ -15,9 +15,8 @@ import (
 	"time"
 )
 
-// The authorization code grant with PKCE — RFC 6749 §4.1 and RFC 7636.
-
-// CodeEndpoints are the two URLs an authorization code grant uses.
+// CodeEndpoints are the two URLs an authorization code grant uses —
+// RFC 6749 §4.1, with PKCE from RFC 7636.
 type CodeEndpoints struct {
 	// Authorize is the page the person is sent to.
 	Authorize string

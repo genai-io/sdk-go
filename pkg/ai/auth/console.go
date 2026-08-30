@@ -11,8 +11,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
 
-// The default way to show a person what a sign-in needs from them.
-
 // ConsoleInteraction prints the instruction to stderr and tries to open a
 // browser.
 func ConsoleInteraction() oauth.Interaction {

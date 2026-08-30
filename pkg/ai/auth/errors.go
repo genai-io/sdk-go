@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// What a caller gets when a credential cannot be resolved.
-
 // NotSignedInError reports a vendor that needs an interactive sign-in and has
 // no stored credential.
 type NotSignedInError struct{ Vendor string }

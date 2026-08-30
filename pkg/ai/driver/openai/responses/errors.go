@@ -6,8 +6,6 @@ import (
 	wire "github.com/openai/openai-go/v3/responses"
 )
 
-// Classifying this protocol's failures into ai.Error kinds.
-
 // responseError converts an in-band API failure. These arrive inside a 200
 // response, so there is no status to classify from — the error code is the
 // only signal for whether another attempt could work.

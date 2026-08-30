@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// Request validation: everything caught before the network.
-
 // Validate checks a call against what the model can actually do, before it
 // reaches the network. It takes the same arguments as Complete, so a caller
 // can ask whether a request is sendable without sending it.

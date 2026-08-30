@@ -2,8 +2,6 @@ package catalog
 
 import "github.com/genai-io/sdk-go/pkg/ai"
 
-// The vocabulary a vendor entry is written in.
-
 // ─── reasoning ladders ───
 
 var (

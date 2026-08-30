@@ -10,9 +10,8 @@ import (
 	"time"
 )
 
-// The device authorization grant — RFC 8628.
-
-// DeviceEndpoints are the two URLs a device authorization grant uses.
+// DeviceEndpoints are the two URLs a device authorization grant uses —
+// RFC 8628.
 type DeviceEndpoints struct {
 	// Code issues the device and user codes.
 	Code string

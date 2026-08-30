@@ -6,7 +6,11 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Filling in what the table does not state.
+// A Vendor.Infer function runs on every resolved model, after the vendor
+// defaults, and by convention only fills fields that are still zero — so a
+// figure the table did state is never overwritten by a guess. Several vendors
+// encode a model's context window in its ID ("kimi-...-128k", "glm-5.2-...")
+// while publishing nothing through their API.
 
 // inferAnthropic sizes a Claude model the table does not list. Claude IDs are
 // stable and long-lived, so an unlisted one is nearly always a model newer

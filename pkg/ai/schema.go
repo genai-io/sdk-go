@@ -11,8 +11,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
-// Asking a model for a shape, and the JSON Schema machinery behind it.
-
 // Schema constrains an answer to a JSON shape.
 type Schema struct {
 	// Name identifies the shape. Some protocols require one, and it is what

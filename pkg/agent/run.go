@@ -42,7 +42,21 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 			yield(nil, ErrBusy)
 			return
 		}
-		defer a.running.Store(false)
+		// Announced when this exchange is over and the agent is idle again,
+		// for an Interrupt that came from somewhere it cannot see the range
+		// end. Closed after running is released, so a caller woken by it can
+		// start the next exchange without meeting ErrBusy.
+		stopped := make(chan struct{})
+		a.mu.Lock()
+		a.stopped = stopped
+		a.mu.Unlock()
+		defer func() {
+			a.mu.Lock()
+			a.stopped = closed
+			a.mu.Unlock()
+			a.running.Store(false)
+			close(stopped)
+		}()
 
 		// gone remembers a consumer that broke out of the range: yielding to
 		// one again is what the iterator forbids, and stopping reading is

@@ -2311,3 +2311,72 @@ func stopReasonsDeclaredIn(t *testing.T, path string) []ai.StopReason {
 	}
 	return out
 }
+
+// Interrupt says when the exchange it ended has actually finished. The caller
+// that presses escape is not the caller ranging over Run, so it cannot see the
+// range end; without this it has no way to know when the agent stopped
+// touching the conversation.
+func TestInterruptSaysWhenTheExchangeIsOver(t *testing.T) {
+	release := make(chan struct{})
+	held := agent.ToolFunc("hold", "blocks until released",
+		func(ctx context.Context, _ struct{}) (agent.Result, error) {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return agent.TextResult("let go"), nil
+		})
+	d := &scripted{scripts: [][]ai.Delta{toolCall("1", "hold", "{}"), text("done")}}
+	a := newAgent(t, d, agent.WithTools(held))
+
+	inTool := make(chan struct{})
+	stopped := make(chan (<-chan struct{}), 1)
+	go func() {
+		<-inTool
+		stopped <- a.Interrupt() // from somewhere that never sees the range
+	}()
+
+	ranging := make(chan struct{})
+	go func() {
+		defer close(ranging)
+		for e := range a.Run(context.Background(), ai.UserMessage("go")) {
+			if _, ok := e.(agent.ToolStart); ok {
+				close(inTool)
+			}
+		}
+	}()
+
+	select {
+	case <-(<-stopped):
+	case <-time.After(2 * time.Second):
+		t.Fatal("the channel from Interrupt never closed")
+	}
+
+	// Closed means over: the range has ended and the agent is free again.
+	select {
+	case <-ranging:
+	case <-time.After(time.Second):
+		t.Error("the channel closed while the exchange was still running")
+	}
+	if _, err := outcome(t, a, ai.UserMessage("again")); err != nil {
+		t.Errorf("the agent was still busy after it said it had stopped: %v", err)
+	}
+	close(release)
+}
+
+// Between exchanges there is nothing to interrupt, and waiting on it must not
+// be a way to hang.
+func TestInterruptBetweenExchangesDoesNotBlock(t *testing.T) {
+	a := newAgent(t, &scripted{scripts: [][]ai.Delta{text("hi")}})
+
+	select {
+	case <-a.Interrupt():
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt blocked with no exchange running")
+	}
+
+	// And it did not poison the next one.
+	if out, err := outcome(t, a, ai.UserMessage("go")); err != nil || out.StopReason != agent.StopEndTurn {
+		t.Errorf("the next exchange = %v / %q, want a clean end_turn", err, out.StopReason)
+	}
+}

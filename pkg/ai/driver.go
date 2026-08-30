@@ -49,6 +49,22 @@ type TokenCounter interface {
 // text and thinking blocks carry incremental Text/Signature fragments; image,
 // tool and opaque reasoning blocks are complete values. EndBlock closes the
 // current textual block after applying Block.
+//
+// What a driver must guarantee, and what it need not:
+//
+//   - A Delta may carry no Block at all. One with only Usage or StopReason set
+//     is how metadata arrives out of band.
+//   - Text and thinking fragments accumulate into one block until it closes.
+//     Switching from one type to the other closes the open one first, so a
+//     driver need not send EndBlock to change what it is producing.
+//   - The last block need not be closed. The stream ending closes it.
+//   - Usage accumulates across deltas rather than replacing, so a protocol that
+//     reports input and output separately may send them separately.
+//   - StopReason, Model and ID are last-write-wins, and an empty one is
+//     ignored — a driver repeating them costs nothing.
+//   - Yielding an error ends the stream. Everything already yielded stays on
+//     the Response the caller receives, so a failure that arrives mid-answer
+//     keeps both the text and the tokens it cost.
 type Delta struct {
 	Block    Block
 	EndBlock bool

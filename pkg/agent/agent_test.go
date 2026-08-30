@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"iter"
 	"slices"
 	"strings"
@@ -2223,4 +2226,88 @@ func TestASecondRunWhileOneIsInFlightIsRefused(t *testing.T) {
 	if !errors.Is(second, agent.ErrBusy) {
 		t.Errorf("the second Run returned %v, want ErrBusy", second)
 	}
+}
+
+// Every ai.StopReason has to mean something here, and the compiler cannot say
+// so: the loop translates them with a switch whose default is end_turn, so one
+// added to pkg/ai and forgotten here becomes "the model answered normally".
+// That has happened once already — refusal read as a complete answer.
+//
+// So the list is read from pkg/ai itself rather than written down twice. A new
+// constant fails this test until somebody decides what a turn ending that way
+// should be called.
+func TestEveryStopReasonIsTranslatedDeliberately(t *testing.T) {
+	want := map[ai.StopReason]agent.StopReason{
+		ai.StopEndTurn:   agent.StopEndTurn,
+		ai.StopMaxTokens: agent.StopMaxTokens,
+		ai.StopRefusal:   agent.StopRefusal,
+		ai.StopSequence:  agent.StopSequence,
+		// A turn that ended in one of these never reaches the translation: the
+		// call failed, and the loop reports the failure instead.
+		ai.StopToolUse: agent.StopEndTurn,
+		ai.StopError:   agent.StopEndTurn,
+		ai.StopAborted: agent.StopEndTurn,
+	}
+
+	for _, reason := range stopReasonsDeclaredIn(t, "../ai/response.go") {
+		expected, decided := want[reason]
+		if !decided {
+			t.Errorf("ai.StopReason %q is new: decide what a turn ending that way "+
+				"is called, add it to endedBecause and to this table", reason)
+			continue
+		}
+		t.Run(string(reason), func(t *testing.T) {
+			d := &scripted{scripts: [][]ai.Delta{{
+				{Block: ai.TextBlock("as far as it got")},
+				{EndBlock: true},
+				{StopReason: reason},
+			}}}
+			out, err := outcome(t, newAgent(t, d), ai.UserMessage("go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.StopReason != expected {
+				t.Errorf("a wire reason of %q became %q, want %q", reason, out.StopReason, expected)
+			}
+		})
+	}
+}
+
+// stopReasonsDeclaredIn reads the StopReason constants out of a source file, so
+// the set this test checks is the set that exists rather than one remembered.
+func stopReasonsDeclaredIn(t *testing.T, path string) []ai.StopReason {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+
+	var out []ai.StopReason
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			v, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			if id, ok := v.Type.(*ast.Ident); !ok || id.Name != "StopReason" {
+				continue
+			}
+			for _, val := range v.Values {
+				lit, ok := val.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				out = append(out, ai.StopReason(strings.Trim(lit.Value, `"`)))
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("no StopReason constants found in %s — the parser or the file moved", path)
+	}
+	return out
 }

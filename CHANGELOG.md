@@ -74,6 +74,11 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Added
 
+- **`session/memory`**, a second `session.Store` — sessions that live as long as
+  the process, and the implementation that proves the interface describes more
+  than the filesystem. The session package's own tests record into it now, so
+  they exercise the contract rather than a directory; `TestStoreContract` runs
+  the same assertions against both stores.
 - **`agent.MessagesReplaced`**, the event `SetMessages` was missing. See below.
 - **`ai.ToolCall.UnmarshalArgs`** decodes a call's arguments into a Go value —
   the function `ToolCall.Input` has always been documented as decoding with.

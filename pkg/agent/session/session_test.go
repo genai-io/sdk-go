@@ -12,6 +12,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
+	"github.com/genai-io/sdk-go/pkg/agent/session/memory"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
@@ -72,7 +73,17 @@ func converse(t *testing.T, a *agent.Agent, rec *session.Recorder, msgs ...ai.Me
 	}
 }
 
-func store(t *testing.T) *jsonl.Store {
+// store is what these tests record into: the in-memory implementation, so what
+// they exercise is the Store contract rather than a filesystem. The one test
+// about a second process opens a jsonl store itself, because that is a claim
+// about that store and not about sessions.
+func store(t *testing.T) session.Store {
+	t.Helper()
+	return memory.Open()
+}
+
+// jsonlStore is for the tests that are about the jsonl store itself.
+func jsonlStore(t *testing.T) *jsonl.Store {
 	t.Helper()
 	s, err := jsonl.Open(t.TempDir())
 	if err != nil {
@@ -203,7 +214,9 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 }
 
 func TestForkingASessionLeavesTheOriginalAlone(t *testing.T) {
-	st := store(t)
+	// jsonl, explicitly: Fork and Delete are that store's own API, not
+	// part of the Store contract this package depends on.
+	st := jsonlStore(t)
 	ctx := context.Background()
 
 	a := newAgent(t, nil, text("one"), text("two"))
@@ -257,7 +270,9 @@ func TestForkingASessionLeavesTheOriginalAlone(t *testing.T) {
 // the session handle instead.
 func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 	ctx := context.Background()
-	st := store(t)
+	// jsonl, explicitly: Fork and Delete are that store's own API, not
+	// part of the Store contract this package depends on.
+	st := jsonlStore(t)
 
 	a := newAgent(t, nil, text("still working"))
 	rec, _, err := session.Open(ctx, st, "")

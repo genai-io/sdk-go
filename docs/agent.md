@@ -100,6 +100,24 @@ default at five minutes and one minute. Running out is reported as a network
 failure — because it is one — and it is one of the two things `WithRetry` is
 for.
 
+### A cut-off answer can be resumed
+
+A model stopped by the output cap was interrupted, not finished, so the turn
+ends with `max_tokens` and half an answer. `WithContinuation(attempts, prompt)`
+puts the prompt into the conversation and takes another step in the same
+exchange instead:
+
+```go
+agent.WithContinuation(2, "Your answer was cut off by the output limit. "+
+    "Carry on from exactly where you stopped, and do not repeat anything.")
+```
+
+The loop knows when it happened; whether to pay for more tokens, and what to
+say, are yours — so this is off by default. The prompt enters as an ordinary
+message and is reported as `MessageAdded`, so a session records what was asked.
+Running out of attempts still ends with `max_tokens`: the answer is still cut
+off.
+
 ### Retry belongs to the client
 
 `ai.Retry(attempts, backoff)` wraps the driver and is where retry goes. The

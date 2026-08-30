@@ -459,6 +459,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		a.add(emit, m)
 	}
 
+	resumed := 0
 	for step := 0; ; step++ {
 		if a.maxSteps > 0 && step >= a.maxSteps {
 			return out.stopped(StopMaxSteps)
@@ -488,6 +489,16 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 
 		calls := msg.ToolCalls()
 		if len(calls) == 0 {
+			// A model stopped by the output cap was interrupted, not finished,
+			// so a caller who asked for it gets another step rather than half
+			// an answer. The prompt goes into the conversation like any other
+			// message, which is what makes the next call see it and a session
+			// record that it was asked.
+			if resp.StopReason == ai.StopMaxTokens && a.resumeTries > resumed {
+				resumed++
+				a.add(emit, ai.UserMessage(a.resumePrompt))
+				continue
+			}
 			return out.stopped(endedBecause(resp.StopReason))
 		}
 

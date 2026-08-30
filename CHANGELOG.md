@@ -79,6 +79,10 @@ Each such change is listed under **Changed** with what to write instead.
   than the filesystem. The session package's own tests record into it now, so
   they exercise the contract rather than a directory; `TestStoreContract` runs
   the same assertions against both stores.
+- **`agent.WithContinuation(attempts, prompt)`** takes another step in the same
+  exchange when the output cap cut an answer off, instead of ending the turn
+  with half of one. Off by default: the loop knows when it happened, but paying
+  for more tokens and choosing the words are the application's.
 - **`Agent.Interrupt` returns a channel** that closes once the exchange it
   ended is actually over and the agent is idle again. The goroutine that read
   the keystroke is not the one ranging over `Run`, so it could not see the

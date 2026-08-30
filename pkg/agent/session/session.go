@@ -121,16 +121,15 @@ type ToolRun struct {
 	IsError bool   `json:"is_error,omitempty"`
 }
 
-// Outcome is how a turn ended: the loop's own reason for stopping, what the
-// turn cost, and the error if it failed.
+// Outcome is how a turn ended.
 //
-// StopReason is why this entry exists. It is not the model's reason — that is
-// on each Inference — but the loop's, and three of its values happen nowhere
-// else: max_steps, terminated, and canceled. Without this entry a session that
-// was interrupted just stops, with nothing saying why.
+// StopReason is why this entry exists: not the model's reason, which is on
+// each Inference, but the loop's — and max_steps, terminated and canceled
+// happen nowhere else. Without it an interrupted session just stops, with
+// nothing saying why.
 //
-// How many inferences it took and how many tools ran are not fields: the
-// Inference and ToolRun entries of the same turn are where those are counted.
+// How many inferences it took and how many tools ran are not fields; the
+// entries of the same turn are where those are counted.
 type Outcome struct {
 	StopReason agent.StopReason `json:"stop_reason,omitempty"`
 	Usage      ai.Usage         `json:"usage"`
@@ -199,7 +198,7 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 //	rec, history, _ := session.Open(ctx, store, "")   // or an existing id
 //	a.SetMessages(history)
 //	for e, err := range a.Run(ctx, ai.UserMessage(line)) {
-//	    rec.Handle(e)
+//	    rec.Handle(ctx, e)
 //	    render(e)
 //	}
 func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message, error) {

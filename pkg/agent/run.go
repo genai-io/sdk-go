@@ -104,7 +104,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 	var lastErr error
 
 	wait := a.retryBackoff
-	for attempt := 1; attempt <= a.maxAttempts; attempt++ {
+	for attempt := 1; attempt <= a.retryAttempts; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit. A
 		// refusal returns before anything is announced.
 		inf := a.inference()
@@ -141,7 +141,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		switch {
 		case retry:
 			lastErr = err
-			if attempt == a.maxAttempts {
+			if attempt == a.retryAttempts {
 				break // nothing to wait for
 			}
 			if err := pause(ctx, wait, err); err != nil {

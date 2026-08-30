@@ -2120,3 +2120,107 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 		t.Errorf("the conversation ended at %q, want the model's answer", last.Text())
 	}
 }
+
+// The mutex on an Agent is a promise: a caller may read and change the agent
+// from another goroutine while a turn is running. Nothing tested that promise,
+// so nothing would have caught a setter added without the lock. Run under
+// -race, which is where this test does its work.
+func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
+	slow := agent.ToolFunc("slow", "takes long enough to be raced",
+		func(ctx context.Context, _ struct{}) (agent.Result, error) {
+			time.Sleep(30 * time.Millisecond)
+			return agent.TextResult("done"), nil
+		})
+	d := &scripted{scripts: [][]ai.Delta{
+		toolCall("1", "slow", "{}"),
+		toolCall("2", "slow", "{}"),
+		text("finished"),
+	}}
+	a := newAgent(t, d, agent.WithTools(slow))
+
+	running := make(chan struct{})
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Everything a caller is told it may do from elsewhere.
+	for _, touch := range []func(){
+		func() { a.SetSystem("changed") },
+		func() { a.SetTools(slow) },
+		func() { a.AddHooks(agent.Hook{}) },
+		func() { a.AddMessages(ai.UserMessage("from outside")) },
+		func() { _ = a.Messages() },
+		func() { _ = a.Tools() },
+		func() { _ = a.System() },
+		func() { _ = a.String() },
+	} {
+		wg.Add(1)
+		go func(f func()) {
+			defer wg.Done()
+			<-running
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					f()
+				}
+			}
+		}(touch)
+	}
+
+	var turnEnded bool
+	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
+		if err != nil {
+			t.Fatalf("the turn failed: %v", err)
+		}
+		if _, ok := e.(agent.TurnStart); ok {
+			close(running) // let the other goroutines loose mid-turn
+		}
+		if _, ok := e.(agent.TurnEnd); ok {
+			turnEnded = true
+		}
+	}
+	close(stop)
+	wg.Wait()
+
+	if !turnEnded {
+		t.Error("the turn never finished")
+	}
+}
+
+// A second Run while one is in flight is refused, not queued: two of them
+// appending to one conversation would interleave into a history neither asked
+// for.
+func TestASecondRunWhileOneIsInFlightIsRefused(t *testing.T) {
+	held := make(chan struct{})
+	blocking := agent.ToolFunc("hold", "blocks until released",
+		func(ctx context.Context, _ struct{}) (agent.Result, error) {
+			<-held
+			return agent.TextResult("released"), nil
+		})
+	d := &scripted{scripts: [][]ai.Delta{toolCall("1", "hold", "{}"), text("done")}}
+	a := newAgent(t, d, agent.WithTools(blocking))
+
+	inTool := make(chan struct{})
+	var second error
+	go func() {
+		<-inTool
+		for _, err := range a.Run(context.Background(), ai.UserMessage("me too")) {
+			second = err
+		}
+		close(held)
+	}()
+
+	for e, err := range a.Run(context.Background(), ai.UserMessage("first")) {
+		if err != nil {
+			t.Fatalf("the first turn failed: %v", err)
+		}
+		if _, ok := e.(agent.ToolStart); ok {
+			close(inTool)
+		}
+	}
+
+	if !errors.Is(second, agent.ErrBusy) {
+		t.Errorf("the second Run returned %v, want ErrBusy", second)
+	}
+}

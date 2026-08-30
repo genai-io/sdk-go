@@ -19,43 +19,47 @@ import (
 type Agent struct {
 	client *ai.Client
 
+	// Settled at construction and never written again, so they are read
+	// without the lock. Anything given a setter has to move to the group
+	// below and take the lock with it.
+	maxSteps      int
+	retryAttempts int
+	retryBackoff  time.Duration
+	// streamFirst bounds how long the endpoint may say nothing at all,
+	// streamIdle how long it may pause once it has started. WithStreamTimeout
+	// normalises "off" to never, so neither is ever zero here and nothing
+	// reading them needs a case for it.
+	streamFirst time.Duration
+	streamIdle  time.Duration
+
+	// Everything a caller can change while the agent runs, and the lock that
+	// makes that safe. Read or write one of these and you hold mu.
+	mu       sync.Mutex
 	system   string
 	messages []ai.Message
 	tools    []Tool
 	hooks    []Hook
-
-	maxSteps int
-	// maxAttempts is 1 unless WithRetry asked for more: the client owns retry,
-	// and stacking a second budget on it multiplies rather than adds.
-	maxAttempts  int
-	retryBackoff time.Duration
-
-	// streamFirst and streamIdle bound how long a model stream may say
-	// nothing. Zero disables either one.
-	streamFirst time.Duration
-	streamIdle  time.Duration
-
-	// stopTurn ends the turn in flight. Never nil: between turns it is the
-	// last turn's, already spent, so calling it is the no-op it should be.
+	// replaced and pending are the two ways the conversation changes from
+	// outside an exchange, waiting for one to announce them. They are
+	// separate because they are announced at different moments: a
+	// replacement at the start of the next exchange, since everything before
+	// it is gone, and queued messages at the next step boundary, which is the
+	// one place it is safe to change what the model is about to see.
+	replaced bool
+	pending  []ai.Message
+	// stopTurn ends the turn in flight. Never nil: between turns it is a
+	// no-op, so Interrupt needs no case for having nothing to interrupt.
 	stopTurn context.CancelFunc
 
+	// Their own synchronisation, because they are read outside mu.
+	//
 	// turnCount is how many exchanges this agent has held. It counts the ones
 	// it actually ran, so a restored conversation starts again at zero — what
 	// came back from storage was someone else's counting.
 	turnCount atomic.Int64
-	// running is held for the length of one exchange and released after it;
-	// a second Run while one is in flight is ErrBusy, not a queue.
+	// running is held for the length of one exchange and released after it: a
+	// second Run while one is in flight is ErrBusy, not a queue.
 	running atomic.Bool
-
-	// replaced records that SetMessages threw the conversation away, so the
-	// next exchange can say so. Nothing else changes the conversation without
-	// announcing it.
-	replaced bool
-
-	// pending is what AddMessages queued, taken at the next step boundary.
-	pending []ai.Message
-
-	mu sync.Mutex
 }
 
 const (
@@ -145,7 +149,7 @@ func orNever(d time.Duration) time.Duration {
 func WithRetry(attempts int, backoff time.Duration) Option {
 	return func(a *Agent) {
 		if attempts > 0 {
-			a.maxAttempts = attempts
+			a.retryAttempts = attempts
 		}
 		if backoff >= 0 {
 			a.retryBackoff = backoff
@@ -162,12 +166,12 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 		return nil, errors.New("agent: a client is required")
 	}
 	a := &Agent{
-		client:       client,
-		maxAttempts:  1,
-		retryBackoff: time.Second,
-		streamFirst:  defaultFirstChunk,
-		streamIdle:   defaultIdle,
-		stopTurn:     func() {},
+		client:        client,
+		retryAttempts: 1,
+		retryBackoff:  time.Second,
+		streamFirst:   defaultFirstChunk,
+		streamIdle:    defaultIdle,
+		stopTurn:      func() {},
 	}
 	for _, opt := range opts {
 		if opt != nil {

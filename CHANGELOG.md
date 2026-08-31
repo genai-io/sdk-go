@@ -7,38 +7,45 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API may change between minor releases.
 Each such change is listed under **Changed** with what to write instead.
 
-## [Unreleased]
+## [0.2.0] - 2026-08-31
+
+This release is `pkg/agent`: the loop around a model call, its events, its
+hooks, its tools and its sessions. `pkg/ai` changes with it where the two meet,
+and those changes are listed first because everything else is built on them.
+
+Five things break. In the order you will meet them:
+
+1. `ai.Tool` is a `Schema` and a `Run`, not four fields.
+2. `agent.Tool` declares `Schema() ai.Schema`, not `Definition() ai.Tool`.
+3. `PreInfer` is handed an `*agent.Inference`, not an `*ai.Request`.
+4. `session` renames what was ambiguous, and `Entry` carries the turn.
+5. `Recorder.Handle` takes a `context.Context`.
+
 
 ### Changed
 
-- **`Entry` carries the turn, and the payloads no longer do.** Which exchange
-  an entry belongs to says where it sits, which is what `Seq` and `At` say too,
-  so it is `Entry.Turn` rather than a field repeated inside three payload
-  types. Message and snapshot entries gain it, having previously had no turn at
-  all.
-- **The session package is renamed where a name was ambiguous.** `session.Tool`
-  is `session.ToolRun` — a tool is a thing that can be run, and `ai` and `agent`
-  both have that type, where this is the record of one having been.
-  `session.Turn` is `session.Outcome`, holding how a turn ended rather than
-  restating which turn it was; `EntryTool` is `EntryToolRun` and `EntryTurn` is
-  `EntryOutcome`.
-- **`Recorder.Handle` takes a context.** `Store` is context-aware in every
-  method and the recorder passed `context.Background()` to all of them, so a
-  store that was not the local filesystem could block the loop delivering
-  events with no way to cancel it.
-- **`Recorder.Snapshot` is gone**, and nothing replaces it — see below.
-- **`agent.Told` is `agent.ResultText`**, a name that says what it returns.
-- **`SetTools` and `AddHooks` are variadic**, matching `WithTools` and
-  `WithHooks`; `AddHook` is `AddHooks`. Messages keep their existing split — a
-  conversation is handed over as a slice (`WithMessages`, `SetMessages`) and
-  added to as items (`AddMessages`).
+- **`ai.Tool` is now a schema and a function.** `Name`, `Description` and
+  `Parameters` are gone; the three of them were a `Schema` written out longhand,
+  which is the type the package already had for exactly this — a named,
+  described JSON shape. Write `ai.Tool{Schema: ai.Schema{Name: …, Description:
+  …, Definition: …}, Run: …}`, or `ai.ToolSchema[T](name, description)` to
+  derive it from a Go type. `ToolFunc` is unchanged. `Tool.ValidateArgs` and
+  `Tool.ParameterSchema` moved onto the schema as `Schema.Validate` and
+  `Schema.DefinitionMap`. A tool can now be `Strict`, which it could not be
+  before.
 - **`ai.Schema.DefinitionMap` and `WireName` take a value receiver**, matching
   `Validate`. They could not be called on a `Schema` returned by value, which
-  is what `agent.Tool.Schema()` returns.
-- **`WithID`, `WithName` and `Agent.Name` are gone.** `WithID` documented
-  itself as identifying the agent in the events it emits, which no event ever
-  carried; between them the two fields fed nothing but `String`. `String`
-  remains, naming the agent by its model.
+  is what `agent.Tool.Schema()` returns. Calls are unchanged, except where one
+  relied on the nil receiver: a possibly-nil `*Schema`, such as
+  `Request.Schema`, needs the nil check written out.
+- **`ai.RepairHistory` is now `ai.Repair`.** The old name introduced a word the
+  package does not otherwise use: there is no history type here, only
+  `[]Message` and `Request.Messages`. `Repair` is unchanged in behaviour — it
+  still pairs tool calls with their results and replaces invalid UTF-8, and
+  still removes only what a protocol would reject. Write `ai.Repair(msgs)`.
+- **`agent.Tool` declares `Schema() ai.Schema`** instead of `Definition()
+  ai.Tool`, which returned a value whose `Run` field was always nil.
+
 - **`PreInfer` is handed an `agent.Inference`, not an `*ai.Request`.** It has
   the three things an agent contributes — `System`, `Messages`, `Tools` — and
   an `Options []ai.Option` layered on last for everything else, so
@@ -60,17 +67,35 @@ Each such change is listed under **Changed** with what to write instead.
   consumer and needed a mutex, two maps and a counter to pair spans back up;
   none of that is left.
 
-- **`ai.Tool` is now a schema and a function.** `Name`, `Description` and
-  `Parameters` are gone; the three of them were a `Schema` written out longhand,
-  which is the type the package already had for exactly this — a named,
-  described JSON shape. Write `ai.Tool{Schema: ai.Schema{Name: …, Description:
-  …, Definition: …}, Run: …}`, or `ai.ToolSchema[T](name, description)` to
-  derive it from a Go type. `ToolFunc` is unchanged. `Tool.ValidateArgs` and
-  `Tool.ParameterSchema` moved onto the schema as `Schema.Validate` and
-  `Schema.DefinitionMap`. A tool can now be `Strict`, which it could not be
-  before.
-- **`agent.Tool` declares `Schema() ai.Schema`** instead of `Definition()
-  ai.Tool`, which returned a value whose `Run` field was always nil.
+- **`WithID`, `WithName` and `Agent.Name` are gone.** `WithID` documented
+  itself as identifying the agent in the events it emits, which no event ever
+  carried; between them the two fields fed nothing but `String`. `String`
+  remains, naming the agent by its model. Nothing replaces them: an agent's
+  identity is the caller's, and it already holds the agent.
+- **`SetTools` and `AddHooks` are variadic**, matching `WithTools` and
+  `WithHooks`; `AddHook` is `AddHooks`. Messages keep their existing split — a
+  conversation is handed over as a slice (`WithMessages`, `SetMessages`) and
+  added to as items (`AddMessages`).
+- **`agent.Told` is `agent.ResultText`**, a name that says what it returns.
+- **The session package is renamed where a name was ambiguous.** `session.Tool`
+  is `session.ToolRun` — a tool is a thing that can be run, and `ai` and `agent`
+  both have that type, where this is the record of one having been.
+  `session.Turn` is `session.Outcome`, holding how a turn ended rather than
+  restating which turn it was; `EntryTool` is `EntryToolRun` and `EntryTurn` is
+  `EntryOutcome`.
+- **`Entry` carries the turn, and the payloads no longer do.** Which exchange
+  an entry belongs to says where it sits, which is what `Seq` and `At` say too,
+  so it is `Entry.Turn` rather than a field repeated inside three payload
+  types. Message and snapshot entries gain it, having previously had no turn at
+  all. Read `entry.Turn` where you read `entry.Inference.Turn`,
+  `entry.ToolRun.Turn` or `entry.Turn.Turn`.
+- **`Recorder.Handle` takes a context.** `Store` is context-aware in every
+  method and the recorder passed `context.Background()` to all of them, so a
+  store that was not the local filesystem could block the loop delivering
+  events with no way to cancel it.
+- **`Recorder.Snapshot` is gone**, and nothing replaces it. It existed so a
+  caller could tell a session that compaction had replaced the conversation;
+  the agent announces that itself now, as `MessagesReplaced`. Delete the call.
 
 ### Added
 
@@ -92,11 +117,15 @@ Each such change is listed under **Changed** with what to write instead.
   the keystroke is not the one ranging over `Run`, so it could not see the
   range end and had no way to know when the agent stopped touching the
   conversation. Calling it as a statement is unchanged.
-- **`agent.MessagesReplaced`**, the event `SetMessages` was missing. See below.
+- **`agent.MessagesReplaced`**, the event `SetMessages` was missing: the
+  conversation being thrown away and replaced, announced at the start of the
+  next exchange so a session's fold knows to start over.
 - **`ai.ToolCall.UnmarshalArgs`** decodes a call's arguments into a Go value —
   the function `ToolCall.Input` has always been documented as decoding with.
   An argument the schema does not have is an error rather than a silent drop.
-- **`agent.WithRetry(attempts, backoff)`** — see below.
+- **`agent.WithRetry(attempts, backoff)`** replaces `WithMaxAttempts`, taking
+  `ai.Retry`'s own arguments. It is off by default, because retry belongs on
+  the client and two budgets multiply rather than add.
 - **`agent.StopRefusal` and `agent.StopSequence`.**
 
 ### Fixed
@@ -162,12 +191,6 @@ Each such change is listed under **Changed** with what to write instead.
   session's sequence number is recovered from the entries file itself — which
   also fixes a second process carrying on from a stale count after a crash and
   writing duplicate sequence numbers. The store-wide lock is now per session.
-
-- **`ai.RepairHistory` is now `ai.Repair`.** The old name introduced a word the
-  package does not otherwise use: there is no history type here, only
-  `[]Message` and `Request.Messages`. `Repair` is unchanged in behaviour — it
-  still pairs tool calls with their results and replaces invalid UTF-8, and
-  still removes only what a protocol would reject. Write `ai.Repair(msgs)`.
 
 ## [0.1.2] - 2026-08-22
 

@@ -181,9 +181,7 @@ var clock = agent.ToolFunc("now", "The current date and time.",
 func render(e agent.Event) {
 	switch v := e.(type) {
 	case agent.MessageUpdate:
-		if v.Delta.Type == ai.EventBlockDelta && v.Delta.Block.Type == ai.BlockText {
-			fmt.Print(v.Delta.Block.Text)
-		}
+		fmt.Print(v.Text())
 	case agent.ToolStart:
 		fmt.Printf("\033[2m[%s]\033[0m ", v.Name)
 	}

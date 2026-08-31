@@ -57,6 +57,25 @@ type MessageUpdate struct{ Delta ai.Event }
 
 func (MessageUpdate) event() {}
 
+// Text is the fragment of the answer this update carries, empty when it
+// carries anything else. Almost every consumer wants exactly this and nothing
+// around it:
+//
+//	case agent.MessageUpdate:
+//	    fmt.Print(v.Text())
+func (u MessageUpdate) Text() string { return u.fragment(ai.BlockText) }
+
+// Thinking is the fragment of reasoning this update carries, empty otherwise.
+// A model that reasons out loud produces these before its answer.
+func (u MessageUpdate) Thinking() string { return u.fragment(ai.BlockThinking) }
+
+func (u MessageUpdate) fragment(kind ai.BlockType) string {
+	if u.Delta.Type != ai.EventBlockDelta || u.Delta.Block.Type != kind {
+		return ""
+	}
+	return u.Delta.Block.Text
+}
+
 // MessageEnd closes the span. A MessageAdded follows once the loop accepts the
 // message, and does not follow at all when Err is set — that absence is what
 // tells a consumer the partial output it drew was discarded.

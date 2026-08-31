@@ -2481,3 +2481,29 @@ func turns(t *testing.T, a *agent.Agent) int {
 	}
 	return n
 }
+
+// The fragment a consumer almost always wants, without reaching through two
+// levels of the event that carries it.
+func TestAMessageUpdateSaysWhatFragmentItCarries(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		delta          ai.Event
+		text, thinking string
+	}{
+		{"text", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockText, Text: "hello"}}, "hello", ""},
+		{"thinking", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockThinking, Text: "hmm"}}, "", "hmm"},
+		{"a block opening", ai.Event{Type: ai.EventBlockStart, Block: ai.Block{Type: ai.BlockText, Text: "no"}}, "", ""},
+		{"a tool call taking shape", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockToolCall}}, "", ""},
+		{"the end", ai.Event{Type: ai.EventDone}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := agent.MessageUpdate{Delta: tc.delta}
+			if got := u.Text(); got != tc.text {
+				t.Errorf("Text() = %q, want %q", got, tc.text)
+			}
+			if got := u.Thinking(); got != tc.thinking {
+				t.Errorf("Thinking() = %q, want %q", got, tc.thinking)
+			}
+		})
+	}
+}

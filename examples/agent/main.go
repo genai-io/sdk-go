@@ -129,9 +129,7 @@ func main() {
 func render(e agent.Event) {
 	switch v := e.(type) {
 	case agent.MessageUpdate:
-		if v.Delta.Type == ai.EventBlockDelta && v.Delta.Block.Type == ai.BlockText {
-			fmt.Print(v.Delta.Block.Text)
-		}
+		fmt.Print(v.Text())
 	case agent.ToolStart:
 		fmt.Printf("\n[%s] %s\n", v.Name, strings.TrimSpace(v.Args))
 	case agent.ToolEnd:

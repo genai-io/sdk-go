@@ -79,6 +79,10 @@ Each such change is listed under **Changed** with what to write instead.
   than the filesystem. The session package's own tests record into it now, so
   they exercise the contract rather than a directory; `TestStoreContract` runs
   the same assertions against both stores.
+- **`MessageUpdate.Text` and `.Thinking`** give the fragment an update carries,
+  empty when it carries something else. Every example in this repo held the
+  same three-level reach through `Delta.Type` and `Delta.Block.Type` to print a
+  token; they print `v.Text()` now.
 - **`agent.WithContinuation(attempts, prompt)`** takes another step in the same
   exchange when the output cap cut an answer off, instead of ending the turn
   with half of one. Off by default: the loop knows when it happened, but paying

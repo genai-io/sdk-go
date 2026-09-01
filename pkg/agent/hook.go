@@ -30,6 +30,12 @@ type Hook struct {
 }
 
 // PreToolContext is what the gate is told about a call it may refuse.
+//
+// "Context" here is the English word, not context.Context, and the two do sit
+// in one signature. Every alternative tried was worse: PreToolCall makes the
+// field below PreToolCall.Call, and naming it for the moment rather than the
+// subject loses what it is. A name that reads oddly beside one other name
+// beats a name that stutters against its own field.
 type PreToolContext struct {
 	Call     ai.ToolCall
 	Tool     Tool

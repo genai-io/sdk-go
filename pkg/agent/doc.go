@@ -14,7 +14,7 @@
 //	    render(e)
 //	}
 //
-// Turn advances the conversation one exchange and reports what it does on the
+// Run advances the conversation one exchange and reports what it does on the
 // way; the last event is TurnEnd, which carries how it went.
 //
 // Repeating it is a for loop, and the loop is the application's — how messages
@@ -41,27 +41,23 @@
 //
 // # Events
 //
-// Nine types, and each exists because a consumer would break without it.
-//
-//	MessageAdded                              a message entered the conversation
-//	MessageStart  MessageUpdate  MessageEnd   the model producing one
-//	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-//	TurnStart                    TurnEnd      the exchange around them
+// Ten types, each one there because a consumer would break without it. Event
+// lists them; what follows is what a list cannot say.
 //
 // A span always comes in pairs, and only what takes time has one. What entered
 // the conversation is its own event because a user's message and a batch of
 // tool results enter without any span at all — they were whole before the
 // agent saw them.
 //
-// The conversation is the fold of MessageAdded, and that is the only event
-// that changes it. Everything else reports work in progress.
+// The conversation is the fold of two events and no others: MessageAdded
+// appends, and MessagesReplaced starts over, because everything announced
+// before one of those is what the caller threw away. What SetMessages did is
+// on the stream for exactly that reason: a consumer that folded only what was
+// appended would hand back the history compaction just discarded.
 //
-// SetMessages is outside that: it swaps the conversation whole, and nothing on
-// the stream says so, because the agent does not know its history was replaced
-// — the caller who replaced it does, and tells whoever was folding.
-//
-// TurnEnd carries the summary: what the turn cost and why it stopped. It holds
-// nothing a consumer could fold out of the stream itself.
+// TurnEnd carries the summary: what the turn cost and why it stopped, the
+// error included. It holds nothing a consumer could fold out of the stream
+// itself.
 //
 // Nothing is dropped on the way out: the events arrive on the ranging
 // goroutine, so there is no reader to fall behind. What a tool reports is the

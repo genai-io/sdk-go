@@ -1,6 +1,10 @@
 package catalog
 
-import "github.com/genai-io/sdk-go/pkg/ai"
+import (
+	"strings"
+
+	"github.com/genai-io/sdk-go/pkg/ai"
+)
 
 // ─── reasoning ladders ───
 
@@ -130,14 +134,14 @@ func cny(input, output, cacheWrite, cacheRead float64) ai.Pricing {
 }
 
 // gpt5 builds an OpenAI reasoning-model entry. The whole GPT-5 family shares
-// one window and output cap.
+// one window and output cap, and inferOpenAI already knows what they are —
+// restating them here is how a row and an inference drift apart.
 func gpt5(id, name string, pricing ai.Pricing) ai.Model {
-	return ai.Model{
+	return inferOpenAI(ai.Model{
 		ID: id, Name: name,
-		ContextWindow: 1_050_000, MaxOutput: 128_000,
 		Reasoning: openAIEfforts,
 		Pricing:   pricing,
-	}
+	})
 }
 
 // gpt56 is gpt5 with the extra top rung the 5.6 family accepts.
@@ -155,7 +159,7 @@ func retired(id, name, replacement string) ai.Model {
 		ID: id, Name: name,
 		Stage:       ai.StageRetired,
 		Replacement: replacement,
-		Reasoning:   NoReasoning,
+		Reasoning:   noReasoning,
 	}
 }
 
@@ -165,9 +169,49 @@ func preview(m ai.Model) ai.Model {
 	return m
 }
 
-// gemini builds a Gemini 3 entry. The family shares one window and output cap;
-// Google publishes no per-model rate card in the API docs, so no pricing is
-// stated rather than a guessed one.
+// gemini builds a Gemini 3 entry. The family shares one window and output cap,
+// which inferGoogle states already. Google publishes no per-model rate card in
+// the API docs, so no pricing is given rather than a guessed one.
 func gemini(id, name string) ai.Model {
-	return ai.Model{ID: id, Name: name, ContextWindow: 1_048_576, MaxOutput: 65_536}
+	return inferGoogle(ai.Model{ID: id, Name: name})
+}
+
+// priced attaches a rate card, by model ID, to a line of models two vendors
+// share. The rows themselves say nothing about price because the two bill
+// differently — the same Claude costs one thing from Anthropic and another
+// through a Google contract — and that is the only thing they differ in.
+func priced(models []ai.Model, prices map[string]ai.Pricing) []ai.Model {
+	out := make([]ai.Model, len(models))
+	for i, m := range models {
+		m.Pricing = prices[m.ID]
+		out[i] = m
+	}
+	return out
+}
+
+// ─── deployments ───
+
+// The variables a Vertex deployment is named by. They are constants because
+// the row lists them for a caller to read and vertexDeployment reads them for
+// real, and the two saying different things would be undetectable.
+const (
+	vertexProjectEnv = "ANTHROPIC_VERTEX_PROJECT_ID"
+	vertexRegionEnv  = "CLOUD_ML_REGION"
+)
+
+// vertexDeployment reads the project and region a Vertex-served model lives
+// in. The project has no default worth guessing: without one the request goes
+// to nobody's project, so it is refused here rather than 400 later. The
+// credential is not among these — Vertex takes Application Default
+// Credentials, not a variable.
+func vertexDeployment(env func(string) string) (ai.ProtocolConfig, error) {
+	project := strings.TrimSpace(env(vertexProjectEnv))
+	if project == "" {
+		return nil, &MissingDeploymentError{
+			EnvVars: []string{vertexProjectEnv},
+			Note: "Vertex needs a Google Cloud project. Credentials themselves come from " +
+				"Application Default Credentials, not from a variable.",
+		}
+	}
+	return ai.VertexConfig{Project: project, Region: strings.TrimSpace(env(vertexRegionEnv))}, nil
 }

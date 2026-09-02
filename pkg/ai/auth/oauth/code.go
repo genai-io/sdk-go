@@ -48,7 +48,9 @@ func Code(ctx context.Context, cfg Config, endpoints CodeEndpoints, ui Interacti
 		return Token{}, fmt.Errorf("oauth: cannot listen on %s for the sign-in redirect "+
 			"(another process may be holding it): %w", redirect.Host, err)
 	}
-	defer listener.Close()
+	// The deferred Shutdown below is what actually stops serving; closing the
+	// listener after it is belt and braces, with nothing left to report.
+	defer func() { _ = listener.Close() }()
 
 	results := make(chan callbackResult, 1)
 	server := &http.Server{
@@ -181,7 +183,9 @@ func send(results chan<- callbackResult, r callbackResult) {
 
 func finish(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>Sign-in</title>"+
+	// A browser that hung up mid-write has still delivered the code; the
+	// grant reports through the results channel, not through this page.
+	_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>Sign-in</title>"+
 		"<body style=\"font:16px system-ui;padding:3rem\"><p>%s</p>", message)
 }
 

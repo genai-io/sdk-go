@@ -1,10 +1,12 @@
 package responses
 
 import (
-	"github.com/genai-io/sdk-go/pkg/ai"
 	sdk "github.com/openai/openai-go/v3"
 	wire "github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+
+	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
 func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
@@ -218,7 +220,7 @@ func (d *Driver) messageParam(role wire.EasyInputMessageRole, content ai.Content
 func imagePart(mediaType, data string) wire.ResponseInputContentUnionParam {
 	part := wire.ResponseInputContentParamOfInputImage(wire.ResponseInputImageDetailAuto)
 	if part.OfInputImage != nil {
-		part.OfInputImage.ImageURL = sdk.String("data:" + mediaType + ";base64," + data)
+		part.OfInputImage.ImageURL = sdk.String(oai.DataURI(mediaType, data))
 	}
 	return part
 }

@@ -24,9 +24,6 @@ func (m Model) validate(req *Request) error {
 	if err := m.checkCompat(); err != nil {
 		return err
 	}
-	if req == nil {
-		req = &Request{}
-	}
 	if err := validateSettings(req); err != nil {
 		return err
 	}
@@ -68,7 +65,7 @@ func (m Model) validateCapabilities(req *Request) error {
 	// extension, and Responses has no stop-sequence parameter. A per-model
 	// flag would have to be set on every row and would silently stop firing
 	// the first time someone forgot.
-	if len(req.SamplingParams) > 0 && (m.API == APIAnthropicMessages || m.API == APIGoogleGenAI) {
+	if len(req.SamplingParams) > 0 && (m.API.anthropicFamily() || m.API == APIGoogleGenAI) {
 		return m.unsupported("does not support OpenAI sampling parameter extensions")
 	}
 	if len(req.StopSequences) > 0 && m.API == APIOpenAIResponses {
@@ -173,15 +170,15 @@ func (m Model) validateProtocolBlock(block Block) error {
 	if block.Type != BlockThinking {
 		return nil
 	}
-	if block.Signature != "" && m.API != "" && m.API != APIAnthropicMessages {
+	if block.Signature != "" && m.API != "" && !m.API.anthropicFamily() {
 		return fmt.Errorf("signed thinking blocks belong to the Anthropic Messages protocol")
 	}
-	switch m.API {
-	case APIAnthropicMessages:
+	switch {
+	case m.API.anthropicFamily():
 		if block.Text != "" && block.Signature == "" {
-			return fmt.Errorf("Anthropic thinking replay requires its signature")
+			return fmt.Errorf("thinking replay on the Anthropic Messages protocol requires its signature")
 		}
-	case APIOpenAIChat:
+	case m.API == APIOpenAIChat:
 		if !CompatOf[OpenAIChatCompat](m).ReasoningContent {
 			return fmt.Errorf("this Chat Completions endpoint cannot replay thinking blocks")
 		}

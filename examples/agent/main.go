@@ -83,7 +83,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer store.Close()
+	defer func() {
+		// Close writes the metadata a later listing reads.
+		if err := store.Close(); err != nil {
+			log.Print(err)
+		}
+	}()
 
 	// Resume the most recent session, or start one. What comes back is the
 	// history to seed the agent with — the agent itself knows nothing about
@@ -105,6 +110,8 @@ func main() {
 	steps := 0
 	for e, err := range a.Run(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
 		if err != nil {
+			// Only a failure that is not part of the exchange arrives here;
+			// how the exchange itself went is on TurnEnd, below.
 			log.Fatalf("\n%v", err)
 		}
 		rec.Handle(ctx, e)
@@ -121,6 +128,9 @@ func main() {
 
 	fmt.Printf("\n\n— %s · %d steps · %d tokens · session %s\n",
 		last.StopReason, steps, last.Usage.Total(), rec.ID())
+	if last.Err != nil {
+		fmt.Fprintf(os.Stderr, "the exchange failed: %v\n", last.Err)
+	}
 	if err := rec.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "session was not fully written: %v\n", err)
 	}

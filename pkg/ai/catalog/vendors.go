@@ -20,6 +20,47 @@ const verifiedGateways = "2026-08-21"
 // Azure the deployment decides them, and on Bedrock the model card does.
 const verifiedHyperscalers = "2026-08-21"
 
+// claudeLine is the live Claude generation as both entries below serve it: the
+// same IDs, the same ladders, the same limits. It was hand-copied into each,
+// which is how the two came to differ in what neither meant to change.
+//
+// The rows state no window: inferAnthropic fills the generation's shape, and a
+// row restating it is a second place for the figure to be wrong.
+var claudeLine = []ai.Model{
+	{ID: "claude-fable-5", Name: "Claude Fable 5", Reasoning: claudeAlwaysOn},
+	{ID: "claude-opus-5", Name: "Claude Opus 5"},
+	{ID: "claude-opus-4-8", Name: "Claude Opus 4.8"},
+	{ID: "claude-opus-4-7", Name: "Claude Opus 4.7"},
+	{ID: "claude-opus-4-6", Name: "Claude Opus 4.6",
+		Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46},
+	{ID: "claude-sonnet-5", Name: "Claude Sonnet 5"},
+	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6",
+		Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46},
+}
+
+// anthropicModels is claudeLine on the first-party API: the same rows with
+// Anthropic's own rate card, plus the generations only this endpoint ever
+// served.
+var anthropicModels = append(priced(claudeLine, map[string]ai.Pricing{
+	"claude-fable-5":    usd(10, 50, 12.50, 1.00),
+	"claude-opus-5":     usd(5, 25, 6.25, 0.50),
+	"claude-opus-4-8":   usd(5, 25, 6.25, 0.50),
+	"claude-opus-4-7":   usd(5, 25, 6.25, 0.50),
+	"claude-opus-4-6":   usd(5, 25, 6.25, 0.50),
+	"claude-sonnet-5":   usd(2, 10, 2.50, 0.20),
+	"claude-sonnet-4-6": usd(3, 15, 3.75, 0.30),
+}),
+	// Retired on the first-party API. They stay listed so a caller still
+	// pointing at one is told what happened and what to move to, instead of
+	// meeting an opaque rejection from the endpoint. Filter them out of a
+	// picker with Stage.Available.
+	retired("claude-opus-4-1-20250805", "Claude Opus 4.1", "claude-opus-5"),
+	retired("claude-opus-4-20250514", "Claude Opus 4", "claude-opus-5"),
+	retired("claude-sonnet-4-20250514", "Claude Sonnet 4", "claude-sonnet-5"),
+	retired("claude-3-7-sonnet-20250219", "Claude Sonnet 3.7", "claude-sonnet-5"),
+	retired("claude-3-5-haiku-20241022", "Claude Haiku 3.5", "claude-sonnet-5"),
+)
+
 // vendors is the directory. Order is the display order; the numbering leaves
 // gaps so a vendor can be slotted in without renumbering the rest.
 var vendors = []Vendor{
@@ -37,33 +78,8 @@ var vendors = []Vendor{
 		// thinking.budget_tokens, is no longer served from here.
 		Compat:    claudeAdaptiveNoTemp,
 		Reasoning: claudeAdaptive,
-		Models: []ai.Model{
-			{ID: "claude-fable-5", Name: "Claude Fable 5", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Reasoning: claudeAlwaysOn, Pricing: usd(10, 50, 12.50, 1.00)},
-			{ID: "claude-opus-5", Name: "Claude Opus 5", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Pricing: usd(5, 25, 6.25, 0.50)},
-			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Pricing: usd(5, 25, 6.25, 0.50)},
-			{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Pricing: usd(5, 25, 6.25, 0.50)},
-			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46, Pricing: usd(5, 25, 6.25, 0.50)},
-			{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Pricing: usd(2, 10, 2.50, 0.20)},
-			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46, Pricing: usd(3, 15, 3.75, 0.30)},
-
-			// Retired on the first-party API. They stay listed so a caller
-			// still pointing at one is told what happened and what to move to,
-			// instead of meeting an opaque rejection from the endpoint. Filter
-			// them out of a picker with Stage.Available.
-			retired("claude-opus-4-1-20250805", "Claude Opus 4.1", "claude-opus-5"),
-			retired("claude-opus-4-20250514", "Claude Opus 4", "claude-opus-5"),
-			retired("claude-sonnet-4-20250514", "Claude Sonnet 4", "claude-sonnet-5"),
-			retired("claude-3-7-sonnet-20250219", "Claude Sonnet 3.7", "claude-sonnet-5"),
-			retired("claude-3-5-haiku-20241022", "Claude Haiku 3.5", "claude-sonnet-5"),
-		},
-		Infer: inferAnthropic,
+		Models:    anthropicModels,
+		Infer:     inferAnthropic,
 	},
 	{
 		ID:          "anthropic-vertex",
@@ -76,28 +92,20 @@ var vendors = []Vendor{
 		// variables below name the deployment, not a credential.
 		KeyEnv: nil,
 		DeploymentEnv: map[string]string{
-			"project": "ANTHROPIC_VERTEX_PROJECT_ID",
-			"region":  "CLOUD_ML_REGION",
+			"project": vertexProjectEnv,
+			"region":  vertexRegionEnv,
 		},
-		Input:     textImage,
-		Compat:    claudeAdaptiveNoTemp,
-		Reasoning: claudeAdaptive,
+		Deployment: vertexDeployment,
+		Input:      textImage,
+		Compat:     claudeAdaptiveNoTemp,
+		Reasoning:  claudeAdaptive,
 		Note: "Authenticates with Google Application Default Credentials; set ANTHROPIC_VERTEX_PROJECT_ID and, optionally, CLOUD_ML_REGION. " +
 			"Vertex still serves earlier generations under @-versioned snapshot IDs; they are not listed, and Infer sizes one if you name it.",
-		Models: []ai.Model{
-			// Claude 4.6 and later use dateless IDs on Vertex too.
-			{ID: "claude-fable-5", Name: "Claude Fable 5", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Reasoning: claudeAlwaysOn},
-			{ID: "claude-opus-5", Name: "Claude Opus 5", ContextWindow: 1_000_000, MaxOutput: 128_000},
-			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", ContextWindow: 1_000_000, MaxOutput: 128_000},
-			{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ContextWindow: 1_000_000, MaxOutput: 128_000},
-			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46},
-			{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ContextWindow: 1_000_000, MaxOutput: 128_000},
-			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ContextWindow: 1_000_000, MaxOutput: 128_000,
-				Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46},
-		},
-		Infer: inferAnthropic,
+		// Claude 4.6 and later use dateless IDs on Vertex too, so the line is
+		// the same one the first-party entry serves. Vertex bills through a
+		// Google contract, so it takes the rows unpriced.
+		Models: claudeLine,
+		Infer:  inferAnthropic,
 	},
 	{
 		ID:          "openai",
@@ -124,9 +132,9 @@ var vendors = []Vendor{
 			gpt5("gpt-5.5", "GPT-5.5", usd(5, 30, 0, 0.50)),
 			gpt5("gpt-5.4", "GPT-5.4", usd(2.50, 15, 0, 0.25)),
 			{ID: "gpt-4.1", Name: "GPT-4.1", ContextWindow: 1_047_576, MaxOutput: 32_768,
-				Reasoning: NoReasoning, Pricing: usd(2, 8, 0, 0.50)},
+				Reasoning: noReasoning, Pricing: usd(2, 8, 0, 0.50)},
 			{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128_000, MaxOutput: 16_384,
-				Reasoning: NoReasoning, Pricing: usd(2.50, 10, 0, 1.25)},
+				Reasoning: noReasoning, Pricing: usd(2.50, 10, 0, 1.25)},
 		},
 		// Reasoning is per model family, not per vendor: gpt-4o does not
 		// reason and gpt-5 does, so Infer decides rather than a default.
@@ -182,7 +190,10 @@ var vendors = []Vendor{
 		KeyEnv:    []string{"AWS_BEARER_TOKEN_BEDROCK"},
 		Input:     textOnly,
 		Reasoning: gptOSSEfforts,
-		Compat:    ai.OpenAIChatCompat{},
+		// The ladder above only reaches the wire if the endpoint's dialect is
+		// stated: gpt-oss takes OpenAI's own reasoning_effort, and without
+		// this the driver has no field to put a rung in and drops it silently.
+		Compat: ai.OpenAIChatCompat{Thinking: ai.ThinkingEffort},
 		Note: "Set AWS_BEDROCK_BASE_URL to https://bedrock-runtime.REGION.amazonaws.com and " +
 			"AWS_BEARER_TOKEN_BEDROCK to a Bedrock API key; the /openai/v1 suffix is added for you. " +
 			"This endpoint speaks Chat Completions only — Bedrock publishes no /responses — so the " +
@@ -200,8 +211,12 @@ var vendors = []Vendor{
 		Order:       30,
 		Verified:    verified,
 		API:         ai.APIGoogleGenAI,
-		KeyEnv:      []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-		Input:       textImage,
+		// Google's own SDKs take a base URL in code rather than from the
+		// environment, so there is no name of theirs to follow; this is the
+		// one the Gemini CLI uses, and it matches GEMINI_API_KEY.
+		BaseURLEnv: "GEMINI_BASE_URL",
+		KeyEnv:     []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
+		Input:      textImage,
 		// Gemini 3 replaced the thinking budget with a level; the 2.5 entries
 		// opt back to a budget through Infer.
 		Compat:    ai.GoogleCompat{ThinkingLevel: true},
@@ -272,7 +287,7 @@ var vendors = []Vendor{
 		},
 	},
 	{
-		ID:          "minmax",
+		ID:          "minimax",
 		DisplayName: "MiniMax",
 		Order:       60,
 		Verified:    verified,
@@ -382,8 +397,9 @@ var vendors = []Vendor{
 		BaseURLSuffix: "/v1",
 		Input:         textImage,
 		Compat:        ai.OpenAIChatCompat{},
-		Note: "Windows depend on the pulled model file and the server's num_ctx, not on a published catalog; " +
-			"the entries below are common defaults. The live listing is authoritative.",
+		Note: "A local server, so there is no credential to set. Windows depend on the pulled model file " +
+			"and the server's num_ctx, not on a published catalog; the entries below are common defaults. " +
+			"The live listing is authoritative.",
 		Models: []ai.Model{
 			{ID: "llama4", Name: "Llama 4", ContextWindow: 131_072, MaxOutput: 16_384},
 			{ID: "qwq", Name: "QwQ", ContextWindow: 131_072, MaxOutput: 16_384},
@@ -574,7 +590,7 @@ var vendors = []Vendor{
 		BaseURL: "https://api.individual.githubcopilot.com",
 		Input:   textImage,
 		Compat:  ai.OpenAIChatCompat{},
-		Headers: CopilotHeaders,
+		Headers: copilotHeaders,
 		Note: "Copilot authenticates a person, not a service: there is no API key. " +
 			"Sign in with auth.Login(ctx, \"copilot\", ...), which runs GitHub's device-code " +
 			"grant and stores the result. The token it issues lasts about half an hour and " +
@@ -597,9 +613,20 @@ var vendors = []Vendor{
 	},
 }
 
-// CopilotHeaders identify the caller as an editor integration. The Copilot API
-// refuses requests that do not.
-var CopilotHeaders = map[string]string{
+// aliases keep a vendor ID that is already written into somebody's
+// configuration resolving after the table changed its own spelling. A row is
+// the truth and an alias only a redirection to one; Find is where they meet.
+var aliases = map[string]string{
+	// The MiniMax row was keyed "minmax" — a misspelling of the brand that
+	// every other field on it, and the vendor's own host, spells correctly.
+	"minmax": "minimax",
+}
+
+// copilotHeaders identify the caller as an editor integration. The Copilot API
+// refuses requests that do not. It is not exported: a package-level map that
+// anyone can write to is a process-wide setting nobody declared, and the entry
+// below hands out a copy of it to whoever needs one.
+var copilotHeaders = map[string]string{
 	"Editor-Version":         "vscode/1.107.0",
 	"Editor-Plugin-Version":  "copilot-chat/0.35.0",
 	"Copilot-Integration-Id": "vscode-chat",

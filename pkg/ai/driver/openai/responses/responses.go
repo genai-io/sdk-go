@@ -19,10 +19,10 @@ import (
 	"strings"
 
 	sdk "github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	wire "github.com/openai/openai-go/v3/responses"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
 // Name is the driver's identifier.
@@ -46,21 +46,8 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
-	opts := []option.RequestOption{option.WithMaxRetries(0)}
-	if url := cfg.URL(); url != "" {
-		opts = append(opts, option.WithBaseURL(url))
-	}
-	if cfg.APIKey != "" {
-		opts = append(opts, option.WithAPIKey(cfg.APIKey))
-	}
-	if cfg.HTTPClient != nil {
-		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
-	}
-	for k, v := range cfg.MergedHeaders() {
-		opts = append(opts, option.WithHeader(k, v))
-	}
 	return &Driver{
-		client: sdk.NewClient(opts...),
+		client: oai.NewClient(cfg),
 		model:  cfg.Model,
 		compat: ai.CompatOf[ai.OpenAIResponsesCompat](cfg.Model),
 	}, nil
@@ -78,13 +65,17 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			return
 		}
 		stream := d.client.Responses.NewStreaming(ctx, params)
-		defer stream.Close()
+		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Responses identifies a function call by output-item ID while its
 		// arguments stream, so calls are collected and emitted at the end.
 		calls := make(map[string]*ai.ToolCall)
 		order := make(map[string]int)
 		emitted := make(map[string]bool)
+		// A refusal is finished off by an ordinary response.completed, whose
+		// stop reason would otherwise overwrite the one that says the model
+		// declined.
+		refused := false
 
 		for stream.Next() {
 			event := stream.Current()
@@ -92,6 +83,17 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			switch event.Type {
 			case "response.output_text.delta":
 				if !yield(ai.Delta{Block: ai.TextBlock(event.AsResponseOutputTextDelta().Delta)}, nil) {
+					return
+				}
+
+			case "response.refusal.delta":
+				// A refusal is an answer, not a failure: the text is what the
+				// model produced, and the stop reason is what says it declined.
+				refused = true
+				if !yield(ai.Delta{
+					Block:      ai.TextBlock(event.AsResponseRefusalDelta().Delta),
+					StopReason: ai.StopRefusal,
+				}, nil) {
 					return
 				}
 
@@ -157,39 +159,39 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "response.completed":
 				resp := event.AsResponseCompleted().Response
-				out := ai.Delta{Model: resp.Model, ID: resp.ID}
-
-				// input_tokens is the whole prompt; the cached slice sits
-				// under input_tokens_details.
-				fresh, cached := ai.SplitPromptTokens(
-					int(resp.Usage.InputTokens),
-					int(resp.Usage.InputTokensDetails.CachedTokens),
-				)
-				out.Usage = &ai.Usage{
-					Input:     fresh,
-					Output:    int(resp.Usage.OutputTokens),
-					CacheRead: cached,
-				}
-
+				// A Responses-compatible endpoint that emits only this event
+				// says which outcome it means in the status.
 				switch resp.Status {
-				case wire.ResponseStatusCompleted:
-					if len(calls) > 0 {
-						out.StopReason = ai.StopToolUse
-					} else {
-						out.StopReason = ai.StopEndTurn
-					}
 				case wire.ResponseStatusIncomplete:
-					out.StopReason = ai.StopMaxTokens
+					if !yield(finished(resp, ai.StopMaxTokens), nil) {
+						return
+					}
 				case wire.ResponseStatusFailed:
 					yield(ai.Delta{}, d.responseError(string(resp.Error.Code), resp.Error.Message))
 					return
+				case wire.ResponseStatusCompleted, "":
+					if !yield(finished(resp, endOfTurn(refused, len(calls) > 0)), nil) {
+						return
+					}
 				default:
-					out.StopReason = ai.StopReason(resp.Status)
+					if !yield(finished(resp, ai.StopReason(resp.Status)), nil) {
+						return
+					}
 				}
 
-				if !yield(out, nil) {
+			case "response.incomplete":
+				// Incomplete and failed are event types of their own, not a
+				// status inside response.completed. Read only there, a request
+				// that ran into max_output_tokens arrives as an empty success:
+				// no usage, no stop reason and no error.
+				if !yield(finished(event.AsResponseIncomplete().Response, ai.StopMaxTokens), nil) {
 					return
 				}
+
+			case "response.failed":
+				resp := event.AsResponseFailed().Response
+				yield(ai.Delta{}, d.responseError(string(resp.Error.Code), resp.Error.Message))
+				return
 
 			case "error":
 				e := event.AsError()
@@ -211,6 +213,42 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				return
 			}
 		}
+	}
+}
+
+// endOfTurn says why a response that ran to completion stopped.
+func endOfTurn(refused, calledTools bool) ai.StopReason {
+	switch {
+	case refused:
+		return ai.StopRefusal
+	case calledTools:
+		return ai.StopToolUse
+	default:
+		return ai.StopEndTurn
+	}
+}
+
+// finished reads the token accounting off a terminal response. All three
+// terminal events carry the same Response, so the three of them share this.
+func finished(resp wire.Response, stop ai.StopReason) ai.Delta {
+	// input_tokens is the whole prompt; the cached slice sits under
+	// input_tokens_details.
+	fresh, cached := ai.SplitPromptTokens(
+		int(resp.Usage.InputTokens),
+		int(resp.Usage.InputTokensDetails.CachedTokens),
+	)
+	return ai.Delta{
+		Model:      string(resp.Model),
+		ID:         resp.ID,
+		StopReason: stop,
+		Usage: &ai.Usage{
+			Input:  fresh,
+			Output: int(resp.Usage.OutputTokens),
+			// Reasoning is already inside output_tokens; it travels separately
+			// only so a caller can see what the thinking cost.
+			Reasoning: int(resp.Usage.OutputTokensDetails.ReasoningTokens),
+			CacheRead: cached,
+		},
 	}
 }
 

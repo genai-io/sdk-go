@@ -101,8 +101,11 @@ type candidate struct {
 }
 
 type usageMetadata struct {
-	PromptTokenCount        int32 `json:"promptTokenCount,omitempty"`
-	CandidatesTokenCount    int32 `json:"candidatesTokenCount,omitempty"`
+	PromptTokenCount     int32 `json:"promptTokenCount,omitempty"`
+	CandidatesTokenCount int32 `json:"candidatesTokenCount,omitempty"`
+	// ThoughtsTokenCount is billed at the output rate but is not inside
+	// candidatesTokenCount, so a thinking turn is under-reported without it.
+	ThoughtsTokenCount      int32 `json:"thoughtsTokenCount,omitempty"`
 	CachedContentTokenCount int32 `json:"cachedContentTokenCount,omitempty"`
 }
 
@@ -135,6 +138,10 @@ type listedModel struct {
 	DisplayName      string `json:"displayName,omitempty"`
 	InputTokenLimit  int32  `json:"inputTokenLimit,omitempty"`
 	OutputTokenLimit int32  `json:"outputTokenLimit,omitempty"`
+	// SupportedGenerationMethods is what the model can actually be asked to do.
+	// The listing carries embedding, TTS, image and live models alongside the
+	// ones that answer a prompt, and only this tells them apart.
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods,omitempty"`
 }
 
 // apiError is the Google API error envelope: {"error":{code,message,status}}.

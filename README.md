@@ -350,7 +350,7 @@ own — so without it you get none. Caching, logging and metering stay yours.
 safe in a server holding several tenants' keys:
 
 ```go
-client, err := ai.NewClient(ai.Config{
+client, err := ai.New(ai.Config{
 	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
 	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
 })

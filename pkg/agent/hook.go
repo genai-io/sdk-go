@@ -10,8 +10,18 @@ import (
 //
 // All but PreTool chain: each sees what the one before it left. PreTool is
 // asked in order and the first refusal is final. All run on the loop's
-// goroutine, one at a time, so none needs locking of its own, and an error
-// from any ends the exchange.
+// goroutine, one at a time, so none needs locking of its own.
+//
+// An error from any of them ends the exchange with StopError, because it says
+// the hook could not do its job — which is the application's failure, not
+// something the model can be asked to work around. A Decision that blocks is
+// the other answer: a refusal the model is told about as a tool error and may
+// try something else after. That is the whole difference between the two
+// things PreTool returns.
+//
+// A hook that panics is not recovered, unlike a tool: it runs on the goroutine
+// ranging over Run, where whoever wrote it can recover it. The exchange
+// unwinds with the panic and reports no outcome, and the agent is left idle.
 type Hook struct {
 	// PreInfer edits one call in place: prune the history, narrow the toolset,
 	// add a line to the prompt that is only true right now. To change the
@@ -22,20 +32,18 @@ type Hook struct {
 	PostInfer func(ctx context.Context, resp *ai.Response) error
 
 	// PreTool runs after the arguments validate and before the tool does.
-	// Where a permission system lives.
+	// Where a permission system lives, and where it refuses with a Decision
+	// rather than an error.
 	PreTool func(ctx context.Context, c PreToolContext) (Decision, error)
 
 	// PostTool runs after the tool returns; a non-nil result replaces its own.
+	// The batch still finishes, and then the exchange ends.
 	PostTool func(ctx context.Context, c PostToolContext) (*Result, error)
 }
 
-// PreToolContext is what the gate is told about a call it may refuse.
-//
-// "Context" here is the English word, not context.Context, and the two do sit
-// in one signature. Every alternative tried was worse: PreToolCall makes the
-// field below PreToolCall.Call, and naming it for the moment rather than the
-// subject loses what it is. A name that reads oddly beside one other name
-// beats a name that stutters against its own field.
+// PreToolContext is what the gate is told about a call it may refuse. "Context"
+// is the English word here, not context.Context: naming the type for the moment
+// rather than for its subject would lose what it is.
 type PreToolContext struct {
 	Call     ai.ToolCall
 	Tool     Tool

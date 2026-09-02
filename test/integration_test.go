@@ -52,9 +52,9 @@ func sse(t *testing.T, named bool, events ...[2]string) *stub {
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, ev := range events {
 			if named {
-				fmt.Fprintf(w, "event: %s\n", ev[0])
+				_, _ = fmt.Fprintf(w, "event: %s\n", ev[0])
 			}
-			fmt.Fprintf(w, "data: %s\n\n", ev[1])
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", ev[1])
 		}
 	}))
 	t.Cleanup(e.server.Close)
@@ -71,7 +71,7 @@ func jsonEndpoint(t *testing.T, status int, body string) *stub {
 		_ = json.Unmarshal(raw, &e.body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		fmt.Fprint(w, body)
+		_, _ = fmt.Fprint(w, body)
 	}))
 	t.Cleanup(e.server.Close)
 	return e
@@ -79,7 +79,7 @@ func jsonEndpoint(t *testing.T, status int, body string) *stub {
 
 func open(t *testing.T, url string, m ai.Model) *ai.Client {
 	t.Helper()
-	c, err := ai.NewClient(ai.Config{Model: m, APIKey: "k", BaseURL: url})
+	c, err := ai.New(ai.Config{Model: m, APIKey: "k", BaseURL: url})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestPromptsCanBeSizedBeforeSending(t *testing.T) {
 func TestAFailedTurnHandsBackWhatItProduced(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: "+`{"id":"1","model":"m","choices":[{"index":0,"delta":{"content":"I was part way thr"}}],`+
+		_, _ = fmt.Fprint(w, "data: "+`{"id":"1","model":"m","choices":[{"index":0,"delta":{"content":"I was part way thr"}}],`+
 			`"usage":{"prompt_tokens":3000,"completion_tokens":40}}`+"\n\n")
 		w.(http.Flusher).Flush()
 		server := w.(http.Hijacker)
@@ -608,19 +608,19 @@ func TestRetryOnlyReplaysWhatItMay(t *testing.T) {
 				case tc.mid:
 					// One good delta, then the stream dies mid-event.
 					w.Header().Set("Content-Type", "text/event-stream")
-					fmt.Fprintf(w, "data: %s\n\n", `{"id":"1","choices":[{"index":0,`+
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"id":"1","choices":[{"index":0,`+
 						`"delta":{"content":"partial"}}]}`)
 					w.(http.Flusher).Flush()
 					// A complete event whose payload is not JSON: the stream
 					// fails only after the caller already has "partial".
-					fmt.Fprint(w, "data: {oops\n\n")
+					_, _ = fmt.Fprint(w, "data: {oops\n\n")
 				case seen < 3:
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(tc.status)
 					_, _ = w.Write([]byte(tc.body))
 				default:
 					w.Header().Set("Content-Type", "text/event-stream")
-					fmt.Fprintf(w, "data: %s\n\n", ok)
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", ok)
 				}
 			}))
 			t.Cleanup(server.Close)
@@ -938,12 +938,12 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		switch turn {
 		case 1: // one good call and one the schema refuses
-			fmt.Fprint(w, `data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[`+
+			_, _ = fmt.Fprint(w, `data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[`+
 				`{"index":0,"id":"a","type":"function","function":{"name":"area","arguments":"{\"city\":\"Delhi\"}"}},`+
 				`{"index":1,"id":"b","type":"function","function":{"name":"area","arguments":"{\"city\":\"Mumbai\"}"}}`+
 				`]},"finish_reason":"tool_calls"}]}`+"\n\n")
 		default:
-			fmt.Fprint(w, `data: {"id":"2","choices":[{"index":0,`+
+			_, _ = fmt.Fprint(w, `data: {"id":"2","choices":[{"index":0,`+
 				`"delta":{"content":"Delhi is 1484 km²."},"finish_reason":"stop"}]}`+"\n\n")
 		}
 	}))
@@ -1126,8 +1126,8 @@ func TestEveryProtocolSaysTheSameFourThingsAboutToolChoice(t *testing.T) {
 			want: map[string]string{
 				"auto":     "absent",
 				"none":     `{"type":"none"}`,
-				"required": `{"disable_parallel_tool_use":false,"type":"any"}`,
-				"named":    `{"disable_parallel_tool_use":false,"name":"search","type":"tool"}`,
+				"required": `{"type":"any"}`,
+				"named":    `{"name":"search","type":"tool"}`,
 			},
 		},
 		{

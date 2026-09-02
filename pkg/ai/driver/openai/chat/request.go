@@ -1,9 +1,11 @@
 package chat
 
 import (
-	"github.com/genai-io/sdk-go/pkg/ai"
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
+
+	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
 func (d *Driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatCompletionNewParams {
@@ -179,7 +181,7 @@ func (d *Driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion
 			parts = append(parts, sdk.ChatCompletionContentPartUnionParam{
 				OfImageURL: &sdk.ChatCompletionContentPartImageParam{
 					ImageURL: sdk.ChatCompletionContentPartImageImageURLParam{
-						URL: dataURI(block.Image.MediaType, block.Image.Data),
+						URL: oai.DataURI(block.Image.MediaType, block.Image.Data),
 					},
 				},
 			})
@@ -242,8 +244,4 @@ func convertTools(tools []ai.Tool) []sdk.ChatCompletionToolUnionParam {
 		})
 	}
 	return out
-}
-
-func dataURI(mediaType, data string) string {
-	return "data:" + mediaType + ";base64," + data
 }

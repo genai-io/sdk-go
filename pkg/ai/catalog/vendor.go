@@ -43,8 +43,16 @@ type Vendor struct {
 
 	// DeploymentEnv names the environment variables that carry a
 	// deployment-scoped setting rather than a credential — a Vertex project
-	// and region, for instance. auth reads them into Config.ProtocolConfig.
+	// and region, for instance.
 	DeploymentEnv map[string]string
+
+	// Deployment turns those variables into the value this vendor's driver
+	// expects as ai.Config.ProtocolConfig, and says which one is missing when
+	// the endpoint cannot run without it. The table owns this because which
+	// protocol wants which shape is a fact about the row, not about auth —
+	// auth supplies the lookup and knows nothing else about it. Nil for a
+	// vendor that needs no deployment.
+	Deployment func(env func(string) string) (ai.ProtocolConfig, error)
 
 	// Input lists the content kinds this vendor's models accept, for models
 	// that do not declare their own. Empty means text only.
@@ -85,10 +93,11 @@ type Vendor struct {
 	Note string
 }
 
-// NoReasoning marks a catalog entry as a model that does not reason, which is
+// noReasoning marks a catalog entry as a model that does not reason, which is
 // different from one that simply does not say — an omitted Reasoning inherits
-// the vendor default.
-var NoReasoning = []ai.ReasoningLevel{}
+// the vendor default. It is not exported: an exported slice is a value every
+// caller shares and any caller can rewrite, and a row is written here anyway.
+var noReasoning = []ai.ReasoningLevel{}
 
 // NeedsDeployment reports whether this vendor requires deployment-scoped
 // configuration — a cloud project, a region — beyond a credential.
@@ -101,9 +110,9 @@ func (v Vendor) clone() Vendor {
 	out.Input = slices.Clone(v.Input)
 	out.Reasoning = slices.Clone(v.Reasoning)
 	out.Headers = maps.Clone(v.Headers)
-	carrier := (ai.Model{Compat: v.Compat, SamplingParams: v.SamplingParams}).Clone()
-	out.Compat = carrier.Compat
-	out.SamplingParams = carrier.SamplingParams
+	// Compat needs no clone: every compat is a struct held in an interface, so
+	// the field copy above is already a copy of the value.
+	out.SamplingParams = maps.Clone(v.SamplingParams)
 	out.Models = make([]ai.Model, len(v.Models))
 	for i, model := range v.Models {
 		out.Models[i] = model.Clone()
@@ -120,6 +129,13 @@ func (v Vendor) Model(id string) ai.Model {
 	}
 	return v.decorate(ai.Model{ID: id})
 }
+
+// Resolve fills in what this vendor knows about a model, overwriting nothing
+// the model already states. It is Model for a model rather than an ID, and it
+// is what a live listing needs: a host reports an ID and a name and almost
+// never a window, a ladder or a protocol quirk, so without this everything the
+// endpoint serves arrives unusable except by name.
+func (v Vendor) Resolve(m ai.Model) ai.Model { return v.decorate(m) }
 
 // ModelList returns the vendor's known models, fully decorated.
 func (v Vendor) ModelList() []ai.Model {
@@ -146,7 +162,7 @@ func (v Vendor) decorate(m ai.Model) ai.Model {
 		m.Input = v.Input
 	}
 	// A nil ladder means "not stated, inherit"; an explicitly empty one
-	// (NoReasoning) means "this model does not reason", which a vendor default
+	// (noReasoning) means "this model does not reason", which a vendor default
 	// must not overwrite.
 	if m.Reasoning == nil {
 		m.Reasoning = v.Reasoning
@@ -205,6 +221,12 @@ func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	}
 	if cfg.Headers == nil {
 		cfg.Headers = v.Headers
+	}
+	// Without this the provider would hand back a live-listed model carrying
+	// nothing but its ID, and every caller would have to resolve it through
+	// the catalog a second time to learn its window and ladder.
+	if cfg.Resolve == nil {
+		cfg.Resolve = v.Resolve
 	}
 	return provider.New(cfg)
 }

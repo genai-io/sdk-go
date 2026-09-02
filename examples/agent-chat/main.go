@@ -97,6 +97,8 @@ func main() {
 		// the next one, which is why nothing is passed back in.
 		for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 			if err != nil {
+				// Only what happens outside a turn arrives here — an exchange
+				// already running, say. How this one went is on TurnEnd.
 				fmt.Fprintf(os.Stderr, "\n%v\n", err)
 				break
 			}
@@ -113,8 +115,12 @@ func render(e agent.Event) {
 		fmt.Printf("\033[2m[%s %s]\033[0m ", v.Name, strings.TrimSpace(v.Args))
 	case agent.TurnEnd:
 		// An interrupted exchange still reports what it did; say so rather
-		// than leaving the reader looking at half an answer.
-		if v.StopReason != agent.StopEndTurn {
+		// than leaving the reader looking at half an answer. A failure is the
+		// one case where the error says more than the reason does.
+		switch {
+		case v.StopReason == agent.StopError:
+			fmt.Printf("\n\033[2m(%v)\033[0m", v.Err)
+		case v.StopReason != agent.StopEndTurn:
 			fmt.Printf("\n\033[2m(%s)\033[0m", v.StopReason)
 		}
 		fmt.Println()

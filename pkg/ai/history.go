@@ -6,7 +6,11 @@ import (
 )
 
 // Repair returns a conversation every protocol will accept: tool calls and
-// their results paired, invalid UTF-8 replaced.
+// their results paired, results with no call dropped, invalid UTF-8 replaced,
+// and any turn left with nothing a protocol would put on the wire — an empty
+// one, or an assistant turn holding only thinking — dropped with it. Several
+// OpenAI-compatible endpoints reject such a turn outright rather than ignoring
+// it, so leaving it in fails the whole request.
 func Repair(msgs []Message) []Message {
 	out := repairToolPairing(msgs)
 	for i := range out {
@@ -23,8 +27,16 @@ func repairToolPairing(msgs []Message) []Message {
 		msg := msgs[i]
 
 		// Tool results are only ever emitted alongside the assistant message
-		// they answer, below. One reached here on its own, so it is orphaned.
+		// they answer, below. One reaching here answers no call, so it goes —
+		// but only it: the same turn commonly carries what the user typed
+		// next, and dropping the message whole would lose that too.
 		if msg.HasToolResults() {
+			msg.Content = filterBlocks(msg.Content, func(block Block) bool {
+				return block.Type != BlockToolResult
+			})
+			if !isEmptyMessage(msg) {
+				out = append(out, msg)
+			}
 			continue
 		}
 
@@ -70,7 +82,7 @@ func repairToolPairing(msgs []Message) []Message {
 			res.Content = filterBlocks(res.Content, func(block Block) bool {
 				return block.Type != BlockToolResult || block.ToolResult != nil && keptIDs[block.ToolResult.ToolCallID]
 			})
-			if res.Content.Has(BlockToolResult) {
+			if !isEmptyMessage(res) {
 				out = append(out, res)
 			}
 		}
@@ -168,11 +180,26 @@ func sanitizeBlock(block Block) (Block, bool) {
 			return block, false
 		}
 		content := sanitizeText(block.ToolResult.Content)
-		if content == block.ToolResult.Content {
+		name := sanitizeText(block.ToolResult.ToolName)
+		if content == block.ToolResult.Content && name == block.ToolResult.ToolName {
 			return block, false
 		}
 		clean := cloneBlock(block)
 		clean.ToolResult.Content = content
+		clean.ToolResult.ToolName = name
+		return clean, true
+	case BlockReasoning:
+		if block.Reasoning == nil {
+			return block, false
+		}
+		// EncryptedContent is provider state replayed byte for byte, so it is
+		// not ours to rewrite; the summary is prose and travels as prose.
+		summary := sanitizeText(block.Reasoning.Summary)
+		if summary == block.Reasoning.Summary {
+			return block, false
+		}
+		clean := cloneBlock(block)
+		clean.Reasoning.Summary = summary
 		return clean, true
 	}
 	return block, false

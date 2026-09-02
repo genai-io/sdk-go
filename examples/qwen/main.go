@@ -74,7 +74,7 @@ func run(ref, question string) error {
 // anyCompatibleEndpoint reaches an OpenAI-compatible server the catalog has
 // never heard of — a self-hosted vLLM, an internal gateway, a new vendor.
 func anyCompatibleEndpoint(baseURL, key, modelID string) (*ai.Client, error) {
-	return ai.NewClient(ai.Config{
+	return ai.New(ai.Config{
 		Model: ai.Model{
 			ID:            modelID,
 			API:           ai.APIOpenAIChat,

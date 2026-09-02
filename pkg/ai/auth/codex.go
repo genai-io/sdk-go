@@ -21,12 +21,12 @@ var codexDefaults = oauth.CodeEndpoints{
 	Redirect:  "http://localhost:1455/auth/callback",
 }
 
-var codexFlow = newCodexFlow(codexDefaults)
+func init() { RegisterFlow("openai-codex", newCodexFlow(codexDefaults)) }
 
-func newCodexFlow(e oauth.CodeEndpoints) flow {
-	return flow{
-		method: "browser (PKCE)",
-		login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
+func newCodexFlow(e oauth.CodeEndpoints) Flow {
+	return Flow{
+		Method: "browser (PKCE)",
+		Login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
 			cfg := oauth.Config{ClientID: codexClientID, Scopes: codexScopes, HTTPClient: client}
 			token, err := oauth.Code(ctx, cfg, e, ui)
 			if err != nil {
@@ -38,7 +38,7 @@ func newCodexFlow(e oauth.CodeEndpoints) flow {
 				ExpiresAt: token.Expires,
 			}, nil
 		},
-		token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
+		Token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
 			if !c.Expired() {
 				return c.Access, c.ExpiresAt, c, nil
 			}

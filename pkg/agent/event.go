@@ -53,7 +53,10 @@ func (MessageStart) event() {}
 // MessageUpdate is one streamed fragment, exactly as pkg/ai made it. A reader
 // that falls behind loses fragments rather than holding the agent up —
 // MessageAdded carries the whole thing anyway.
-type MessageUpdate struct{ Delta ai.Event }
+type MessageUpdate struct {
+	Turn  int
+	Delta ai.Event
+}
 
 func (MessageUpdate) event() {}
 

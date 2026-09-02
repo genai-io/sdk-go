@@ -296,7 +296,7 @@ client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costM
 **`pkg/ai` 永远不读环境变量、不读文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：
 
 ```go
-client, err := ai.NewClient(ai.Config{
+client, err := ai.New(ai.Config{
 	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
 	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
 })

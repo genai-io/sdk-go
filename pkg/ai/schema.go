@@ -105,7 +105,7 @@ func (s Schema) WireName() string {
 func jsonSchemaObject(value any) map[string]any {
 	switch def := value.(type) {
 	case map[string]any:
-		return cloneStringMap(def)
+		return maps.Clone(def)
 	case nil:
 		return nil
 	default:
@@ -128,13 +128,10 @@ func cloneSchema(schema *Schema) *Schema {
 		return nil
 	}
 	out := *schema
-	out.Definition = cloneShallow(schema.Definition)
-	return &out
-}
-
-func cloneShallow(value any) any {
-	if m, ok := value.(map[string]any); ok {
-		return maps.Clone(m)
+	// A map is the one definition shape a caller can still be holding and edit
+	// after handing it over; anything else is copied by the assignment above.
+	if def, ok := schema.Definition.(map[string]any); ok {
+		out.Definition = maps.Clone(def)
 	}
-	return value
+	return &out
 }

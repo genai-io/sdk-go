@@ -2,11 +2,10 @@ package agent
 
 import (
 	"context"
-	"iter"
 	"runtime"
-	"sync"
 	"testing"
 
+	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
@@ -107,7 +106,7 @@ func TestManyExchangesDoNotAccumulate(t *testing.T) {
 
 func newTestAgent(t *testing.T, scripts ...[]ai.Delta) *Agent {
 	t.Helper()
-	client := ai.NewClientWithDriver(&stubDriver{scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
 	a, err := New(client)
 	if err != nil {
 		t.Fatal(err)
@@ -115,35 +114,4 @@ func newTestAgent(t *testing.T, scripts ...[]ai.Delta) *Agent {
 	return a
 }
 
-func text(s string) []ai.Delta {
-	return []ai.Delta{{Block: ai.TextBlock(s)}, {EndBlock: true}, {StopReason: ai.StopEndTurn}}
-}
-
-// stubDriver answers each call with the next script, and repeats the last one
-// so a test does not have to count how many exchanges it will run.
-type stubDriver struct {
-	mu      sync.Mutex
-	scripts [][]ai.Delta
-	calls   int
-}
-
-func (d *stubDriver) Name() string { return "stub" }
-
-func (d *stubDriver) Stream(_ context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
-	d.mu.Lock()
-	n := d.calls
-	d.calls++
-	var script []ai.Delta
-	if len(d.scripts) > 0 {
-		script = d.scripts[min(n, len(d.scripts)-1)]
-	}
-	d.mu.Unlock()
-
-	return func(yield func(ai.Delta, error) bool) {
-		for _, delta := range script {
-			if !yield(delta, nil) {
-				return
-			}
-		}
-	}
-}
+var text = scripted.Text

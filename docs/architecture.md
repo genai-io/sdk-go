@@ -60,7 +60,7 @@ whichever rung you enter it at:
 | --- | --- | --- |
 | `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
 | `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
-| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
 | `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
 | a reference | `auth.Client(ref)` | `*ai.Client` |
 | a vendor ID | `auth.Provider(id)` | `*provider.Provider` |
@@ -75,7 +75,7 @@ Two package-level ways in, and the difference is whether the environment is
 allowed to answer:
 
 ```go
-ai.NewClient(Config)              // you supply the model, the key and the host
+ai.New(Config)               // you supply the model, the key and the host
 auth.Client("vendor/model")  // the catalog and the environment supply them
 ```
 
@@ -133,7 +133,7 @@ column is Go code.
   openrouter  huggingface      |
   bedrock-openai               |
 
-  anthropic   minmax           |
+  anthropic   minimax          |
   mimo        volcengine       +--> anthropic-messages      --> driver/anthropic
                                         4 vendors
 
@@ -401,13 +401,28 @@ off and high returns high, and nothing tells the caller. The direction is
 deliberate — quietly reasoning *less* than asked is the more surprising failure
 — but the silence is not something a caller can currently observe.
 
+**Most of the catalog carries no price.** Thirty-three of the fifty-five rows
+have a zero rate card, and eight have no context window. Some of that is
+correct — Vertex is billed by Google against a project, and a local Ollama is
+billed by nobody — and the rest is a table nobody has finished filling in.
+`Pricing.Cost` on an unpriced model returns zero rather than an estimate, for
+the same reason an unknown window reports no headroom: a guessed figure fails
+silently in both directions. So a caller that bills on this must check the rate
+card is not empty before trusting the total.
+
 ## Testing
 
-One black-box package, `test/`. It imports the SDK the way an application does
-and asserts on two things only: **the bytes that reached the endpoint, and the
-value that came back.** Every endpoint is a stub HTTP server, so the suite needs
-no network and no credential.
+Two layers, and the split is deliberate.
 
-That shape is deliberate. Tests that reach inside verify the implementation
-they were written against; these verify the contract, so a driver rewritten
-behind the same wire behaviour keeps passing.
+`test/` is one black-box package. It imports the SDK the way an application
+does and asserts on two things only: **the bytes that reached the endpoint, and
+the value that came back.** Every endpoint is a stub HTTP server, so the suite
+needs no network and no credential. Tests that reach inside verify the
+implementation they were written against; these verify the contract, so a
+driver rewritten behind the same wire behaviour keeps passing.
+
+Beside it, each package tests its own units — the stream lifecycle, history
+repair, error classification, schema derivation, the SSE parser, tool-call
+accumulation, the catalog's invariants, the credential store. The contract
+tests say the five protocols agree; the unit tests say each one is right about
+the case no other protocol exercises.

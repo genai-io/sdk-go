@@ -9,6 +9,9 @@ type MemoryStore struct {
 	m  map[string]Credential
 }
 
+// NewMemoryStore returns an empty store. A server that manages its own secrets
+// sets one as DefaultStore, which is how it opts out of this SDK writing
+// anything to disk at all.
 func NewMemoryStore() *MemoryStore { return &MemoryStore{m: map[string]Credential{}} }
 
 // Load returns the credential held for a vendor.

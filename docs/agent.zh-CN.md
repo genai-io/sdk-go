@@ -61,7 +61,7 @@ flowchart LR
 
 `reason` 做一次模型调用,返回它产出的消息。如果这条消息在要工具,`act` 就审查这一批、跑下活着的、把结果喂回去。模型不再要东西、直接作答时,turn 结束。
 
-turn 有五种结束方式,**每个出口都必须说出是哪一种**:
+turn 有八种结束方式,**每个出口都必须说出是哪一种**。失败的 turn 只在这里说一次:`TurnEnd` 带着原因和错误,而迭代器自己的错误留给 turn 之外的失败——今天只有 `ErrBusy`——所以一次失败只被报告一次。
 
 | `StopReason` | |
 | --- | --- |
@@ -102,6 +102,8 @@ agent.WithContinuation(2, "你的回答被输出上限截断了。从你停下�
 <-a.Interrupt()      // 这一轮结束了,agent 空闲
 a.SetMessages(fresh)
 ```
+
+已经在跑的工具会通过它的 context 被要求停下,然后**被等待**——因为它要经由这次交换汇报。一个不理会取消的工具,会把那个 channel 一直占到它自己返回为止。串行批次则在两个工具之间就停下,而不是把剩下的跑完,每个没跑成的调用都按"已取消"汇报。
 
 交换之间没有东西可中断:channel 已经是关闭的。取消 `Run` 自己的 context 是另一回事,那会结束一切。
 
@@ -205,7 +207,8 @@ agent.WithHooks(agent.Hook{
 - 除 `PreTool` 外都是链式的:每个看到的是前一个改完的结果。
 - `PreTool` 按顺序征询,**第一次拒绝即终局**。一个越加越弱的门不是门。
 - 每个 hook 都在循环那条 goroutine 上、一次一个,所以**都不需要自己加锁**。
-- 任何一个返回错误,这次交换就结束。
+- **返回错误会以 `StopError` 结束这次交换,返回一个"拦下"的 `Decision` 不会。** 错误说的是这个 hook 没能完成自己的活,那是应用的失败,不是模型能绕过去的事;而拦下是一次拒绝,模型会以工具错误的形式被告知,还可以换个别的试。`PreTool` 那两个返回值的全部区别就在这里。
+- **hook 里的 panic 不会被兜住**,工具里的会。工具跑在这个包自己创建的 goroutine 上,别人接不住;hook 跑在 range `Run` 的那条 goroutine 上,写它的人自己就能接。交换会带着 panic 解栈,不报告任何结局,agent 回到空闲。
 
 一个 agent 持有的是**多个** hook,不是一个:权限门和审计日志是两件事,不该被迫写成同一个函数。
 
@@ -353,7 +356,7 @@ type Store interface {
 pkg/agent/
   agent.go     agent 是什么:状态、构造选项、能读能改的东西
   run.go       一次交换:Run,以及它背后 reason/act 的循环
-  event.go     9 个事件
+  event.go     10 个事件
   hook.go      4 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   session/     事件 → 持久条目,以及折回来

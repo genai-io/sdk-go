@@ -17,7 +17,7 @@
 // Interactive vendors authenticate a person rather than a service: there is no
 // key to paste, only a subscription and a browser. Login runs the grant and
 // keeps the result in a Store so the next run does not sign in again — see
-// login.go. The default Store is a 0600 file under the user's config
+// login.go, which also carries the registry a consumer adds a third grant to. The default Store is a 0600 file under the user's config
 // directory, which is what a CLI wants; a server should replace it by setting
 // DefaultStore. That file is the only thing this SDK writes to disk.
 //
@@ -26,7 +26,7 @@
 //	auth.go        resolving a reference into an ai.Config or a client
 //	env.go         the environment variables a key-based vendor uses
 //	provider.go    the same, for a whole vendor's model listing
-//	login.go       interactive sign-in, and the vendors that need one
+//	login.go       interactive sign-in: the Flow registry and the Login verb
 //	copilot.go     GitHub Copilot's grant
 //	codex.go       the ChatGPT/Codex grant
 //	console.go     the default terminal prompt for a sign-in

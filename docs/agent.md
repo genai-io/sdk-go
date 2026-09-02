@@ -78,7 +78,10 @@ flowchart LR
 message asks for tools, `act` vets the batch, runs what survives, and feeds the
 results back. When the model answers without asking for anything, the turn ends.
 
-Five ways a turn can end, and every exit names one:
+Eight ways a turn can end, and every exit names one. A turn that failed says so
+here and nowhere else: `TurnEnd` carries the reason and the error, and the
+iterator's own error is reserved for what happens outside a turn — `ErrBusy`
+today — so one failure is reported once.
 
 | `StopReason` | |
 | --- | --- |
@@ -145,8 +148,14 @@ ranging over `Run`, so it cannot see the range end; this is how it finds out.
 a.SetMessages(fresh)
 ```
 
-Between exchanges there is nothing to interrupt: the channel is already closed. Cancelling `Run`'s own context is the
-other thing, and ends everything.
+A tool already running is asked to stop through its context and then waited
+for, because it reports through the exchange — so a tool that ignores
+cancellation holds that channel open until it returns. A sequential batch stops
+between tools rather than running the rest, and each call that never ran is
+reported as cancelled.
+
+Between exchanges there is nothing to interrupt: the channel is already closed.
+Cancelling `Run`'s own context is the other thing, and ends everything.
 
 ## Events
 
@@ -269,7 +278,15 @@ agent.WithHooks(agent.Hook{
   gets weaker as you add to it is not a gate.
 - Every hook runs on the loop's goroutine, one at a time, so none needs locking
   of its own.
-- An error from any of them ends the exchange.
+- **An error ends the exchange with `StopError`; a `Decision` that blocks does
+  not.** The error says the hook could not do its job, which is the
+  application's failure and not something the model can work around. A block is
+  a refusal the model is told about as a tool error and may try something else
+  after. That is the whole difference between the two things `PreTool` returns.
+- **A hook that panics is not recovered**, unlike a tool. A tool runs on a
+  goroutine this package created, where nobody else can catch it; a hook runs
+  on the goroutine ranging over `Run`, where whoever wrote it can. The exchange
+  unwinds with the panic, reports no outcome, and leaves the agent idle.
 
 An agent holds several hooks, not one: a permission gate and an audit log are
 different concerns and should not have to be the same function.
@@ -466,7 +483,7 @@ interface only has to name what this package calls.
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
   run.go       an exchange: Run, and the reason-and-act loop behind it
-  event.go     the nine events
+  event.go     the ten events
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   session/     events → durable entries, and back

@@ -34,6 +34,10 @@ const (
 	apiVersion     = "v1beta"
 )
 
+// generateContentMethod is the entry in a listed model's
+// supportedGenerationMethods that says it can answer a prompt.
+const generateContentMethod = "generateContent"
+
 func init() { ai.RegisterAPI(ai.APIGoogleGenAI, New) }
 
 // Driver talks to one Gemini endpoint.
@@ -89,19 +93,19 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 		res, err := d.post(ctx, d.methodURL("streamGenerateContent", "alt=sse"), body)
 		if err != nil {
-			yield(ai.Delta{}, d.wrapStream(err))
+			yield(ai.Delta{}, fail.WrapStream(err))
 			return
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
 
 		for chunk, err := range sseEvents(res.Body) {
 			if err != nil {
-				yield(ai.Delta{}, d.wrapStream(err))
+				yield(ai.Delta{}, fail.WrapStream(err))
 				return
 			}
 			var out generateResponse
 			if err := json.Unmarshal(chunk, &out); err != nil {
-				yield(ai.Delta{}, d.wrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
+				yield(ai.Delta{}, fail.WrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
 				return
 			}
 			if !d.emit(out, yield) {
@@ -141,9 +145,14 @@ func (d *Driver) emit(out generateResponse, yield func(ai.Delta, error) bool) bo
 		// Gemini reports the cached prefix inside the prompt count, so it is
 		// split out the same way the OpenAI protocols are.
 		fresh, cached := ai.SplitPromptTokens(int(u.PromptTokenCount), int(u.CachedContentTokenCount))
+		// Thinking is counted outside candidatesTokenCount here, unlike every
+		// other protocol, so it is added in: Output is what the output rate is
+		// charged on, and Reasoning is how much of it went unseen.
+		reasoning := int(u.ThoughtsTokenCount)
 		if !yield(ai.Delta{Usage: &ai.Usage{
 			Input:     fresh,
-			Output:    int(u.CandidatesTokenCount),
+			Output:    int(u.CandidatesTokenCount) + reasoning,
+			Reasoning: reasoning,
 			CacheRead: cached,
 		}}, nil) {
 			return false
@@ -189,8 +198,6 @@ func mapFinishReason(reason string) ai.StopReason {
 		return ai.StopMaxTokens
 	case "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST":
 		return ai.StopRefusal
-	case "":
-		return ""
 	default:
 		return ai.StopReason(reason)
 	}
@@ -213,20 +220,22 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 
 	res, err := d.post(ctx, d.methodURL("countTokens", ""), &countTokensRequest{GenerateContentRequest: inner})
 	if err != nil {
-		return 0, d.wrap(err)
+		return 0, fail.Wrap(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
 
 	var out countTokensResponse
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return 0, d.wrap(err)
+		return 0, fail.Wrap(err)
 	}
 	return int(out.TotalTokens), nil
 }
 
-// Models lists the Gemini models the endpoint serves. Experimental and
-// "-latest" aliases are dropped: they duplicate a concrete model under a name
-// whose meaning changes without notice.
+// Models lists the models the endpoint serves that can answer a prompt. The
+// listing also carries embedding, image, speech and live models, which say so
+// in supportedGenerationMethods. Experimental and "-latest" aliases are dropped
+// on top of that: they duplicate a concrete model under a name whose meaning
+// changes without notice.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	var out []ai.Model
 	for token := ""; ; {
@@ -236,13 +245,13 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		}
 		res, err := d.get(ctx, fmt.Sprintf("%s/%s/models?%s", d.baseURL, apiVersion, query))
 		if err != nil {
-			return nil, d.wrap(err)
+			return nil, fail.Wrap(err)
 		}
 		var page modelList
 		err = json.NewDecoder(res.Body).Decode(&page)
-		res.Body.Close()
+		_ = res.Body.Close() // the decode error above is the one worth reporting
 		if err != nil {
-			return nil, d.wrap(err)
+			return nil, fail.Wrap(err)
 		}
 
 		for _, m := range page.Models {
@@ -250,7 +259,10 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 			if !ok {
 				id = m.Name
 			}
-			if !strings.Contains(id, "gemini") || strings.Contains(id, "-exp") || strings.Contains(id, "-latest") {
+			if !slices.Contains(m.SupportedGenerationMethods, generateContentMethod) {
+				continue
+			}
+			if strings.Contains(id, "-exp") || strings.Contains(id, "-latest") {
 				continue
 			}
 			name := m.DisplayName
@@ -272,7 +284,7 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		token = page.NextPageToken
 	}
 	if len(out) == 0 {
-		return nil, &ai.Error{Driver: Name, Kind: ai.KindUnknown, Message: "endpoint listed no Gemini models"}
+		return nil, &ai.Error{Driver: Name, Kind: ai.KindUnknown, Message: "endpoint listed no models that generate content"}
 	}
 	slices.SortFunc(out, func(a, b ai.Model) int { return strings.Compare(a.ID, b.ID) })
 	return out, nil

@@ -1,0 +1,1914 @@
+[
+  {
+    "id": "claude-fable-5",
+    "api": "anthropic-messages",
+    "name": "Claude Fable 5",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 10,
+      "output": 50,
+      "cache_write": 12.5,
+      "cache_read": 1
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-5",
+    "api": "anthropic-messages",
+    "name": "Claude Opus 5",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 5,
+      "output": 25,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-8",
+    "api": "anthropic-messages",
+    "name": "Claude Opus 4.8",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 5,
+      "output": 25,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-7",
+    "api": "anthropic-messages",
+    "name": "Claude Opus 4.7",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 5,
+      "output": 25,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-6",
+    "api": "anthropic-messages",
+    "name": "Claude Opus 4.6",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 5,
+      "output": 25,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true
+    }
+  },
+  {
+    "id": "claude-sonnet-5",
+    "api": "anthropic-messages",
+    "name": "Claude Sonnet 5",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 2,
+      "output": 10,
+      "cache_write": 2.5,
+      "cache_read": 0.2
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-sonnet-4-6",
+    "api": "anthropic-messages",
+    "name": "Claude Sonnet 4.6",
+    "vendor": "anthropic",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 3,
+      "output": 15,
+      "cache_write": 3.75,
+      "cache_read": 0.3
+    },
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true
+    }
+  },
+  {
+    "id": "claude-opus-4-1-20250805",
+    "api": "anthropic-messages",
+    "name": "Claude Opus 4.1",
+    "vendor": "anthropic",
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "retired",
+    "replacement": "claude-opus-5",
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-20250514",
+    "api": "anthropic-messages",
+    "name": "Claude Opus 4",
+    "vendor": "anthropic",
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "retired",
+    "replacement": "claude-opus-5",
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-sonnet-4-20250514",
+    "api": "anthropic-messages",
+    "name": "Claude Sonnet 4",
+    "vendor": "anthropic",
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "retired",
+    "replacement": "claude-sonnet-5",
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-3-7-sonnet-20250219",
+    "api": "anthropic-messages",
+    "name": "Claude Sonnet 3.7",
+    "vendor": "anthropic",
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "retired",
+    "replacement": "claude-sonnet-5",
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-3-5-haiku-20241022",
+    "api": "anthropic-messages",
+    "name": "Claude Haiku 3.5",
+    "vendor": "anthropic",
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "retired",
+    "replacement": "claude-sonnet-5",
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-fable-5",
+    "api": "anthropic-vertex",
+    "name": "Claude Fable 5",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-5",
+    "api": "anthropic-vertex",
+    "name": "Claude Opus 5",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-8",
+    "api": "anthropic-vertex",
+    "name": "Claude Opus 4.8",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-7",
+    "api": "anthropic-vertex",
+    "name": "Claude Opus 4.7",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-opus-4-6",
+    "api": "anthropic-vertex",
+    "name": "Claude Opus 4.6",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true
+    }
+  },
+  {
+    "id": "claude-sonnet-5",
+    "api": "anthropic-vertex",
+    "name": "Claude Sonnet 5",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    }
+  },
+  {
+    "id": "claude-sonnet-4-6",
+    "api": "anthropic-vertex",
+    "name": "Claude Sonnet 4.6",
+    "vendor": "anthropic-vertex",
+    "context_window": 1000000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "force_adaptive_thinking": true
+    }
+  },
+  {
+    "id": "gpt-5.6-sol",
+    "api": "openai-responses",
+    "name": "GPT-5.6 Sol",
+    "vendor": "openai",
+    "context_window": 1050000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "value": "none"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 5,
+      "output": 30,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gpt-5.6-terra",
+    "api": "openai-responses",
+    "name": "GPT-5.6 Terra",
+    "vendor": "openai",
+    "context_window": 1050000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "value": "none"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 2,
+      "output": 12,
+      "cache_write": 2.5,
+      "cache_read": 0.2
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gpt-5.6-luna",
+    "api": "openai-responses",
+    "name": "GPT-5.6 Luna",
+    "vendor": "openai",
+    "context_window": 1050000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "value": "none"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 0.2,
+      "output": 1.2,
+      "cache_write": 0.25,
+      "cache_read": 0.02
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gpt-5.5",
+    "api": "openai-responses",
+    "name": "GPT-5.5",
+    "vendor": "openai",
+    "context_window": 1050000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "value": "none"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 5,
+      "output": 30,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gpt-5.4",
+    "api": "openai-responses",
+    "name": "GPT-5.4",
+    "vendor": "openai",
+    "context_window": 1050000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "value": "none"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 2.5,
+      "output": 15,
+      "cache_read": 0.25
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gpt-4.1",
+    "api": "openai-responses",
+    "name": "GPT-4.1",
+    "vendor": "openai",
+    "context_window": 1047576,
+    "max_output": 32768,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 2,
+      "output": 8,
+      "cache_read": 0.5
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gpt-4o",
+    "api": "openai-responses",
+    "name": "GPT-4o",
+    "vendor": "openai",
+    "context_window": 128000,
+    "max_output": 16384,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 2.5,
+      "output": 10,
+      "cache_read": 1.25
+    },
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "openai.gpt-oss-120b-1:0",
+    "api": "openai-chat-completions",
+    "name": "GPT-OSS 120B",
+    "vendor": "bedrock-openai",
+    "context_window": 128000,
+    "input": [
+      "text"
+    ],
+    "reasoning": [
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "effort"
+    }
+  },
+  {
+    "id": "openai.gpt-oss-20b-1:0",
+    "api": "openai-chat-completions",
+    "name": "GPT-OSS 20B",
+    "vendor": "bedrock-openai",
+    "context_window": 128000,
+    "input": [
+      "text"
+    ],
+    "reasoning": [
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "medium",
+        "value": "medium",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "high"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "effort"
+    }
+  },
+  {
+    "id": "gemini-3.7-flash",
+    "api": "google-genai",
+    "name": "Gemini 3.7 Flash",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.6-flash",
+    "api": "google-genai",
+    "name": "Gemini 3.6 Flash",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.5-flash",
+    "api": "google-genai",
+    "name": "Gemini 3.5 Flash",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.5-flash-lite",
+    "api": "google-genai",
+    "name": "Gemini 3.5 Flash-Lite",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.1-flash-lite",
+    "api": "google-genai",
+    "name": "Gemini 3.1 Flash-Lite",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.1-pro-preview",
+    "api": "google-genai",
+    "name": "Gemini 3.1 Pro (preview)",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "preview",
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3-flash-preview",
+    "api": "google-genai",
+    "name": "Gemini 3 Flash (preview)",
+    "vendor": "google",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "preview",
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "deepseek-v4-flash",
+    "api": "openai-chat-completions",
+    "name": "DeepSeek V4 Flash",
+    "vendor": "deepseek",
+    "base_url": "https://api.deepseek.com",
+    "context_window": 1000000,
+    "max_output": 384000,
+    "input": [
+      "text"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 0.44,
+      "output": 1.32,
+      "cache_write": 0.44,
+      "cache_read": 0.014
+    },
+    "unsupported": {},
+    "compat": {
+      "thinking": "effort_or_disable",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "deepseek-v4-pro",
+    "api": "openai-chat-completions",
+    "name": "DeepSeek V4 Pro",
+    "vendor": "deepseek",
+    "base_url": "https://api.deepseek.com",
+    "context_window": 1000000,
+    "max_output": 384000,
+    "input": [
+      "text"
+    ],
+    "reasoning": [
+      {
+        "effort": "off"
+      },
+      {
+        "effort": "low",
+        "value": "low"
+      },
+      {
+        "effort": "high",
+        "value": "high",
+        "default": true
+      },
+      {
+        "effort": "xhigh",
+        "value": "xhigh"
+      },
+      {
+        "effort": "max",
+        "value": "max"
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 1.32,
+      "output": 3.96,
+      "cache_write": 1.32,
+      "cache_read": 0.044
+    },
+    "unsupported": {},
+    "compat": {
+      "thinking": "effort_or_disable",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "sensenova-6.7-flash-lite",
+    "api": "openai-chat-completions",
+    "name": "SenseNova 6.7 Flash Lite",
+    "vendor": "sensenova",
+    "base_url": "https://token.sensenova.cn/v1",
+    "context_window": 256000,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "deepseek-v4-flash",
+    "api": "openai-chat-completions",
+    "name": "DeepSeek V4 Flash (via SenseNova)",
+    "vendor": "sensenova",
+    "base_url": "https://token.sensenova.cn/v1",
+    "context_window": 1000000,
+    "max_output": 384000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "MiniMax-M3",
+    "api": "anthropic-messages",
+    "name": "MiniMax M3",
+    "vendor": "minimax",
+    "base_url": "https://api.minimaxi.com/anthropic",
+    "context_window": 1000000,
+    "max_output": 8192,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {
+      "currency": "CNY",
+      "input": 2.1,
+      "output": 8.4,
+      "cache_read": 0.42,
+      "tiers": [
+        {
+          "above_input_tokens": 512000,
+          "input": 4.2,
+          "output": 16.8,
+          "cache_read": 0.84
+        }
+      ]
+    },
+    "unsupported": {}
+  },
+  {
+    "id": "MiniMax-M2.7",
+    "api": "anthropic-messages",
+    "name": "MiniMax M2.7",
+    "vendor": "minimax",
+    "base_url": "https://api.minimaxi.com/anthropic",
+    "context_window": 204800,
+    "max_output": 8192,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {
+      "currency": "CNY",
+      "input": 2.1,
+      "output": 8.4,
+      "cache_write": 2.625,
+      "cache_read": 0.42
+    },
+    "unsupported": {}
+  },
+  {
+    "id": "MiniMax-M2.7-highspeed",
+    "api": "anthropic-messages",
+    "name": "MiniMax M2.7 Highspeed",
+    "vendor": "minimax",
+    "base_url": "https://api.minimaxi.com/anthropic",
+    "context_window": 204800,
+    "max_output": 8192,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {
+      "currency": "CNY",
+      "input": 4.2,
+      "output": 16.8,
+      "cache_write": 2.625,
+      "cache_read": 0.42
+    },
+    "unsupported": {}
+  },
+  {
+    "id": "kimi-k3",
+    "api": "openai-chat-completions",
+    "name": "Kimi K3",
+    "vendor": "moonshot",
+    "base_url": "https://api.moonshot.cn/v1",
+    "context_window": 1048576,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "enabled"
+      }
+    ],
+    "pricing": {
+      "currency": "CNY",
+      "input": 20,
+      "output": 100,
+      "cache_read": 2
+    },
+    "unsupported": {},
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "qwen3.8-max",
+    "api": "openai-chat-completions",
+    "name": "Qwen3.8 Max",
+    "vendor": "alibaba",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "enable_thinking",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "qwen3.7-plus",
+    "api": "openai-chat-completions",
+    "name": "Qwen3.7 Plus",
+    "vendor": "alibaba",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "enable_thinking",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "qwen3.7-flash",
+    "api": "openai-chat-completions",
+    "name": "Qwen3.7 Flash",
+    "vendor": "alibaba",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "enable_thinking",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "glm-5",
+    "api": "openai-chat-completions",
+    "name": "GLM-5",
+    "vendor": "bigmodel",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "context_window": 200000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "enabled"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "glm-4.7",
+    "api": "openai-chat-completions",
+    "name": "GLM-4.7",
+    "vendor": "bigmodel",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "context_window": 200000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "enabled"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "glm-4.7-flashx",
+    "api": "openai-chat-completions",
+    "name": "GLM-4.7-FlashX",
+    "vendor": "bigmodel",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "context_window": 200000,
+    "max_output": 128000,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "high",
+        "value": "enabled"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    }
+  },
+  {
+    "id": "llama4",
+    "api": "openai-chat-completions",
+    "name": "Llama 4",
+    "vendor": "ollama",
+    "base_url": "http://localhost:11434/v1",
+    "context_window": 131072,
+    "max_output": 16384,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "qwq",
+    "api": "openai-chat-completions",
+    "name": "QwQ",
+    "vendor": "ollama",
+    "base_url": "http://localhost:11434/v1",
+    "context_window": 131072,
+    "max_output": 16384,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "gemma3",
+    "api": "openai-chat-completions",
+    "name": "Gemma 3",
+    "vendor": "ollama",
+    "base_url": "http://localhost:11434/v1",
+    "context_window": 131072,
+    "max_output": 16384,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "mistral",
+    "api": "openai-chat-completions",
+    "name": "Mistral",
+    "vendor": "ollama",
+    "base_url": "http://localhost:11434/v1",
+    "context_window": 131072,
+    "max_output": 16384,
+    "input": [
+      "text",
+      "image"
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {}
+  },
+  {
+    "id": "mimo-v2.5-pro",
+    "api": "anthropic-messages",
+    "name": "MiMo V2.5 Pro",
+    "vendor": "mimo",
+    "base_url": "https://api.xiaomimimo.com/anthropic",
+    "context_window": 1048576,
+    "max_output": 131072,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 0.435,
+      "output": 0.87,
+      "cache_read": 0.0036
+    },
+    "unsupported": {}
+  },
+  {
+    "id": "mimo-v2.5",
+    "api": "anthropic-messages",
+    "name": "MiMo V2.5",
+    "vendor": "mimo",
+    "base_url": "https://api.xiaomimimo.com/anthropic",
+    "context_window": 1048576,
+    "max_output": 131072,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "budget": 5000
+      },
+      {
+        "effort": "medium",
+        "budget": 32000
+      },
+      {
+        "effort": "high",
+        "budget": 128000
+      }
+    ],
+    "pricing": {
+      "currency": "USD",
+      "input": 0.14,
+      "output": 0.28,
+      "cache_read": 0.0028
+    },
+    "unsupported": {}
+  }
+]

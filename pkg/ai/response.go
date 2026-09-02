@@ -10,13 +10,22 @@ import (
 type StopReason string
 
 const (
-	StopEndTurn   StopReason = "end_turn"
-	StopToolUse   StopReason = "tool_use"
+	// StopEndTurn is a complete answer: the model had nothing more to say.
+	StopEndTurn StopReason = "end_turn"
+	// StopToolUse means the turn is waiting on you to run the calls it made.
+	StopToolUse StopReason = "tool_use"
+	// StopMaxTokens is a truncated answer, cut off by the output cap. The text
+	// is real but unfinished, so acting on it as a whole answer is a mistake.
 	StopMaxTokens StopReason = "max_tokens"
-	StopSequence  StopReason = "stop_sequence"
-	StopRefusal   StopReason = "refusal"
-	StopError     StopReason = "error"
-	StopAborted   StopReason = "aborted"
+	// StopSequence means generation hit one of Request.StopSequences.
+	StopSequence StopReason = "stop_sequence"
+	// StopRefusal is the model declining, which is an answer rather than a
+	// failure: retrying the same prompt gets the same refusal.
+	StopRefusal StopReason = "refusal"
+	// StopError means the call failed; Response.Err says how.
+	StopError StopReason = "error"
+	// StopAborted means the caller's context ended the call mid-flight.
+	StopAborted StopReason = "aborted"
 )
 
 // Usage is the token accounting for one call.
@@ -26,8 +35,16 @@ type Usage struct {
 	CacheWrite int `json:"cache_write,omitempty"`
 	CacheRead  int `json:"cache_read,omitempty"`
 
+	// CacheWrite1h is the slice of CacheWrite written to a long-lifetime entry,
+	// which is billed at twice the input rate rather than the cache-write one.
+	// It travels separately because the totals cannot be told apart afterwards,
+	// and pricing a long-cache turn at the short rate understates it.
 	CacheWrite1h int `json:"cache_write_1h,omitempty"`
-	Reasoning    int `json:"reasoning,omitempty"`
+
+	// Reasoning is the tokens spent thinking, where the provider reports them
+	// apart from the answer. Cost prices Output, not this, so it is diagnostic:
+	// how much of a turn went on working the caller never saw.
+	Reasoning int `json:"reasoning,omitempty"`
 }
 
 // TotalInput is the whole prompt: fresh tokens plus the cached prefix, whether

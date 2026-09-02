@@ -39,17 +39,17 @@ The two names you will actually type are shortcuts along it, and each is
 literally one line:
 
 ```go
-// auth.Client = auth.Config + ai.NewClient
+// auth.Client = auth.Config + ai.New
 func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	cfg, err := Config(ref)
 	if err != nil {
 		return nil, err
 	}
-	return ai.NewClient(cfg, opts...)
+	return ai.New(cfg, opts...)
 }
 
-// ai.NewClient = ai.NewDriver + ai.NewClientWithDriver
-func NewClient(cfg Config, opts ...Option) (*Client, error) {
+// ai.New = ai.NewDriver + ai.NewClientWithDriver
+func New(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ All three produce the same client:
 client, err := auth.Client("openai/gpt-4.1")
 
 cfg, err := auth.Config("openai/gpt-4.1")
-client, err := ai.NewClient(cfg)
+client, err := ai.New(cfg)
 
 driver, err := ai.NewDriver(cfg)
 client := ai.NewClientWithDriver(driver, cfg.Model)
@@ -77,7 +77,7 @@ chain you need to stop**:
 | --- | --- | --- |
 | `auth.Client(ref)` | A command-line tool | The reference. The credential comes from the environment. |
 | `auth.Config(ref)` | Same, but the endpoint or the `http.Client` has to change | The reference, then your edits to the `Config` |
-| `ai.NewClient(cfg)` | A server. Nothing ambient may be read. | The `Model` and the credential |
+| `ai.New(cfg)` | A server. Nothing ambient may be read. | The `Model` and the credential |
 | `ai.NewDriver(cfg)` | The driver has to pass through your hands — middleware | The same, and the last step yourself |
 | `ai.NewClientWithDriver(driver, model)` | You already hold a driver, including a stub in tests | The driver and the `Model` |
 
@@ -113,13 +113,13 @@ cfg, err := auth.Config("openai/gpt-4.1")
 cfg.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
-client, err := ai.NewClient(cfg)
+client, err := ai.New(cfg)
 ```
 
 `auth.Config` fills the credential and endpoint and stops, so what it returns
 is an ordinary `ai.Config` you can edit.
 
-## Stopping at `ai.NewClient`
+## Stopping at `ai.New`
 
 `pkg/ai` reads no environment variable and no file. That is what makes it safe
 in a server holding several tenants' keys: nothing it does depends on ambient
@@ -128,7 +128,7 @@ state, so two requests cannot pick up each other's credentials.
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
-client, err := ai.NewClient(ai.Config{
+client, err := ai.New(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
 	BaseURL:    "https://gateway.internal/v1",

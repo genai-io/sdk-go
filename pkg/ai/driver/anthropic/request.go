@@ -21,9 +21,43 @@ var validToolID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 type toolIDs struct {
 	m map[string]string
 	n int
+
+	// unnamed holds the IDs minted for calls that arrived without one, and
+	// answered counts how many results have claimed one. Gemini leaves a
+	// function call's ID empty, so there is nothing to key a map on and two
+	// parallel calls would otherwise become the same Anthropic ID; matching by
+	// position instead pairs the nth unnamed result with the nth unnamed call,
+	// which is the order both arrive in.
+	unnamed  []string
+	answered int
 }
 
-func (t *toolIDs) resolve(id string) string {
+// call resolves the ID of a tool call the model made.
+func (t *toolIDs) call(id string) string {
+	if id == "" {
+		mapped := t.mint()
+		t.unnamed = append(t.unnamed, mapped)
+		return mapped
+	}
+	return t.named(id)
+}
+
+// result resolves the ID of a tool result answering one of those calls.
+func (t *toolIDs) result(id string) string {
+	if id == "" {
+		if t.answered < len(t.unnamed) {
+			mapped := t.unnamed[t.answered]
+			t.answered++
+			return mapped
+		}
+		// A result with no call in front of it. It will be rejected either
+		// way; a fresh ID at least says which one went missing.
+		return t.mint()
+	}
+	return t.named(id)
+}
+
+func (t *toolIDs) named(id string) string {
 	if validToolID.MatchString(id) {
 		return id
 	}
@@ -33,10 +67,14 @@ func (t *toolIDs) resolve(id string) string {
 	if mapped, ok := t.m[id]; ok {
 		return mapped
 	}
-	t.n++
-	mapped := fmt.Sprintf("toolu_compat_%d", t.n)
+	mapped := t.mint()
 	t.m[id] = mapped
 	return mapped
+}
+
+func (t *toolIDs) mint() string {
+	t.n++
+	return fmt.Sprintf("toolu_compat_%d", t.n)
 }
 
 func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewParams, error) {
@@ -178,22 +216,24 @@ func (d *Driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphe
 // toolChoice maps the neutral constraint onto Anthropic's union. A nil result
 // leaves the field off, which is the API's own default.
 func toolChoice(req *ai.Request, native Options) *sdk.ToolChoiceUnionParam {
-	noParallel := sdk.Bool(true)
-	if !native.DisableParallelToolUse {
-		noParallel = sdk.Bool(false)
-	}
+	// disable_parallel_tool_use is sent only when it is on. Its zero value
+	// changes nothing, as the option documents, and an Anthropic-compatible
+	// host may reject a property it has never heard of.
 	switch name, forced := req.ToolChoice.Tool(); {
 	case forced:
-		return &sdk.ToolChoiceUnionParam{OfTool: &sdk.ToolChoiceToolParam{
-			Name:                   name,
-			DisableParallelToolUse: noParallel,
-		}}
+		choice := &sdk.ToolChoiceToolParam{Name: name}
+		if native.DisableParallelToolUse {
+			choice.DisableParallelToolUse = sdk.Bool(true)
+		}
+		return &sdk.ToolChoiceUnionParam{OfTool: choice}
 	case req.ToolChoice == ai.ToolChoiceNone:
 		return &sdk.ToolChoiceUnionParam{OfNone: &sdk.ToolChoiceNoneParam{}}
 	case req.ToolChoice == ai.ToolChoiceRequired:
-		return &sdk.ToolChoiceUnionParam{OfAny: &sdk.ToolChoiceAnyParam{
-			DisableParallelToolUse: noParallel,
-		}}
+		choice := &sdk.ToolChoiceAnyParam{}
+		if native.DisableParallelToolUse {
+			choice.DisableParallelToolUse = sdk.Bool(true)
+		}
+		return &sdk.ToolChoiceUnionParam{OfAny: choice}
 	}
 	return nil
 }
@@ -214,8 +254,9 @@ func toolInputValue(input string) any {
 }
 
 // messageBlocks maps the canonical sequence without reordering it. A thinking
-// block is replayed only when signed and thinking is enabled for this request;
-// Anthropic rejects both unsigned and disabled-thinking replay.
+// block — readable or redacted — is replayed only when thinking is enabled for
+// this request, and a readable one only when signed; Anthropic rejects both
+// unsigned and disabled-thinking replay.
 func messageBlocks(msg ai.Message, thinkingOn bool, ids *toolIDs) []sdk.ContentBlockParamUnion {
 	blocks := make([]sdk.ContentBlockParamUnion, 0, len(msg.Content))
 	for _, block := range msg.Content {
@@ -232,15 +273,23 @@ func messageBlocks(msg ai.Message, thinkingOn bool, ids *toolIDs) []sdk.ContentB
 			if block.Text != "" && block.Signature != "" && thinkingOn {
 				blocks = append(blocks, sdk.NewThinkingBlock(block.Signature, block.Text))
 			}
+		case ai.BlockReasoning:
+			// Redacted thinking, which the model produced but the safety
+			// classifier withheld. There is nothing to read, and it has to go
+			// back exactly as it arrived or a tool-use continuation is
+			// rejected.
+			if block.Reasoning != nil && block.Reasoning.EncryptedContent != "" && thinkingOn {
+				blocks = append(blocks, sdk.NewRedactedThinkingBlock(block.Reasoning.EncryptedContent))
+			}
 		case ai.BlockToolCall:
 			if block.ToolCall != nil {
 				tc := block.ToolCall
-				blocks = append(blocks, sdk.NewToolUseBlock(ids.resolve(tc.ID), toolInputValue(tc.Input), tc.Name))
+				blocks = append(blocks, sdk.NewToolUseBlock(ids.call(tc.ID), toolInputValue(tc.Input), tc.Name))
 			}
 		case ai.BlockToolResult:
 			if block.ToolResult != nil {
 				r := block.ToolResult
-				blocks = append(blocks, sdk.NewToolResultBlock(ids.resolve(r.ToolCallID), r.Content, r.IsError))
+				blocks = append(blocks, sdk.NewToolResultBlock(ids.result(r.ToolCallID), r.Content, r.IsError))
 			}
 		}
 	}

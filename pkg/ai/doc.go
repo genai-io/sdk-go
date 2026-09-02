@@ -21,7 +21,7 @@
 //	)
 //
 //	model, err := catalog.Model("anthropic/claude-opus-5")
-//	client, err := ai.NewClient(ai.Config{Model: model, APIKey: key})
+//	client, err := ai.New(ai.Config{Model: model, APIKey: key})
 //	messages := []ai.Message{ai.UserMessage("Explain goroutine leaks.")}
 //	response, err := client.Complete(ctx, messages,
 //		ai.WithSystem("You are concise."),
@@ -46,7 +46,7 @@
 // There are two package-level ways to get a Client, and the difference is
 // whether the environment is allowed to answer:
 //
-//	ai.NewClient(Config)         you supply the model, the key and the host
+//	ai.New(Config)               you supply the model, the key and the host
 //	auth.Client("vendor/model")  the catalog and the environment supply them
 //
 // Core ai never reads an environment variable or a file, which is what makes
@@ -124,8 +124,9 @@
 //
 // The policy itself belongs to the caller, who alone knows the budget for a
 // turn and what must not be logged. One rule is not theirs to discover: a
-// retry may only replay a call that failed before any delta reached the
-// caller.
+// retry may only replay a call that failed before any content reached the
+// caller — a delta of usage or a model ID is not content, and a stream that
+// opens with one and then fails is still replayable.
 //
 // # Where things live
 //

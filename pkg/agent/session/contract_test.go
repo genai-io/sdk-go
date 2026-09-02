@@ -135,6 +135,33 @@ func TestStoreContract(t *testing.T) {
 				}
 			})
 
+			t.Run("a cancelled read ends with the cancellation", func(t *testing.T) {
+				st := impl.open(t)
+				meta, err := st.Create(ctx(), session.Meta{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := st.Append(ctx(), meta.ID, msg("one"), msg("two")); err != nil {
+					t.Fatal(err)
+				}
+
+				stopped, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				read, failure := 0, error(nil)
+				for _, err := range st.Entries(stopped, meta.ID) {
+					if err != nil {
+						failure = err
+						break
+					}
+					read++
+				}
+				if !errors.Is(failure, context.Canceled) {
+					t.Errorf("Entries = %v after %d entries, want the cancellation — a read that "+
+						"stops quietly reads as a shorter session", failure, read)
+				}
+			})
+
 			t.Run("what was stored is not what the caller still holds", func(t *testing.T) {
 				st := impl.open(t)
 				meta, err := st.Create(ctx(), session.Meta{})

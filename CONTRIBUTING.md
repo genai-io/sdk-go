@@ -72,18 +72,34 @@ is never ignored silently. Construction settings work the same way through
 
 ## Tests
 
-The suite is one black-box package under `test/`. It imports the SDK the way an
-application does and asserts on two things: the bytes that reached the
-endpoint, and the value that came back. Every endpoint is a stub HTTP server,
-so it needs no network and no credential.
+Two layers, and a change usually needs one of each.
+
+`test/` is one black-box package. It imports the SDK the way an application
+does and asserts on two things: the bytes that reached the endpoint, and the
+value that came back. Every endpoint is a stub HTTP server, so it needs no
+network and no credential.
+
+Beside it, each package tests its own units — the stream lifecycle, history
+repair, error classification, schema derivation, the SSE parser, tool-call
+accumulation, the catalog's invariants, the credential store. Nothing here
+needs a network either.
 
 ```sh
-go test ./test/
+make test          # go test -race ./...
+go test ./test/    # the cross-protocol suite alone
 ```
 
-A new protocol needs its own entries in the cross-protocol tables there — the
-ones that pin what each protocol sends for the same request — because that is
-what keeps five drivers agreeing on one meaning.
+A new protocol needs its own entries in the cross-protocol tables in `test/` —
+the ones that pin what each protocol sends for the same request — because that
+is what keeps five drivers agreeing on one meaning. It also needs its own
+package tests for the parts no other protocol exercises.
+
+A new vendor needs no code, and `pkg/ai/catalog` will tell you if the row is
+wrong: `TestCatalogInvariants` pins that a ladder on an OpenAI-Chat endpoint
+states a `Thinking` dialect, that IDs and display order are unique, that
+`Verified` parses, and that a `Compat` value matches its `API`. `golden_test.go`
+holds the whole resolved table, so a row that changes another row's meaning
+shows up as a diff rather than as a surprise months later.
 
 ## Testing your own code
 

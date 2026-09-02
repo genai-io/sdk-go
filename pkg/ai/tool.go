@@ -68,7 +68,7 @@ func ToolFunc[T any](name, description string, run func(ctx context.Context, arg
 // it; call it directly when you are filling in Tool.Run yourself.
 func ToolSchema[T any](name, description string) Schema {
 	t := reflect.TypeFor[T]()
-	if t == nil || t.Kind() != reflect.Struct {
+	if t.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
 	}
 	if name == "" {

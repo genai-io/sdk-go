@@ -41,3 +41,96 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 		t.Errorf("the restore starts at %q, want the summary", got)
 	}
 }
+
+// The shape both examples in this repository have: open a session, hand the
+// agent whatever came back, answer. For a session that is new, what comes back
+// is nothing — and an agent that announced that as a replacement wrote a
+// snapshot of an empty conversation, which the fold then read as a record
+// carrying nothing and refused. The second run could not reopen what the first
+// had written.
+func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
+	for _, impl := range []struct {
+		name string
+		open func(*testing.T) session.Store
+	}{
+		{"memory", store},
+		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
+	} {
+		t.Run(impl.name, func(t *testing.T) {
+			st := impl.open(t)
+			ctx := context.Background()
+
+			rec, history, err := session.Open(ctx, st, "")
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			first := newAgent(t, nil, text("hello"))
+			first.SetMessages(history) // what the examples do, verbatim
+			converse(t, first, rec, ai.UserMessage("hi"))
+			if err := rec.Err(); err != nil {
+				t.Fatalf("recording failed: %v", err)
+			}
+
+			rec2, restored, err := session.Open(ctx, st, rec.ID())
+			if err != nil {
+				t.Fatalf("the session the first run wrote will not reopen: %v", err)
+			}
+			if len(restored) != 2 {
+				t.Fatalf("restored %d messages, want the 2 that were recorded", len(restored))
+			}
+
+			second := newAgent(t, nil, text("still here"))
+			second.SetMessages(restored)
+			converse(t, second, rec2, ai.UserMessage("again"))
+
+			all, err := session.Messages(ctx, st, rec.ID())
+			if err != nil {
+				t.Fatalf("Messages: %v", err)
+			}
+			if len(all) != 4 {
+				t.Errorf("the session holds %d messages, want 4", len(all))
+			}
+		})
+	}
+}
+
+// Clearing a conversation is a state a session has to be able to hold: an empty
+// snapshot says everything before it is gone, which is not the same as a record
+// that carries nothing. Both stores, because it is the wire format that loses
+// the difference — an empty list of messages is not written at all.
+func TestAClearedConversationRestoresAsCleared(t *testing.T) {
+	for _, impl := range []struct {
+		name string
+		open func(*testing.T) session.Store
+	}{
+		{"memory", store},
+		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
+	} {
+		t.Run(impl.name, func(t *testing.T) {
+			st := impl.open(t)
+			ctx := context.Background()
+
+			a := newAgent(t, nil, text("one"), text("two"))
+			rec, _, err := session.Open(ctx, st, "")
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			converse(t, a, rec, ai.UserMessage("first"))
+
+			a.SetMessages(nil)
+			converse(t, a, rec, ai.UserMessage("starting over"))
+
+			restored, err := session.Messages(ctx, st, rec.ID())
+			if err != nil {
+				t.Fatalf("Messages: %v", err)
+			}
+			if len(restored) != len(a.Messages()) {
+				t.Fatalf("restored %d messages, the agent holds %d — what was cleared came back",
+					len(restored), len(a.Messages()))
+			}
+			if got := restored[0].Text(); got != "starting over" {
+				t.Errorf("the restore starts at %q, want the first thing said after the clearing", got)
+			}
+		})
+	}
+}

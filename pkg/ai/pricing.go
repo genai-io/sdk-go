@@ -9,13 +9,16 @@ type Pricing struct {
 	CacheRead  float64 `json:"cache_read,omitempty"`
 
 	// Tiers are request-wide rate switches. The highest tier whose threshold
-	// the prompt exceeds replaces the base rates for the whole request —
-	// MiniMax bills M3 at double above 512k input tokens, and a flat card
-	// cannot say so.
+	// the prompt exceeds takes over for the whole request — MiniMax bills M3 at
+	// double above 512k input tokens, and a flat card cannot say so.
 	Tiers []PricingTier `json:"tiers,omitempty"`
 }
 
-// PricingTier is a rate card that takes over above a prompt-size threshold.
+// PricingTier is a rate card that takes over above a prompt-size threshold. It
+// states only the rates it changes: a rate left at zero keeps the base card's,
+// so a tier that doubles input alone does not quietly make output free. A rate
+// that genuinely becomes zero above the threshold cannot be said this way, and
+// no published card does that.
 type PricingTier struct {
 	// AboveInputTokens is the total input token count this tier applies past.
 	AboveInputTokens int     `json:"above_input_tokens"`
@@ -53,8 +56,9 @@ func (p Pricing) Cost(u Usage) Cost {
 	for _, tier := range p.Tiers {
 		if u.TotalInput() > tier.AboveInputTokens && tier.AboveInputTokens > matched {
 			matched = tier.AboveInputTokens
-			input, output = tier.Input, tier.Output
-			cacheWrite, cacheRead = tier.CacheWrite, tier.CacheRead
+			input, output = tierRate(tier.Input, p.Input), tierRate(tier.Output, p.Output)
+			cacheWrite = tierRate(tier.CacheWrite, p.CacheWrite)
+			cacheRead = tierRate(tier.CacheRead, p.CacheRead)
 		}
 	}
 
@@ -73,6 +77,15 @@ func (p Pricing) Cost(u Usage) Cost {
 	}
 	c.Total = c.Input + c.Output + c.CacheWrite + c.CacheRead
 	return c
+}
+
+// tierRate is what the tier charges: its own rate where it states one, and the
+// base card's where it is silent.
+func tierRate(tier, base float64) float64 {
+	if tier == 0 {
+		return base
+	}
+	return tier
 }
 
 // Known reports whether any rate is set.

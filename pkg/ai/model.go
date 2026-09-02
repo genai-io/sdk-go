@@ -30,9 +30,8 @@ const (
 )
 
 // anthropicFamily reports whether this protocol carries an Anthropic Messages
-// body. Every rule about that body has to name both members, because Vertex
-// differs only in how the client authenticates and where it points — a rule
-// that lists one of them silently stops applying the moment a model moves.
+// body. Vertex differs only in how the client authenticates and where it
+// points, so every rule about that body has to name both.
 func (a API) anthropicFamily() bool {
 	return a == APIAnthropicMessages || a == APIAnthropicVertex
 }
@@ -235,9 +234,8 @@ func (m Model) String() string {
 type plainModel Model
 
 // modelJSON is the wire shape: every Model field as the standard encoder sees
-// it, with only Compat shadowed by its raw form. Restating the field list here
-// is what used to drop a newly added field from JSON without a word, so the
-// list is now the struct definition and cannot drift from it.
+// it, with only Compat shadowed by its raw form. Embedding rather than
+// restating the fields is what keeps the two from drifting apart.
 type modelJSON struct {
 	plainModel
 	Compat json.RawMessage `json:"compat,omitempty"`

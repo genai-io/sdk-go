@@ -163,10 +163,8 @@ func requestDeviceCode(ctx context.Context, cfg Config, endpoint string) (device
 const defaultDeviceLifetimeSeconds = 900
 
 // pollFloor is the shortest interval Device waits between polls whatever the
-// provider asks for, and slowDownStep is what it adds when the provider says
-// to back off — RFC 8628's own figure. They are variables rather than
-// constants only so a test can drive several polls without spending seconds on
-// each; nothing in this package changes them.
+// provider asks for, and slowDownStep is what it adds when the provider says to
+// back off — RFC 8628's own figure. Variables only so a test can drive them.
 var (
 	pollFloor    = 1 * time.Second
 	slowDownStep = 5 * time.Second

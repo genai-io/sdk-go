@@ -16,9 +16,8 @@ func withRetryAfter(value string) *http.Response {
 	return resp
 }
 
-// Classification decides between retrying, compacting, asking for a credential
-// and giving up, so a check that fires on the wrong input turns a recoverable
-// failure into a fatal one. The order the checks run in is the whole rule.
+// Classification decides between retrying, compacting and giving up, so a
+// check that fires on the wrong input makes a recoverable failure fatal.
 func TestClassifyReadsEachSignalWhereItBelongs(t *testing.T) {
 	for name, tc := range map[string]struct {
 		status    int
@@ -38,9 +37,8 @@ func TestClassifyReadsEachSignalWhereItBelongs(t *testing.T) {
 			want:    KindContextExceeded,
 		},
 		"a 401 mentioning tokens is still a bad credential": {
-			// The word "token" means a credential here. Reading the message
-			// first would call this a context overflow and stop retrying a
-			// class of failure that a new key fixes.
+			// The word "token" means a credential here; reading the message
+			// first would call it a context overflow and stop retrying.
 			status: http.StatusUnauthorized, message: "too many tokens in the authorization header",
 			want: KindAuth,
 		},

@@ -43,11 +43,8 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 }
 
 // The shape both examples in this repository have: open a session, hand the
-// agent whatever came back, answer. For a session that is new, what comes back
-// is nothing — and an agent that announced that as a replacement wrote a
-// snapshot of an empty conversation, which the fold then read as a record
-// carrying nothing and refused. The second run could not reopen what the first
-// had written.
+// agent whatever came back, answer. What comes back from a new session is
+// nothing, and a second run still has to reopen what the first wrote.
 func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 	for _, impl := range []struct {
 		name string
@@ -94,10 +91,9 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 	}
 }
 
-// Clearing a conversation is a state a session has to be able to hold: an empty
-// snapshot says everything before it is gone, which is not the same as a record
-// that carries nothing. Both stores, because it is the wire format that loses
-// the difference — an empty list of messages is not written at all.
+// Clearing a conversation is a state a session has to hold: an empty snapshot
+// says everything before it is gone, which is not a record that carries
+// nothing. Both stores, because it is the wire format that loses the difference.
 func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 	for _, impl := range []struct {
 		name string

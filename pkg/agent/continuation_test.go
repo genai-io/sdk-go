@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
@@ -21,7 +20,7 @@ func cutOff(s string) []ai.Delta {
 // the loop takes another step in the same exchange rather than handing back
 // half an answer.
 func TestACutOffAnswerIsResumedWhenAsked(t *testing.T) {
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		cutOff("the first half"),
 		text("the second half"),
 	}}
@@ -56,7 +55,7 @@ func TestACutOffAnswerIsResumedWhenAsked(t *testing.T) {
 
 // Off unless asked for: paying for more tokens is the application's call.
 func TestACutOffAnswerStopsWhenNotAsked(t *testing.T) {
-	d := &scripted.Driver{Scripts: [][]ai.Delta{cutOff("the first half"), text("never reached")}}
+	d := &scripted{Scripts: [][]ai.Delta{cutOff("the first half"), text("never reached")}}
 	a := newAgent(t, d)
 
 	out, err := outcome(t, a, ai.UserMessage("write at length"))
@@ -73,7 +72,7 @@ func TestACutOffAnswerStopsWhenNotAsked(t *testing.T) {
 
 // Running out of attempts is still a cut-off answer, and says so.
 func TestResumingGivesUpAndStillSaysItWasCutOff(t *testing.T) {
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		cutOff("one"), cutOff("two"), cutOff("three"), cutOff("four"),
 	}}
 	a := newAgent(t, d, agent.WithContinuation(2, "carry on"))

@@ -56,20 +56,14 @@ type Config struct {
 	// endpoint whose listing lives somewhere other than the protocol's own
 	// models call.
 	//
-	// It is handed the *Provider it belongs to so it can read the credential
-	// and endpoint already configured here, which is the whole reason a
-	// listing can be fetched at all.
+	// It is handed the *Provider it belongs to, so it can read the credential
+	// and endpoint already configured here.
 	Fetch func(ctx context.Context, p *Provider) ([]ai.Model, error)
 
-	// Resolve fills in what is known about a model from its ID alone — the
-	// context window a vendor encodes in the name, the reasoning ladder its
-	// family takes. A host's listing carries almost none of that, and an ID
-	// nobody has listed carries none at all, so without this every live-listed
-	// model arrives stripped of everything but its name. catalog installs its
-	// own resolver here; nil leaves a model as the endpoint reported it.
-	//
-	// It must fill rather than replace: what the host reported is not unknown,
-	// and this layer's whole rule is that the host wins on any figure it gave.
+	// Resolve fills in what is known about a model from its ID alone — a context
+	// window encoded in the name, the family's reasoning ladder — which a host's
+	// listing rarely carries; catalog installs one here. It must fill rather than
+	// replace: the host wins on any figure it gave.
 	Resolve func(ai.Model) ai.Model
 }
 
@@ -129,8 +123,7 @@ func (p *Provider) Models() []ai.Model {
 // Model looks one model up by ID. Unlike Models it also answers for an ID the
 // provider has never heard of, by decorating it with the provider's protocol
 // and provider and asking Resolve what else the ID implies — an unlisted model
-// is nearly always one newer than the catalog, not one that does not exist,
-// and it arrives with its window and ladder rather than only its name.
+// is nearly always one newer than the catalog, not one that does not exist.
 func (p *Provider) Model(id string) (ai.Model, bool) {
 	for _, m := range p.Models() {
 		if strings.EqualFold(m.ID, id) {

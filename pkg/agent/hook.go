@@ -12,16 +12,12 @@ import (
 // asked in order and the first refusal is final. All run on the loop's
 // goroutine, one at a time, so none needs locking of its own.
 //
-// An error from any of them ends the exchange with StopError, because it says
-// the hook could not do its job — which is the application's failure, not
-// something the model can be asked to work around. A Decision that blocks is
-// the other answer: a refusal the model is told about as a tool error and may
-// try something else after. That is the whole difference between the two
-// things PreTool returns.
+// An error from any of them ends the exchange with StopError: the hook could
+// not do its job. A Decision that blocks is the other answer — a refusal the
+// model is told about as a tool error and may work around.
 //
 // A hook that panics is not recovered, unlike a tool: it runs on the goroutine
-// ranging over Run, where whoever wrote it can recover it. The exchange
-// unwinds with the panic and reports no outcome, and the agent is left idle.
+// ranging over Run, and the exchange unwinds with it, reporting no outcome.
 type Hook struct {
 	// PreInfer edits one call in place: prune the history, narrow the toolset,
 	// add a line to the prompt that is only true right now. To change the
@@ -32,8 +28,7 @@ type Hook struct {
 	PostInfer func(ctx context.Context, resp *ai.Response) error
 
 	// PreTool runs after the arguments validate and before the tool does.
-	// Where a permission system lives, and where it refuses with a Decision
-	// rather than an error.
+	// Where a permission system lives, and where it refuses with a Decision.
 	PreTool func(ctx context.Context, c PreToolContext) (Decision, error)
 
 	// PostTool runs after the tool returns; a non-nil result replaces its own.

@@ -579,8 +579,7 @@ func TestAnAppendAfterATornTailIsReadableAndNumbered(t *testing.T) {
 
 // Only the last line is allowed to be unreadable, because that is a process
 // that was killed. One in the middle is a hole, and a conversation with a hole
-// in it is not a shorter conversation — it is a broken one, so it is reported
-// rather than quietly cut short.
+// is not a shorter one — so it is reported rather than quietly cut short.
 func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
@@ -621,10 +620,9 @@ func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
 	}
 }
 
-// Delete closes the file a session is being appended to. An append that was
-// already under way has to fail rather than corrupt the store or take the
-// process with it — and whether the directory goes with it is the race, since
-// an appender that got there first recreates the file inside it.
+// Delete closes the file a session is being appended to. An append already
+// under way has to fail rather than corrupt the store — and whether the
+// directory goes with it is the race, since the appender recreates the file.
 func TestAppendRacingDeleteFailsCleanly(t *testing.T) {
 	s := store(t)
 	meta := create(t, s)

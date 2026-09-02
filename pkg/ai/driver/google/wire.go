@@ -138,9 +138,8 @@ type listedModel struct {
 	DisplayName      string `json:"displayName,omitempty"`
 	InputTokenLimit  int32  `json:"inputTokenLimit,omitempty"`
 	OutputTokenLimit int32  `json:"outputTokenLimit,omitempty"`
-	// SupportedGenerationMethods is what the model can actually be asked to do.
-	// The listing carries embedding, TTS, image and live models alongside the
-	// ones that answer a prompt, and only this tells them apart.
+	// SupportedGenerationMethods is the only thing telling a prompt-answering
+	// model from the embedding, TTS, image and live models the listing carries.
 	SupportedGenerationMethods []string `json:"supportedGenerationMethods,omitempty"`
 }
 

@@ -227,9 +227,7 @@ func schemaForType(t reflect.Type, seen map[reflect.Type]bool, where string) map
 		return maps.Clone(fixed)
 	}
 	// A MarshalJSON writes whatever it likes and reflection cannot see what:
-	// big.Int would be described as an empty object and json.RawMessage as an
-	// array of bytes, each a schema that rejects the JSON its own type writes.
-	// Only the caller knows the shape, so ask for it rather than guess.
+	// big.Int would derive as an empty object, json.RawMessage as a byte array.
 	if reflect.PointerTo(t).Implements(jsonMarshalerType) {
 		panic(fmt.Sprintf("jsonschema: %s is %s, which marshals through MarshalJSON, so its "+
 			"fields are not its JSON — give the field a type that marshals to itself, or "+
@@ -316,9 +314,8 @@ func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[
 	defer delete(seen, t)
 
 	properties := map[string]any{}
-	// Empty rather than nil: two of the drivers forward this map to the
-	// endpoint verbatim, and a struct with no fields would send
-	// "required": null.
+	// Empty rather than nil: two drivers forward this map to the endpoint
+	// verbatim, and a struct with no fields would send "required": null.
 	required := []any{}
 	collectFields(t, seen, where, properties, &required)
 
@@ -391,8 +388,8 @@ func droppedByTag(field reflect.StructField) bool {
 
 // jsonFieldName applies encoding/json's naming rules: the tag's first segment
 // names the property, "-" drops the field, and omitempty or omitzero makes it
-// optional. A pointer is optional too, but says so in schemaForType, where
-// every pointer passes — including the ones inside a slice or a map.
+// optional. A pointer says so in schemaForType instead, which every pointer
+// reaches — including the ones inside a slice or a map.
 func jsonFieldName(field reflect.StructField) (name string, optional, skip bool) {
 	tag, ok := field.Tag.Lookup("json")
 	if !ok {

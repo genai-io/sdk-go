@@ -12,13 +12,10 @@ import (
 // Check measures a decoded JSON value against a schema. An empty schema
 // constrains nothing, which is what a tool declaring no parameters wants.
 //
-// Required is read more loosely than it is written. A derived schema puts
-// every property in required, optional ones included, because that is what
-// OpenAI's strict mode demands — optionality is the ["T","null"] type union
-// instead. The other providers are not strict, and a model there answers the
-// same schema by leaving an optional argument out rather than sending null. So
-// coming back, a property is missing only when its own schema refuses null;
-// one that admits null is read as null and checked as such.
+// Required is read more loosely than it is written. A derived schema lists
+// every property as required because OpenAI's strict mode demands it, writing
+// optionality as a ["T","null"] union instead; elsewhere a model simply leaves
+// the argument out. So a property is missing only when it refuses null.
 func Check(schema map[string]any, value any) error {
 	if len(schema) == 0 {
 		return nil
@@ -73,9 +70,8 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 		if _, ok := value[name]; ok {
 			continue
 		}
-		// An optional property is required and nullable, so leaving it out
-		// says what null says. Only a property whose schema refuses null is
-		// genuinely absent.
+		// An optional property is required and nullable, so leaving it out says
+		// what null says. Only one whose schema refuses null is genuinely absent.
 		if sub, ok := properties[name].(map[string]any); ok && admitsNull(sub) {
 			continue
 		}

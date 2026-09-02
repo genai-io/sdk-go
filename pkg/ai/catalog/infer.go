@@ -29,25 +29,19 @@ func inferAnthropic(m ai.Model) ai.Model {
 // openAIGenerations sizes an OpenAI model by its generation, most specific
 // first.
 //
-// Each pattern matches the generation as a whole token rather than as a
-// prefix, and that is the whole point of them being patterns:
-//
-//   - a prefix of "gpt-4" also matches a gpt-4.5 nobody has published yet, and
-//     would size it at the original GPT-4's 8k. The 4-series patterns below
-//     stop at a following digit or dot, so an unrecognised point release
-//     reports unknown instead of a figure that is off by two orders.
-//   - a fine-tune is named for what it was tuned from and wrapped in a job
-//     ("ft:gpt-5.4-2026-01-01:acme::abc"), so the generation is not at the
-//     front. Matching anywhere in the ID sizes it as its base model.
+// The patterns match a generation as a whole token, not as a prefix: "gpt-4"
+// as a prefix would also claim an unpublished gpt-4.5 and size it at the
+// original's 8k, so the 4-series patterns stop at a following digit or dot.
+// They match anywhere in the ID, which sizes a fine-tune
+// ("ft:gpt-5.4-2026-01-01:acme::abc") as the model it was tuned from.
 var openAIGenerations = []struct {
 	generation     *regexp.Regexp
 	window, output int
 	reasons        bool
 }{
 	{regexp.MustCompile(`(^|[^a-z0-9])gpt-[56](\.[0-9]+)?([^.0-9]|$)`), 1_050_000, 128_000, true},
-	// The generations before GPT-5. They are not listed as rows — nobody
-	// starts a project on one — but /v1/models still serves them, and a caller
-	// who names one deserves a window rather than silence.
+	// The generations before GPT-5. Not listed as rows, but /v1/models still
+	// serves them, so naming one gets a window rather than silence.
 	{regexp.MustCompile(`(^|[^a-z0-9])o[134]([^.0-9]|$)`), 200_000, 100_000, true},
 	{regexp.MustCompile(`(^|[^a-z0-9])gpt-4\.1([^.0-9]|$)`), 1_047_576, 32_768, false},
 	{regexp.MustCompile(`(^|[^a-z0-9])gpt-4o([^.0-9]|$)`), 128_000, 16_384, false},
@@ -60,10 +54,8 @@ var openAIGenerations = []struct {
 // list. The /v1/models listing carries neither, so both come from the
 // published per-model pages.
 //
-// An ID whose generation is not recognised is left alone, ladder included. A
-// nil Reasoning says nothing is known about this model, which is what is
-// true; stamping it "does not reason" would answer a question nobody here can
-// answer, and the caller would believe it.
+// An ID whose generation is not recognised is left alone, ladder included: a
+// nil Reasoning says nothing is known, not "this model does not reason".
 func inferOpenAI(m ai.Model) ai.Model {
 	id := strings.ToLower(strings.TrimSpace(m.ID))
 	for _, g := range openAIGenerations {
@@ -108,9 +100,7 @@ func inferGoogle(m ai.Model) ai.Model {
 }
 
 // moonshotWindow reads the window suffix out of a Kimi model ID as a whole
-// number rather than as a substring. "8k" occurs inside "128k", so a
-// substring test only worked because of the order the cases happened to be
-// written in — one reordering away from sizing a 128k model at 8k.
+// number rather than as a substring: "8k" occurs inside "128k".
 var moonshotWindow = regexp.MustCompile(`(^|[^0-9])([0-9]+)k($|[^a-z0-9])`)
 
 // inferMoonshot reads the window out of a Kimi model ID, which is where

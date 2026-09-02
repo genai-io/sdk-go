@@ -145,9 +145,8 @@ func (d *Driver) emit(out generateResponse, yield func(ai.Delta, error) bool) bo
 		// Gemini reports the cached prefix inside the prompt count, so it is
 		// split out the same way the OpenAI protocols are.
 		fresh, cached := ai.SplitPromptTokens(int(u.PromptTokenCount), int(u.CachedContentTokenCount))
-		// Thinking is counted outside candidatesTokenCount here, unlike every
-		// other protocol, so it is added in: Output is what the output rate is
-		// charged on, and Reasoning is how much of it went unseen.
+		// Gemini counts thinking outside candidatesTokenCount, unlike every other
+		// protocol, so it is added into Output — what the output rate charges on.
 		reasoning := int(u.ThoughtsTokenCount)
 		if !yield(ai.Delta{Usage: &ai.Usage{
 			Input:     fresh,
@@ -234,8 +233,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 // Models lists the models the endpoint serves that can answer a prompt. The
 // listing also carries embedding, image, speech and live models, which say so
 // in supportedGenerationMethods. Experimental and "-latest" aliases are dropped
-// on top of that: they duplicate a concrete model under a name whose meaning
-// changes without notice.
+// too: they duplicate a concrete model under a name whose meaning can change.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	var out []ai.Model
 	for token := ""; ; {

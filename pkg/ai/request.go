@@ -208,9 +208,8 @@ const (
 	EffortOff Effort = "off"
 	// EffortMinimal is the shortest thinking a model that must think will do.
 	EffortMinimal Effort = "minimal"
-	// EffortLow, EffortMedium and EffortHigh are the three rungs every
-	// reasoning vendor offers under one name or another, and the ones a
-	// portable caller should reach for.
+	// EffortLow, EffortMedium and EffortHigh are the three rungs every reasoning
+	// vendor offers, and the ones a portable caller should reach for.
 	EffortLow    Effort = "low"
 	EffortMedium Effort = "medium"
 	EffortHigh   Effort = "high"

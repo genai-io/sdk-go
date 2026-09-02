@@ -21,8 +21,7 @@ const verifiedGateways = "2026-08-21"
 const verifiedHyperscalers = "2026-08-21"
 
 // claudeLine is the live Claude generation as both entries below serve it: the
-// same IDs, the same ladders, the same limits. It was hand-copied into each,
-// which is how the two came to differ in what neither meant to change.
+// same IDs, the same ladders, the same limits.
 //
 // The rows state no window: inferAnthropic fills the generation's shape, and a
 // row restating it is a second place for the figure to be wrong.
@@ -50,10 +49,8 @@ var anthropicModels = append(priced(claudeLine, map[string]ai.Pricing{
 	"claude-sonnet-5":   usd(2, 10, 2.50, 0.20),
 	"claude-sonnet-4-6": usd(3, 15, 3.75, 0.30),
 }),
-	// Retired on the first-party API. They stay listed so a caller still
-	// pointing at one is told what happened and what to move to, instead of
-	// meeting an opaque rejection from the endpoint. Filter them out of a
-	// picker with Stage.Available.
+	// Retired on the first-party API. They stay listed so a caller pointing at
+	// one is told what to move to; filter them out with Stage.Available.
 	retired("claude-opus-4-1-20250805", "Claude Opus 4.1", "claude-opus-5"),
 	retired("claude-opus-4-20250514", "Claude Opus 4", "claude-opus-5"),
 	retired("claude-sonnet-4-20250514", "Claude Sonnet 4", "claude-sonnet-5"),
@@ -101,9 +98,8 @@ var vendors = []Vendor{
 		Reasoning:  claudeAdaptive,
 		Note: "Authenticates with Google Application Default Credentials; set ANTHROPIC_VERTEX_PROJECT_ID and, optionally, CLOUD_ML_REGION. " +
 			"Vertex still serves earlier generations under @-versioned snapshot IDs; they are not listed, and Infer sizes one if you name it.",
-		// Claude 4.6 and later use dateless IDs on Vertex too, so the line is
-		// the same one the first-party entry serves. Vertex bills through a
-		// Google contract, so it takes the rows unpriced.
+		// Claude 4.6 and later use dateless IDs on Vertex too, so this is the
+		// first-party line — unpriced, as Vertex bills through Google.
 		Models: claudeLine,
 		Infer:  inferAnthropic,
 	},
@@ -190,9 +186,8 @@ var vendors = []Vendor{
 		KeyEnv:    []string{"AWS_BEARER_TOKEN_BEDROCK"},
 		Input:     textOnly,
 		Reasoning: gptOSSEfforts,
-		// The ladder above only reaches the wire if the endpoint's dialect is
-		// stated: gpt-oss takes OpenAI's own reasoning_effort, and without
-		// this the driver has no field to put a rung in and drops it silently.
+		// The ladder above only reaches the wire once the dialect is stated:
+		// gpt-oss takes OpenAI's own reasoning_effort.
 		Compat: ai.OpenAIChatCompat{Thinking: ai.ThinkingEffort},
 		Note: "Set AWS_BEDROCK_BASE_URL to https://bedrock-runtime.REGION.amazonaws.com and " +
 			"AWS_BEARER_TOKEN_BEDROCK to a Bedrock API key; the /openai/v1 suffix is added for you. " +
@@ -211,9 +206,8 @@ var vendors = []Vendor{
 		Order:       30,
 		Verified:    verified,
 		API:         ai.APIGoogleGenAI,
-		// Google's own SDKs take a base URL in code rather than from the
-		// environment, so there is no name of theirs to follow; this is the
-		// one the Gemini CLI uses, and it matches GEMINI_API_KEY.
+		// Google's own SDKs take a base URL in code, not from the environment, so
+		// there is no name of theirs to follow; this is the Gemini CLI's.
 		BaseURLEnv: "GEMINI_BASE_URL",
 		KeyEnv:     []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
 		Input:      textImage,

@@ -79,10 +79,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			chunk := stream.Current()
 
 			for _, choice := range chunk.Choices {
-				// Reasoning is read whatever the request asked for. Gating it
-				// on the rung dropped it from endpoints that reason with no
-				// switch to declare — a local model, a gateway deciding for
-				// itself — and an endpoint that sends none costs nothing here.
+				// Reasoning is read whatever the request asked for: an endpoint
+				// may reason with no switch to declare — a local model, or a
+				// gateway deciding for itself.
 				if text := reasoningText(choice.Delta.RawJSON()); text != "" {
 					if !yield(ai.Delta{Block: ai.ThinkingBlock(text, "")}, nil) {
 						return
@@ -156,8 +155,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 		if err := stream.Err(); err != nil {
 			// Everything produced stays on the Response, so the calls collected
-			// before the cut are handed over ahead of the failure that ends the
-			// stream.
+			// before the cut go out ahead of the failure that ended the stream.
 			if flush() {
 				yield(ai.Delta{}, fail.WrapStream(err))
 			}
@@ -195,10 +193,9 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 // reasoningText reads the reasoning a stream delta carries. Neither spelling is
-// part of the standard schema, so the typed SDK struct has no field for either:
-// Moonshot, DeepSeek, Alibaba and Z.ai stream reasoning_content, while
-// OpenRouter and Ollama stream reasoning. An endpoint sending both sends the
-// same words twice, so the first one wins.
+// in the standard schema, so the typed SDK struct has no field for either:
+// Moonshot, DeepSeek, Alibaba and Z.ai stream reasoning_content, OpenRouter and
+// Ollama stream reasoning, and an endpoint sending both sends the same words.
 func reasoningText(rawJSON string) string {
 	if rawJSON == "" {
 		return ""

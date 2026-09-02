@@ -47,11 +47,9 @@ type Vendor struct {
 	DeploymentEnv map[string]string
 
 	// Deployment turns those variables into the value this vendor's driver
-	// expects as ai.Config.ProtocolConfig, and says which one is missing when
-	// the endpoint cannot run without it. The table owns this because which
-	// protocol wants which shape is a fact about the row, not about auth —
-	// auth supplies the lookup and knows nothing else about it. Nil for a
-	// vendor that needs no deployment.
+	// expects as ai.Config.ProtocolConfig, and says which one is missing when the
+	// endpoint cannot run without it — a fact about the row, not about auth. Nil
+	// for a vendor that needs no deployment.
 	Deployment func(env func(string) string) (ai.ProtocolConfig, error)
 
 	// Input lists the content kinds this vendor's models accept, for models
@@ -95,8 +93,7 @@ type Vendor struct {
 
 // noReasoning marks a catalog entry as a model that does not reason, which is
 // different from one that simply does not say — an omitted Reasoning inherits
-// the vendor default. It is not exported: an exported slice is a value every
-// caller shares and any caller can rewrite, and a row is written here anyway.
+// the vendor default. Unexported: an exported slice is one every caller shares.
 var noReasoning = []ai.ReasoningLevel{}
 
 // NeedsDeployment reports whether this vendor requires deployment-scoped
@@ -131,10 +128,9 @@ func (v Vendor) Model(id string) ai.Model {
 }
 
 // Resolve fills in what this vendor knows about a model, overwriting nothing
-// the model already states. It is Model for a model rather than an ID, and it
-// is what a live listing needs: a host reports an ID and a name and almost
-// never a window, a ladder or a protocol quirk, so without this everything the
-// endpoint serves arrives unusable except by name.
+// the model already states. It is Model for a model rather than an ID, which is
+// what a live listing needs: a host reports an ID and a name and almost never a
+// window, a ladder or a protocol quirk.
 func (v Vendor) Resolve(m ai.Model) ai.Model { return v.decorate(m) }
 
 // ModelList returns the vendor's known models, fully decorated.
@@ -222,9 +218,8 @@ func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	if cfg.Headers == nil {
 		cfg.Headers = v.Headers
 	}
-	// Without this the provider would hand back a live-listed model carrying
-	// nothing but its ID, and every caller would have to resolve it through
-	// the catalog a second time to learn its window and ladder.
+	// Without this a live-listed model would arrive carrying nothing but its ID,
+	// leaving the caller to resolve it through the catalog a second time.
 	if cfg.Resolve == nil {
 		cfg.Resolve = v.Resolve
 	}

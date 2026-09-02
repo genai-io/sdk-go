@@ -95,15 +95,10 @@ func ClientOptions(cfg ai.Config, deployment ...option.RequestOption) []option.R
 // It does not call sdk.NewClient, which prepends DefaultClientOptions — and
 // that reads ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL out
 // of the process environment. A Config is meant to be the whole truth about
-// where a request goes and what it presents; a server holding one tenant's
-// credential per client cannot have another arrive from the ambient
-// environment. Overriding each variable as it is discovered would leave the
-// next one to leak, so none is ever read.
+// where a request goes and what it presents, so none of them is ever read.
 //
-// Only the two services the driver uses are wired. Reaching through this client
-// for a third would find one carrying no options at all, and fail on its first
-// call — loudly, rather than by quietly taking a credential from somewhere
-// else.
+// Only the two services the driver uses are wired; reaching through this client
+// for a third finds one carrying no options and fails on its first call.
 func NewSDKClient(opts ...option.RequestOption) sdk.Client {
 	client := sdk.Client{Options: opts}
 	client.Messages = sdk.NewMessageService(opts...)
@@ -190,10 +185,8 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					toolName = block.ContentBlock.Name
 					toolInput.Reset()
 				case "redacted_thinking":
-					// Thinking the safety classifier withheld. It arrives whole
-					// and unreadable, and the API rejects a later tool-use turn
-					// whose history drops it, so it is carried as opaque state
-					// rather than discarded.
+					// Thinking the safety classifier withheld: unreadable, but
+					// the API rejects a tool-use turn whose history drops it.
 					if !yield(ai.Delta{Block: ai.ReasoningBlock(ai.ReasoningItem{
 						EncryptedContent: block.ContentBlock.Data,
 					})}, nil) {
@@ -240,11 +233,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "message_delta":
 				md := event.AsMessageDelta()
-				// Every figure here is the running total for the call, which is
-				// what a Delta's usage is meant to carry. Input tokens are
-				// repeated rather than new: Anthropic sends them at
-				// message_start, and some compatible endpoints (SenseNova) only
-				// here, so passing both is right either way.
+				// Every figure here is the running total for the call. Input
+				// tokens repeat what message_start already sent, but some
+				// compatible endpoints (SenseNova) send them only here.
 				if !yield(ai.Delta{
 					StopReason: mapStopReason(string(md.Delta.StopReason)),
 					Usage: &ai.Usage{

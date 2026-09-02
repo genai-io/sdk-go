@@ -129,7 +129,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	for e, err := range a.Run(ctx, ai.UserMessage(prompt)) {
 		if err != nil {
 			// Outside-the-turn failures only; the exchange reports its own on
-			// TurnEnd, which is what end holds when the loop finishes.
+			// TurnEnd.
 			return err
 		}
 		rec.Handle(ctx, e)

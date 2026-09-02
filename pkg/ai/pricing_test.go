@@ -55,8 +55,7 @@ func TestCostPricesEachPartOfTheCall(t *testing.T) {
 }
 
 // A tier says what changes above its threshold. Reading it as a whole
-// replacement card makes every rate it does not restate free, which is silent
-// and wrong in the direction that costs the vendor rather than the caller.
+// replacement card would make every rate it does not restate free.
 func TestATierOverridesOnlyTheRatesItStates(t *testing.T) {
 	partial := Pricing{
 		Currency: USD, Input: 1, Output: 2, CacheWrite: 4, CacheRead: 8,

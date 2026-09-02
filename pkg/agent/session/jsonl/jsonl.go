@@ -112,8 +112,7 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 		if err != nil {
 			return fmt.Errorf("jsonl: encoding entry %d: %w", e.Seq, err)
 		}
-		// bufio keeps the first write error and Flush below is where it is
-		// read, so checking each write here would report it twice.
+		// bufio keeps the first error; Flush below is where it is read.
 		_, _ = w.Write(line)
 		_ = w.WriteByte('\n')
 	}
@@ -137,8 +136,7 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 const metaEvery = 64
 
 // Entries reads a session from the beginning. A cancelled context ends the
-// read with its error rather than quietly, because a read that stopped early
-// and said nothing is indistinguishable from a shorter session.
+// read with its error, since stopping quietly looks like a shorter session.
 func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
 	return func(yield func(session.Entry, error) bool) {
 		dir, err := s.dir(id)
@@ -161,11 +159,8 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-		// A line that does not parse is held rather than acted on until the
-		// next one says which it was. As the last line it is a process killed
-		// mid-append and the session ends there, one entry short; with
-		// anything after it, it is a hole in the middle, and a conversation
-		// with a hole in it is worse than a short one.
+		// A line that does not parse is held until the next one says which it
+		// was: as the last line the session just ends; otherwise it is a hole.
 		var torn error
 		n := 0
 		for scanner.Scan() {
@@ -284,10 +279,9 @@ func (s *Store) Fork(ctx context.Context, id string, upto int64) (session.Meta, 
 	return s.Meta(ctx, forked.ID)
 }
 
-// Delete removes a session and everything in it. Deleting one that is being
-// appended to is a race the caller has to settle: the appender can recreate the
-// entries file inside the directory being removed, and this then fails saying
-// so rather than pretending the session is gone.
+// Delete removes a session and everything in it. Deleting one still being
+// appended to is the caller's race: an appender recreating the entries file
+// makes this fail rather than pretend the session is gone.
 func (s *Store) Delete(_ context.Context, id string) error {
 	dir, err := s.dir(id)
 	if err != nil {
@@ -307,10 +301,8 @@ func (s *Store) Delete(_ context.Context, id string) error {
 }
 
 // Close saves what was appended and releases the files. Not closing loses no
-// entry: Append hands each one to the operating system, which serves it to
-// every other reader whether or not this store closed. What is lost is how up
-// to date meta.json looks from outside — and, since nothing here fsyncs, the
-// tail of a session on a machine that loses power.
+// entry, only how up to date meta.json looks from outside — and, since nothing
+// here fsyncs, the tail of a session on a machine that loses power.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	live := s.live
@@ -326,10 +318,8 @@ func (s *Store) Close() error {
 	return firstErr
 }
 
-// dir is where a session lives. The id is checked rather than joined straight
-// in: ids come from application input, and Join would let "" name the store
-// itself and ".." name a directory beside it — either of which Delete would
-// then remove.
+// dir is where a session lives. Ids come from application input, so Join alone
+// would let "" name the store itself and ".." a neighbour for Delete to remove.
 func (s *Store) dir(id string) (string, error) {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
 		return "", fmt.Errorf("jsonl: %q is not a session id", id)
@@ -386,9 +376,8 @@ func (o *openSession) save() error {
 	}
 	raw, err := os.ReadFile(filepath.Join(o.dir, metaFile))
 	if errors.Is(err, fs.ErrNotExist) {
-		// The session was deleted under whoever is still appending to it: there
-		// is no metadata to bring up to date. Failing here would fail every
-		// Meta and List on the store, for every other session too.
+		// Deleted under whoever is still appending: there is no metadata to
+		// update, and failing here would fail Meta and List for every session.
 		o.unsaved = 0
 		return nil
 	}
@@ -439,10 +428,8 @@ func (s *Store) saveAll() error {
 	return firstErr
 }
 
-// trimTornTail drops a half-written last line, so that the next entry begins a
-// line of its own rather than joining the wreckage of the one a killed process
-// left. That entry is lost either way; this is what stops it taking the next
-// one with it.
+// trimTornTail drops a half-written last line, so the next entry begins a line
+// of its own. That entry is lost either way; this stops it taking the next.
 func trimTornTail(path string) (err error) {
 	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -451,8 +438,7 @@ func trimTornTail(path string) (err error) {
 	if err != nil {
 		return err
 	}
-	// This function truncates, so a failure to close is a failure to truncate
-	// on any filesystem that reports one late.
+	// Truncating: a close that fails is a truncate that may not have landed.
 	defer func() { err = errors.Join(err, f.Close()) }()
 
 	size, err := f.Seek(0, io.SeekEnd)
@@ -510,9 +496,8 @@ func lastSeq(path string) (int64, error) {
 		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
 			return 0, err
 		}
-		// Back over whole lines until one parses: numbering from where the
-		// readable part ended is the point, and a line that says nothing is
-		// not where it ended.
+		// Back over whole lines until one parses: the count carries on from
+		// where the readable part ended.
 		trimmed := bytes.TrimRight(buf, "\n")
 		for {
 			i := bytes.LastIndexByte(trimmed, '\n')

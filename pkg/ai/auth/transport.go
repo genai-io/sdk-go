@@ -62,10 +62,8 @@ type tokenSource struct {
 // sources holds one tokenSource per vendor and store.
 //
 // A refresh token rotates: spending it invalidates the one before it. Two
-// clients for the same vendor, each with a source of its own, renew from the
-// same stored token and the second renewal is refused outright — after which
-// whichever wrote last decides what is left on disk. Sharing the source makes
-// the renewal happen once, under one lock, with one result.
+// sources for one vendor would renew from the same stored token and the second
+// renewal be refused, so sharing one makes it happen once, under one lock.
 var sources struct {
 	mu sync.Mutex
 	m  map[sourceKey]*tokenSource
@@ -89,8 +87,7 @@ func sharedSource(vendorID string, f Flow, store Store, c Credential) *tokenSour
 		}
 	}
 	// A Store whose type cannot be a map key — a struct holding a map, passed
-	// by value — gets a source of its own rather than a panic. It still
-	// re-reads the store before renewing, which is most of the protection.
+	// by value — gets a source of its own rather than a panic.
 	if store != nil && !reflect.TypeOf(store).Comparable() {
 		return fresh()
 	}
@@ -128,10 +125,8 @@ func (s *tokenSource) token(ctx context.Context) (string, error) {
 	if s.current != "" && !expired(s.expires) {
 		return s.current, nil
 	}
-	// Read the store again before renewing. Another process may have signed in
-	// or refreshed since this source was built, and a rotated refresh token can
-	// only be spent once — renewing from a copy that has already been
-	// superseded fails outright and takes the sign-in with it.
+	// Another process may have signed in or refreshed since this source was
+	// built, and a rotated refresh token can only be spent once.
 	if s.store != nil {
 		if stored, found, err := s.store.Load(s.vendor); err == nil && found && stored.Access != "" {
 			s.cred = stored
@@ -149,17 +144,13 @@ func (s *tokenSource) token(ctx context.Context) (string, error) {
 		if s.store != nil {
 			if err := s.store.Save(updated); err != nil {
 				// A rotated refresh token that could not be written is gone:
-				// the one still in the store has been spent, so the next run
-				// starts signed out with nothing to renew from. That is worth
-				// failing this request over, because it is the last moment
-				// anyone can be told.
+				// the stored one is spent, so the next run cannot renew.
 				if rotated {
 					return "", fmt.Errorf("auth: %s issued a new refresh token that could not be stored, "+
 						"and the stored one is now spent: %w", s.vendor, err)
 				}
-				// Nothing that cannot be recovered was lost — the endpoint a
-				// sign-in rediscovers, at worst. A session that cannot write
-				// to disk still works, and failing here would cost the turn.
+				// Nothing unrecoverable was lost — the endpoint a sign-in
+				// rediscovers, at worst — so a read-only disk still works.
 			}
 		}
 	}

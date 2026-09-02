@@ -14,10 +14,9 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
 
-// The test vendors. Registering a flow is permanent for the life of the
-// process — a second registration for one vendor panics — so these are
-// registered once here and their behavior is varied through the hooks below
-// rather than by re-registering.
+// The test vendors. Registering a flow is permanent for the life of the process
+// — a second registration for one vendor panics — so these are registered once
+// and their behavior varied through the hooks below.
 const (
 	stubVendor   = "test-stub"
 	rotateVendor = "test-rotating"

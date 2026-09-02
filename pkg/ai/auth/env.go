@@ -35,8 +35,7 @@ func BaseURL(v catalog.Vendor) string {
 // without is unset. It returns nil for a vendor that has none.
 //
 // Which variables those are, and what shape they make, is the row's business:
-// this package supplies the lookup and knows nothing else about it. Deciding
-// here would mean auth carrying a list of every driver's private arrangements.
+// this package supplies the lookup and knows nothing else about it.
 func Deployment(v catalog.Vendor) (ai.ProtocolConfig, error) {
 	if v.Deployment == nil {
 		return nil, nil
@@ -44,9 +43,8 @@ func Deployment(v catalog.Vendor) (ai.ProtocolConfig, error) {
 	cfg, err := v.Deployment(os.Getenv)
 	var missing *catalog.MissingDeploymentError
 	if errors.As(err, &missing) {
-		// Reported as a missing credential because that is what it is from
-		// where the caller stands: a variable they have to set before this
-		// vendor works, with the same one error shape to handle.
+		// Reported as a missing credential: from where the caller stands it is
+		// a variable to set before this vendor works, with one shape to handle.
 		return nil, &MissingKeyError{Vendor: v.ID, EnvVars: missing.EnvVars, Note: missing.Note}
 	}
 	return cfg, err

@@ -13,11 +13,9 @@ var update = flag.Bool("update", false, "rewrite the golden table in testdata")
 // TestTableIsUnchanged pins the entire resolved table, byte for byte.
 //
 // The rows are written in shorthand — presets, shared lines, and an Infer that
-// fills what a row leaves out — and every one of those is a way for a refactor
-// to change what a caller sees without changing anything a reader would notice.
-// This is the test that says whether tidying the table moved a figure. A diff
-// here is not a failure by itself; it is a claim to check and then record with
-// -update.
+// fills what a row leaves out — so tidying the table can move a figure without
+// changing anything a reader would notice. A diff here is not a failure by
+// itself; it is a claim to check and then record with -update.
 func TestTableIsUnchanged(t *testing.T) {
 	path := filepath.Join("testdata", "models.json")
 

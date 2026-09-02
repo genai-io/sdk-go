@@ -80,8 +80,7 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 }
 
 // Entries reads a session from the beginning. A cancelled context ends the
-// read with its error rather than quietly, because a read that stopped early
-// and said nothing is indistinguishable from a shorter session.
+// read with its error, since stopping quietly looks like a shorter session.
 func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
 	s.mu.Lock()
 	h, ok := s.sessions[id]

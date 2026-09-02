@@ -14,10 +14,8 @@ import (
 // Flow is one vendor's interactive sign-in: the grant that authenticates a
 // person, and the renewal that keeps the result usable afterwards.
 //
-// A few vendors authenticate a person rather than a service — there is no API
-// key to paste, only a subscription and a browser — and this is what makes
-// those reachable. The set of them is open on purpose: this package ships the
-// two grants it knows about, and anyone whose vendor signs in some third way
+// The set of interactive vendors is open on purpose: this package ships the two
+// grants it knows about, and anyone whose vendor signs in some third way
 // registers their own rather than waiting for this package to hear of it.
 type Flow struct {
 	// Method describes the grant for a caller listing what is available, such
@@ -41,11 +39,9 @@ var flows struct {
 	m  map[string]Flow
 }
 
-// RegisterFlow declares how a vendor signs in. The two built-in grants
-// register themselves from init, as driver packages do with ai.RegisterAPI, so
-// importing this package is enough to reach them; anyone else calls this.
-// Registering the same vendor twice panics: two flows for one vendor means one
-// of them is silently dead.
+// RegisterFlow declares how a vendor signs in. The two built-in grants register
+// themselves from init, as driver packages do with ai.RegisterAPI; anyone else
+// calls this. Registering one vendor twice panics: one flow would be dead.
 func RegisterFlow(vendorID string, f Flow) {
 	if vendorID == "" {
 		panic("auth: RegisterFlow with no vendor ID")

@@ -59,9 +59,7 @@ type TokenCounter interface {
 //   - The last block need not be closed. The stream ending closes it.
 //   - Usage is merged field by field, last non-zero wins, so a protocol that
 //     reports input at the start and output at the end may send them
-//     separately, and a zero never erases a figure already in hand. Each field
-//     must carry the running total for the call, not an increment: two deltas
-//     of ten output tokens leave the count at ten.
+//     separately. Each field carries the running total, not an increment.
 //   - StopReason, Model and ID are last-write-wins, and an empty one is
 //     ignored — a driver repeating them costs nothing.
 //   - Yielding an error ends the stream. Everything already yielded stays on
@@ -245,10 +243,8 @@ func RejectProtocolConfig(config Config, driver string) error {
 	return rejectProtocolValue(config.ProtocolConfig, driver, "native configuration")
 }
 
-// The two escape hatches are the same handful of lines twice — a type
-// assertion that must not fail quietly. Whichever side is being read, a value
-// the driver cannot use is the caller asking for something they will not get,
-// and saying so beats falling back to the zero value.
+// Both escape hatches share these helpers: a value the driver cannot use is an
+// error, not a silent fall back to the zero value.
 
 // protocolValueAs pulls one driver's own value out of the interface carrying
 // it. what names the side for the error message.

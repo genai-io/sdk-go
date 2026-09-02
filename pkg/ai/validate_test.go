@@ -13,9 +13,8 @@ func thinkingTurn(text, signature string) []Message {
 	}
 }
 
-// Anthropic on Vertex is the same body over a different door. A rule that names
-// only APIAnthropicMessages breaks thinking replay for every Vertex caller, and
-// breaks it by rejecting exactly what the protocol requires.
+// Anthropic on Vertex is the same body over a different door: a rule naming
+// only APIAnthropicMessages breaks thinking replay for every Vertex caller.
 func TestVertexIsHeldToTheAnthropicRules(t *testing.T) {
 	for name, tc := range map[string]struct {
 		api      API

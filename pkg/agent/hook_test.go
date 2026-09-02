@@ -8,13 +8,12 @@ import (
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 func TestTheGateSeesTheMessageThatRequestedTheCall(t *testing.T) {
 	var seen int
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
 		toolCall("call-1", "noop", `{}`),
 		text("fine"),
 	}}, ai.Model{ID: "stub", API: "stub"})
@@ -55,7 +54,7 @@ func TestABlockedCallBecomesAToolErrorTheModelCanRead(t *testing.T) {
 			return agent.Result{}, nil
 		})
 
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
 		toolCall("call-1", "rm", `{}`),
 		text("understood"),
 	}}, ai.Model{ID: "stub", API: "stub"})
@@ -95,7 +94,7 @@ func TestTheFirstRefusalIsFinal(t *testing.T) {
 		})
 
 	var asked []string
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "rm", `{}`),
 		text("understood"),
 	}}, ai.Model{ID: "stub", API: "stub"})
@@ -140,7 +139,7 @@ func TestHooksChainTheirRewrites(t *testing.T) {
 			return agent.TextResult(args.Text), nil
 		})
 
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "echo", `{"text":"one"}`),
 		text("done"),
 	}}, ai.Model{ID: "stub", API: "stub"})
@@ -179,7 +178,7 @@ func TestPreInferRunsOnEveryStep(t *testing.T) {
 		})
 
 	var sizes []int
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "echo", `{}`),
 		text("done"),
 	}}, ai.Model{ID: "stub", API: "stub"})
@@ -219,7 +218,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	}
 
 	var sent *agent.Inference
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{text("fine")}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("fine")}}, ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client,
 		agent.WithSystem("the agent's own prompt"),
 		agent.WithTools(tools...),
@@ -272,12 +271,10 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 
 // A PreInfer error ends the turn before the model is called at all. It is not
 // turned into a message the model gets to see: nothing had happened yet, and
-// inventing a turn to carry the error would be reporting something that never
-// took place. Nor is there a span — a call that never started is never ended,
-// and a consumer that saw one end without seeing it begin has a spinner it
-// cannot retire.
+// inventing a turn to carry the error would report something that never took
+// place. Nor is there a span — a call that never started is never ended.
 func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
-	driver := &scripted.Driver{Scripts: [][]ai.Delta{text("never reached")}}
+	driver := &scripted{Scripts: [][]ai.Delta{text("never reached")}}
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	var second bool
@@ -339,7 +336,7 @@ func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
 // that, not a copy of its output. MessageStart reports the same request,
 // so a consumer sees exactly what the hook saw.
 func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{text("done")}},
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("done")}},
 		ai.Model{ID: "stub", API: "stub"},
 		ai.WithMaxTokens(4096)) // a client default, applied after the hook
 
@@ -387,7 +384,7 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 // assembled fresh each time, so a hook is never handed its own previous edits.
 func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 	var prompts []string
-	client := ai.NewClientWithDriver(&scripted.Driver{
+	client := ai.NewClientWithDriver(&scripted{
 		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
 		Scripts: [][]ai.Delta{nil, text("second time lucky")},
 	}, ai.Model{ID: "stub", API: "stub"})
@@ -425,7 +422,7 @@ func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 
 // Several PreInfer hooks run in order, each seeing what the one before it did.
 func TestPreInferHooksChain(t *testing.T) {
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{text("fine")}},
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("fine")}},
 		ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
@@ -469,7 +466,7 @@ func TestAPreInferHookEditsTheCallItIsGiven(t *testing.T) {
 			return agent.TextResult("mild"), nil
 		})
 
-	driver := &scripted.Driver{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
+	driver := &scripted{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
 		ai.WithMaxTokens(4096), ai.WithEffort(ai.EffortLow))
 
@@ -532,7 +529,7 @@ func TestAPreInferHookEditsTheCallItIsGiven(t *testing.T) {
 // PostInfer runs on what came back, and edits it before it enters the
 // conversation — the seam a redaction or an annotation needs.
 func TestPostInferEditsWhatEntersTheConversation(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("my number is 555-1234")}},
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("my number is 555-1234")}},
 		agent.WithHooks(agent.Hook{
 			PostInfer: func(_ context.Context, resp *ai.Response) error {
 				for i, b := range resp.Content {
@@ -564,7 +561,7 @@ func TestPostInferEditsWhatEntersTheConversation(t *testing.T) {
 // A PostInfer that objects ends the turn without another attempt: it made a
 // decision, and repeating the call would be ignoring it.
 func TestAPostInferRefusalIsNotRetried(t *testing.T) {
-	driver := &scripted.Driver{Scripts: [][]ai.Delta{text("one"), text("two"), text("three")}}
+	driver := &scripted{Scripts: [][]ai.Delta{text("one"), text("two"), text("three")}}
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
@@ -605,7 +602,7 @@ func TestAPostInferRefusalIsNotRetried(t *testing.T) {
 // happens to look transient must still not be retried, and must not leave an
 // MessageEnd with no MessageStart before it.
 func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
-	driver := &scripted.Driver{Scripts: [][]ai.Delta{text("one"), text("two"), text("three")}}
+	driver := &scripted{Scripts: [][]ai.Delta{text("one"), text("two"), text("three")}}
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
@@ -639,9 +636,8 @@ func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
 }
 
 // The two answers a gate can give are not the same answer. A Decision that
-// blocks is policy: the model is told, in words written for it, and gets to try
-// something else. An error is infrastructure — the hook could not do its job —
-// and the exchange ends rather than asking the model to work around it.
+// blocks is policy: the model is told and gets to try something else. An error
+// is infrastructure — the hook could not do its job — and the exchange ends.
 func TestAGateRefusesWithADecisionAndFailsWithAnError(t *testing.T) {
 	ran := 0
 	tool := agent.ToolFunc("rm", "Delete things.",
@@ -669,7 +665,7 @@ func TestAGateRefusesWithADecisionAndFailsWithAnError(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ran = 0
-			d := &scripted.Driver{Scripts: [][]ai.Delta{
+			d := &scripted{Scripts: [][]ai.Delta{
 				toolCall("c1", "rm", `{}`),
 				text("all right then"),
 			}}
@@ -729,7 +725,7 @@ func TestAFailedToolHookStillClosesTheSpan(t *testing.T) {
 			}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+			a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 				toolCall("c1", "look", `{}`),
 				text("unreachable"),
 			}}, agent.WithTools(tool), agent.WithHooks(tc.hook))
@@ -763,11 +759,10 @@ func TestAFailedToolHookStillClosesTheSpan(t *testing.T) {
 
 // A hook runs on the goroutine ranging over Run, so a panic in one is the
 // caller's to recover — unlike a tool, which runs where nobody else can. What
-// the agent owes is to come out of it idle rather than stuck holding the
-// exchange.
+// the agent owes is to come out of it idle rather than holding the exchange.
 func TestAPanickingHookIsTheCallersToCatch(t *testing.T) {
 	first := true
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("never reached"), text("fine")}},
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("never reached"), text("fine")}},
 		agent.WithHooks(agent.Hook{
 			PreInfer: func(context.Context, *agent.Inference) error {
 				if first {
@@ -795,9 +790,8 @@ func TestAPanickingHookIsTheCallersToCatch(t *testing.T) {
 }
 
 // A hook that failed partway through a batch takes the batch with it. The calls
-// that had already opened a span still close — nobody is left holding a spinner
-// — and one that was vetted and will now never run says that, rather than
-// reporting a result it does not have.
+// that had already opened a span still close, and one that was vetted and will
+// now never run says so rather than reporting a result it does not have.
 func TestAFailedHookClosesTheCallsThatWillNeverRun(t *testing.T) {
 	ran := 0
 	tool := agent.ToolFunc("touch", "Touch something.",
@@ -806,7 +800,7 @@ func TestAFailedHookClosesTheCallsThatWillNeverRun(t *testing.T) {
 			return agent.TextResult("touched"), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "touch", Input: `{}`})},
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "touch", Input: `{}`})},

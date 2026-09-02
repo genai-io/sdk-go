@@ -10,11 +10,9 @@ import (
 
 // FileStore keeps credentials in one JSON file, readable only by its owner.
 //
-// It is the only thing this SDK writes to disk, and what it writes is a
-// sign-in that cannot be recovered without doing it again — so the file is
-// created 0600 and replaced by writing a temporary file and renaming it. A
-// torn write would leave every vendor's credential unreadable, not just the
-// one being saved.
+// What it holds cannot be recovered without signing in again, so the file is
+// created 0600 and replaced by writing a temporary file and renaming it: a torn
+// write would lose every vendor's credential, not just the one being saved.
 type FileStore struct {
 	path string
 	mu   sync.Mutex

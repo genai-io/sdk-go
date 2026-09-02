@@ -26,10 +26,8 @@ var ErrNotFound = errors.New("session: not found")
 // it has to be listable without reading any session's entries.
 type Meta struct {
 	ID string `json:"id"`
-	// Title and Model are the application's to set, through whatever its store
-	// offers for that — jsonl has SetMeta. Nothing in this package writes
-	// them: which model answered is on each Inference entry, where it can
-	// differ from one turn to the next.
+	// Title and Model are the application's to set through its store — jsonl
+	// has SetMeta. Which model answered is on each Inference entry instead.
 	Title     string    `json:"title,omitempty"`
 	Model     string    `json:"model,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -137,10 +135,8 @@ type Outcome struct {
 // Stamped is the entry as a store writes it: numbered, and timestamped if
 // whoever handed it over did not do so already.
 //
-// This and the two below are the store contract's own arithmetic, kept here
-// rather than in each store: a third implementation that got any of them subtly
-// different would be a store this package's tests pass on and nothing else
-// works with.
+// This and the two below are the store contract's own arithmetic, kept here so
+// a third implementation cannot get it subtly different.
 func (e Entry) Stamped(seq int64, at time.Time) Entry {
 	if e.Seq == 0 {
 		e.Seq = seq

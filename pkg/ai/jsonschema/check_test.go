@@ -8,9 +8,8 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
-// searchArgs is a tool's arguments carrying one of every constraint the
-// checker enforces, so the cases below are all measured against a schema a
-// caller would really have derived.
+// searchArgs carries one of every constraint the checker enforces, so the
+// cases below run against a schema a caller would really have derived.
 type searchArgs struct {
 	Query    string         `json:"query" description:"what to look for" minLength:"2" maxLength:"40" pattern:"^[a-z ]+$"`
 	Priority string         `json:"priority" enum:"low|medium|high"`
@@ -32,9 +31,8 @@ func TestCheckAccepts(t *testing.T) {
 		"every argument, filled in": `{"query":"go rocks","priority":"low","limit":5,
 			"tags":["a"],"filters":{"x":1},"nested":{"name":"n","note":"hi"}}`,
 
-		// The point of the exercise: a model on a provider that is not strict
-		// omits the arguments it has nothing to say about, and the schema says
-		// they are required because OpenAI's strict mode says so.
+		// A model on a provider that is not strict omits the arguments it has
+		// nothing to say about, though strict mode had them listed as required.
 		"the optional arguments left out": `{"query":"go","priority":"low"}`,
 		"an optional argument left out one level down": `{"query":"go","priority":"low",
 			"nested":{"name":"n"}}`,
@@ -121,9 +119,8 @@ func TestCheckRejects(t *testing.T) {
 	}
 }
 
-// A property is missing only when its own schema refuses null. Written by
-// hand, because that is the difference the derived schema hides behind
-// omitempty.
+// A property is missing only when its own schema refuses null. Written by hand,
+// because that is the difference the derived schema hides behind omitempty.
 func TestCheckReadsRequiredByWhatTheTypeAdmits(t *testing.T) {
 	for name, tc := range map[string]struct {
 		property map[string]any
@@ -160,8 +157,7 @@ func TestCheckReadsRequiredByWhatTheTypeAdmits(t *testing.T) {
 }
 
 // The drivers hand a schema through JSON before it comes back to be checked,
-// which turns every type union into []any of string. The reading of required
-// has to survive that.
+// which turns every type union into []any of string. Required must survive it.
 func TestCheckAfterAJSONRoundTrip(t *testing.T) {
 	raw, err := json.Marshal(jsonschema.For[searchArgs]())
 	if err != nil {

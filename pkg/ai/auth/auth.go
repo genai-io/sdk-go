@@ -28,8 +28,7 @@ func Available() []catalog.Vendor {
 			continue
 		}
 		// And one whose models live in a cloud project is unusable until it is
-		// told which. Reporting it as available and then refusing the first
-		// call is the same lie in two places.
+		// told which.
 		if _, err := Deployment(v); err != nil {
 			continue
 		}

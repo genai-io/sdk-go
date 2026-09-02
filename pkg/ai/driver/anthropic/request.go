@@ -23,11 +23,8 @@ type toolIDs struct {
 	n int
 
 	// unnamed holds the IDs minted for calls that arrived without one, and
-	// answered counts how many results have claimed one. Gemini leaves a
-	// function call's ID empty, so there is nothing to key a map on and two
-	// parallel calls would otherwise become the same Anthropic ID; matching by
-	// position instead pairs the nth unnamed result with the nth unnamed call,
-	// which is the order both arrive in.
+	// answered counts how many have been claimed. Gemini leaves a function call's
+	// ID empty, so the nth unnamed result is paired with the nth unnamed call.
 	unnamed  []string
 	answered int
 }
@@ -216,9 +213,8 @@ func (d *Driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphe
 // toolChoice maps the neutral constraint onto Anthropic's union. A nil result
 // leaves the field off, which is the API's own default.
 func toolChoice(req *ai.Request, native Options) *sdk.ToolChoiceUnionParam {
-	// disable_parallel_tool_use is sent only when it is on. Its zero value
-	// changes nothing, as the option documents, and an Anthropic-compatible
-	// host may reject a property it has never heard of.
+	// disable_parallel_tool_use is sent only when it is on: an
+	// Anthropic-compatible host may reject a property it has never heard of.
 	switch name, forced := req.ToolChoice.Tool(); {
 	case forced:
 		choice := &sdk.ToolChoiceToolParam{Name: name}
@@ -274,10 +270,8 @@ func messageBlocks(msg ai.Message, thinkingOn bool, ids *toolIDs) []sdk.ContentB
 				blocks = append(blocks, sdk.NewThinkingBlock(block.Signature, block.Text))
 			}
 		case ai.BlockReasoning:
-			// Redacted thinking, which the model produced but the safety
-			// classifier withheld. There is nothing to read, and it has to go
-			// back exactly as it arrived or a tool-use continuation is
-			// rejected.
+			// Redacted thinking: nothing to read, and it has to go back exactly
+			// as it arrived or a tool-use continuation is rejected.
 			if block.Reasoning != nil && block.Reasoning.EncryptedContent != "" && thinkingOn {
 				blocks = append(blocks, sdk.NewRedactedThinkingBlock(block.Reasoning.EncryptedContent))
 			}

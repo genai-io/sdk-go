@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 // The claim that lets a retry need no event of its own: it is two spans with
 // nothing appended between them, and that absence is the signal.
 func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{
+	a := newAgent(t, &scripted{
 		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
 		Scripts: [][]ai.Delta{nil, text("second time lucky")},
 	}, agent.WithRetry(3, 0))
@@ -62,7 +61,7 @@ func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 // on it as if the model had simply said nothing.
 func TestExhaustingRetriesReturnsTheFailure(t *testing.T) {
 	overloaded := &ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}
-	a := newAgent(t, &scripted.Driver{Errs: []error{overloaded, overloaded, overloaded}})
+	a := newAgent(t, &scripted{Errs: []error{overloaded, overloaded, overloaded}})
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err == nil {
@@ -81,7 +80,7 @@ func TestExhaustingRetriesReturnsTheFailure(t *testing.T) {
 
 // A call that failed still spent what it spent. Losing that hides real money.
 func TestAFailedCallStillReportsItsCost(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{
+	a := newAgent(t, &scripted{
 		Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}},
 		Scripts: [][]ai.Delta{
 			{{Usage: &ai.Usage{Input: 120, Output: 4}}},
@@ -168,7 +167,7 @@ func TestAStalledStreamIsRetried(t *testing.T) {
 // A watchdog nobody asked for does not fire: zero means no limit, and a slow
 // endpoint is not an error.
 func TestNoStreamTimeoutMeansNoWatchdog(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("fine")}},
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("fine")}},
 		agent.WithStreamTimeout(0, 0))
 
 	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
@@ -181,7 +180,7 @@ func TestNoStreamTimeoutMeansNoWatchdog(t *testing.T) {
 // a loop that counts attempts without ever waiting does exactly that.
 func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
 	const askedFor = 60 * time.Millisecond
-	a := newAgent(t, &scripted.Driver{
+	a := newAgent(t, &scripted{
 		Errs: []error{&ai.Error{
 			Kind: ai.KindRateLimit, Message: "slow down", RetryAfter: askedFor,
 		}},
@@ -202,7 +201,7 @@ func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
 // two budgets multiply: three attempts here on a client wrapping ai.Retry(3)
 // is nine model calls for one step.
 func TestAnAgentDoesNotRetryUnlessAsked(t *testing.T) {
-	d := &scripted.Driver{
+	d := &scripted{
 		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
 		Scripts: [][]ai.Delta{nil, text("would have been the retry")},
 	}

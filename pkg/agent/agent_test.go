@@ -11,15 +11,7 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
-)
-
-// The vocabulary these tests are written in: a scripted model, and the two
-// shapes of answer it gives.
-var (
-	text     = scripted.Text
-	toolCall = scripted.ToolCall
 )
 
 func newAgent(t *testing.T, d ai.Driver, opts ...agent.Option) *agent.Agent {
@@ -128,7 +120,7 @@ func assertSequence(t *testing.T, got []agent.Event, want []string) {
 // An exchange closes nothing, so a caller may take several in a row, and the
 // turns are numbered in order.
 func TestExchangesRunInSequence(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("first"), text("second")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("first"), text("second")}})
 
 	for i, want := range []string{"first", "second"} {
 		out, err := outcome(t, a, ai.UserMessage("ask"))
@@ -146,7 +138,7 @@ func TestExchangesRunInSequence(t *testing.T) {
 
 // A failure ends its own exchange and nothing more: the next one runs.
 func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{
+	a := newAgent(t, &scripted{
 		Errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "no key"}},
 		Scripts: [][]ai.Delta{nil, text("second time")},
 	})
@@ -173,7 +165,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 			return agent.TextResult("done"), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "wait", `{}`),
 		text("finished"),
 	}}, agent.WithTools(blocking))
@@ -210,7 +202,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 // Repeating an exchange is a for loop the caller writes, which is what lets it
 // decide the batching and what a failure means.
 func TestSeveralExchangesAreACallersLoop(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("first"), text("second")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("first"), text("second")}})
 
 	var answers []string
 	for _, batch := range [][]ai.Message{
@@ -239,7 +231,7 @@ func TestSeveralExchangesAreACallersLoop(t *testing.T) {
 // Collect folds an exchange for a caller that wants the answer rather than the
 // progress — the shape a subagent behind a tool call needs.
 func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("the answer")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("the answer")}})
 
 	out, err := outcome(t, a, ai.UserMessage("ask"))
 	if err != nil {
@@ -262,7 +254,7 @@ func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
 			return agent.TextResult("echoed"), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "echo", `{}`),
 		text("done"),
 	}}, agent.WithTools(echo))
@@ -304,7 +296,7 @@ func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
 // on the next inference, not mid-stream. A turn holds several inferences, so
 // "next" is a real moment inside one — and nothing pinned it.
 func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		toolCall("1", "before", "{}"),
 		text("done"),
 	}, Keep: true}
@@ -373,7 +365,7 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 			time.Sleep(30 * time.Millisecond)
 			return agent.TextResult("done"), nil
 		})
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		toolCall("1", "slow", "{}"),
 		toolCall("2", "slow", "{}"),
 		text("finished"),
@@ -436,7 +428,7 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
 	stray := ai.ToolFunc("stray", "configured on the client",
 		func(context.Context, struct{}) (string, error) { return "", nil })
-	driver := &scripted.Driver{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
+	driver := &scripted{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
 		ai.WithTools(stray))
 
@@ -454,9 +446,8 @@ func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
 }
 
 // Replacing the conversation while an exchange runs lands on it at once — that
-// is what the lock is for — but the announcement waits for the next exchange.
-// A MessagesReplaced in the middle of one would say the history the turn is
-// working from was thrown away, which is not what happened.
+// is what the lock is for — but the announcement waits for the next exchange:
+// mid-turn it would say the history the turn is working from was thrown away.
 func TestAReplacementDuringAnExchangeIsAnnouncedByTheNextOne(t *testing.T) {
 	var a *agent.Agent
 	swap := agent.ToolFunc("compact", "Replace the conversation.",
@@ -464,7 +455,7 @@ func TestAReplacementDuringAnExchangeIsAnnouncedByTheNextOne(t *testing.T) {
 			a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
 			return agent.TextResult("compacted"), nil
 		})
-	a = newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a = newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "compact", `{}`),
 		text("done"),
 		text("and again"),
@@ -500,12 +491,10 @@ func TestAReplacementDuringAnExchangeIsAnnouncedByTheNextOne(t *testing.T) {
 	}
 }
 
-// Replacing nothing with nothing happened to nobody. Announcing it records a
-// snapshot of an empty conversation, and a session that folded one came back
-// saying it was corrupt — which is what seeding an agent from a fresh session
-// does, in both of this repository's examples.
+// Replacing nothing with nothing happened to nobody: announcing it records a
+// snapshot of an empty conversation, which a fold then reads as corrupt.
 func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("hello"), text("still here")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("hello"), text("still here")}})
 	a.SetMessages(nil) // what session.Open hands back for a session that is new
 
 	events, err := collect(t, a, ai.UserMessage("go"))
@@ -538,7 +527,7 @@ func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
 // conversation ahead of the next exchange's own input: it was said first, and a
 // fold is only the conversation if that order is the truth.
 func TestMessagesQueuedBetweenExchangesEnterAheadOfTheNextInput(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("first"), text("second")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("first"), text("second")}})
 
 	if _, err := outcome(t, a, ai.UserMessage("one")); err != nil {
 		t.Fatalf("first turn: %v", err)

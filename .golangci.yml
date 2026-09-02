@@ -40,10 +40,10 @@ linters:
       # An ignored error should say so as `_ =`, with a comment giving the
       # reason. Reporting the blank assignment too would make that impossible.
       check-blank: false
-    misspell:
-      # No locale: this codebase writes British English on purpose, and
-      # pinning one would turn "recognise" and "honouring" into findings.
-      locale: ""
+    # misspell takes no locale here on purpose: this codebase writes British
+    # English, and pinning either one would turn "recognise" and "honouring"
+    # into findings. Omitting the key is how that is spelled — the schema
+    # accepts only US or UK, not an empty string.
 
   exclusions:
     generated: lax

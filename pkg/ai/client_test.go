@@ -15,10 +15,8 @@ type script struct {
 	err    error
 }
 
-// scripted is a Driver that replays a fixed run per call, so a test can say
-// exactly what the protocol layer hands up — including the shapes a live
-// provider only produces occasionally. The last script repeats, so a retry
-// test states only the attempts that differ.
+// scripted is a Driver that replays a fixed run per call. The last script
+// repeats, so a retry test states only the attempts that differ.
 type scripted struct {
 	scripts []script
 	calls   int
@@ -81,8 +79,7 @@ func collectEvents(t *testing.T, c *Client, msgs ...Message) ([]seen, *Response,
 }
 
 // Every content kind shares one start/delta/end lifecycle, and the index is
-// what tells two blocks apart. A consumer written against that shape has to be
-// able to trust it for every kind, not only for text.
+// what tells two blocks apart — for every kind, not only for text.
 func TestStreamGivesEveryBlockTheSameLifecycle(t *testing.T) {
 	call := ToolCall{ID: "c1", Name: "search", Input: `{"q":"go"}`}
 
@@ -210,8 +207,7 @@ func TestStreamAggregatesWhatTheDeltasCarried(t *testing.T) {
 }
 
 // A range loop may stop at any point, and a range function that yields after
-// its body returned false panics. Breaking on the block that a failure flushed
-// is the case that used to do exactly that.
+// its body returned false panics — including on the block a failure flushed.
 func TestAConsumerMayBreakOnAnyEvent(t *testing.T) {
 	runs := map[string]script{
 		"a stream that completes": {deltas: []Delta{
@@ -274,9 +270,8 @@ func TestAStreamThatEndsWithoutAResponseIsReported(t *testing.T) {
 	}
 }
 
-// A cancel is a cancel wherever it was noticed. Handing back a bare
-// context.Canceled would make IsKind(err, KindCanceled) false for the one
-// caught before the request and true for the one a driver reported.
+// A cancel is a cancel wherever it was noticed: a bare context.Canceled would
+// make IsKind(err, KindCanceled) false for the one caught before the request.
 func TestACancelBeforeTheRequestIsClassified(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

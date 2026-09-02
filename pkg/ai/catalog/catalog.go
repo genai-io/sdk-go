@@ -54,9 +54,8 @@ func Find(id string) (Vendor, bool) {
 	if v, ok := row(id); ok {
 		return v, true
 	}
-	// A spelling the table has since dropped. Honouring it costs one lookup
-	// and saves every configuration pinned to the old one; the model it
-	// resolves to still reports the current vendor ID, so nothing propagates.
+	// A spelling the table has since dropped. What it resolves to still reports
+	// the current vendor ID, so the old name goes no further than this lookup.
 	if to, ok := aliases[strings.ToLower(id)]; ok {
 		return row(to)
 	}

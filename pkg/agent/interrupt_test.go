@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 // Breaking out of the range ends the exchange: a consumer that stopped reading
 // has stopped caring about this turn.
 func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
-	driver := &scripted.Driver{Scripts: [][]ai.Delta{
+	driver := &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "never", `{}`),
 		text("unreachable"),
 	}}
@@ -51,7 +50,7 @@ func TestInterruptSaysWhenTheExchangeIsOver(t *testing.T) {
 			}
 			return agent.TextResult("let go"), nil
 		})
-	d := &scripted.Driver{Scripts: [][]ai.Delta{toolCall("1", "hold", "{}"), text("done")}}
+	d := &scripted{Scripts: [][]ai.Delta{toolCall("1", "hold", "{}"), text("done")}}
 	a := newAgent(t, d, agent.WithTools(held))
 
 	inTool := make(chan struct{})
@@ -92,7 +91,7 @@ func TestInterruptSaysWhenTheExchangeIsOver(t *testing.T) {
 // Between exchanges there is nothing to interrupt, and waiting on it must not
 // be a way to hang.
 func TestInterruptBetweenExchangesDoesNotBlock(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("hi")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("hi")}})
 
 	select {
 	case <-a.Interrupt():
@@ -202,7 +201,7 @@ func TestACancelledBatchStopsBeforeTheNextTool(t *testing.T) {
 			return agent.TextResult("done"), nil
 		}))
 
-	a = newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a = newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "step", Input: `{}`})},
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "step", Input: `{}`})},

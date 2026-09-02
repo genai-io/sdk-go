@@ -97,9 +97,8 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 
 		for delta, err := range c.driver.Stream(ctx, req) {
 			if err != nil {
-				// Closing first flushes the block the failure interrupted, and
-				// the consumer may well stop on it — yielding again after it
-				// said no panics the range loop.
+				// Flush the block the failure interrupted first; the consumer may
+				// stop on it, and yielding after it said no panics the range loop.
 				if !blocks.close() {
 					return
 				}
@@ -175,20 +174,19 @@ func Collect(events iter.Seq2[Event, error]) (*Response, error) {
 // be measured differently from how it is sent.
 func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option) (*Request, error) {
 	if err := ctx.Err(); err != nil {
-		// Classified rather than handed back bare, so IsKind(err, KindCanceled)
-		// answers the same whether the cancel was caught here or came back
-		// through a driver.
+		// Classified, so IsKind(err, KindCanceled) answers the same whether the
+		// cancel was caught here or reported by a driver.
 		return nil, &Error{Kind: KindCanceled, Err: err}
 	}
 	req := newRequest(c.model, messages, c.defaults, opts)
 	if err := c.model.validateStructure(req); err != nil {
 		return nil, err
 	}
+	// The system prompt travels outside Messages, so Repair never sees it.
+	req.System = sanitizeText(req.System)
 	// History repair is semantic preparation, not wire translation. Doing it
 	// once here makes exact counting, estimated counting, middleware and
-	// generation observe the same conversation. The system prompt reaches the
-	// wire outside Messages, so Repair never sees it and it is cleaned here.
-	req.System = sanitizeText(req.System)
+	// generation observe the same conversation.
 	req.Messages = Repair(req.Messages)
 
 	if err := c.model.validate(req); err != nil {

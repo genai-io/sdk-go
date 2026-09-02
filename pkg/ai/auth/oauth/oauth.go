@@ -48,9 +48,8 @@ func (t Token) Valid() bool {
 // starts with thirty seconds left can still finish after it has run out, and
 // the resulting 401 looks like a bad credential rather than a stale one.
 //
-// It is exported because it is the one answer to "is this still good": package
-// auth applies the same margin to a stored credential, and two packages
-// disagreeing about that by a few seconds is a failure nobody can reproduce.
+// It is exported because package auth applies the same margin to a stored
+// credential, and two packages disagreeing about it is unreproducible.
 const ExpiryMargin = 60 * time.Second
 
 // Prompt is what a person has to do to finish signing in: a page to open and,

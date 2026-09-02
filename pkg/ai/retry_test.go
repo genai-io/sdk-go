@@ -26,9 +26,8 @@ func retried(t *testing.T, attempts int, backoff time.Duration, scripts ...scrip
 
 func overloaded() error { return &Error{Kind: KindOverloaded, Status: 529, Message: "overloaded"} }
 
-// Retry's whole job is knowing what may be replayed. These are the four
-// conditions, and getting any of them wrong either duplicates an answer or
-// abandons a call that would have succeeded.
+// Retry's whole job is knowing what may be replayed: getting it wrong either
+// duplicates an answer or abandons a call that would have succeeded.
 func TestRetryReplaysOnlyWhatItMay(t *testing.T) {
 	ok := script{deltas: []Delta{{Block: TextBlock("ok")}}}
 
@@ -127,8 +126,7 @@ func TestRetryPrefersTheProvidersOwnHint(t *testing.T) {
 }
 
 // A cancel noticed while waiting out the backoff is the same failure as one a
-// driver reports, and callers switch on the kind rather than on where it came
-// from.
+// driver reports; callers switch on the kind, not on where it came from.
 func TestRetryClassifiesACancelDuringTheBackoff(t *testing.T) {
 	d := &scripted{scripts: []script{{err: overloaded()}}}
 	c := NewClientWithDriver(Wrap(d, Retry(5, time.Hour)), stubModel())

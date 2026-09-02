@@ -21,9 +21,8 @@ type errorEnvelope struct {
 
 // details reads a failure out of the SDK's error type. The body is parsed
 // rather than taken from the SDK's Error method, which renders the request
-// line, the status, the request ID and the raw JSON all at once: that makes a
-// message no caller wants to show, and it leaves the error type — the one
-// machine-readable part, and what prompt_too_long arrives as — unread.
+// line, status, request ID and raw JSON at once and still leaves the error
+// type — what prompt_too_long arrives as — unread.
 func details(err error) errs.Details {
 	var apiErr *sdk.Error
 	if !errors.As(err, &apiErr) {

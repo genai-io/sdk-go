@@ -73,8 +73,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		order := make(map[string]int)
 		emitted := make(map[string]bool)
 		// A refusal is finished off by an ordinary response.completed, whose
-		// stop reason would otherwise overwrite the one that says the model
-		// declined.
+		// stop reason would otherwise overwrite the refusal.
 		refused := false
 
 		for stream.Next() {
@@ -181,9 +180,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "response.incomplete":
 				// Incomplete and failed are event types of their own, not a
-				// status inside response.completed. Read only there, a request
-				// that ran into max_output_tokens arrives as an empty success:
-				// no usage, no stop reason and no error.
+				// status inside response.completed.
 				if !yield(finished(event.AsResponseIncomplete().Response, ai.StopMaxTokens), nil) {
 					return
 				}

@@ -17,10 +17,8 @@ type fakeConfig struct{ Project string }
 
 func (fakeConfig) ProtocolConfig() {}
 
-// The two escape hatches carry a driver's own value through an interface, so
-// the assertion is the only thing standing between a caller's setting and it
-// being ignored. Falling back to the zero value would look like the option
-// simply having had no effect.
+// The escape hatches carry a driver's own value through an interface, and
+// falling back to the zero value would look like the option having no effect.
 func TestAProtocolValueOfTheWrongTypeIsReportedRatherThanIgnored(t *testing.T) {
 	if got, err := ProtocolOptionsAs[fakeOptions](&Request{}); err != nil || got != (fakeOptions{}) {
 		t.Errorf("no options gave %v, %v; want the zero value and no error", got, err)

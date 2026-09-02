@@ -53,8 +53,7 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 			cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingBudget: budgetOf(level.Budget)}
 		case level.Effort == ai.EffortOff:
 			// A budget model reasons unless a zero budget says not to, so the
-			// off rung has to be said out loud rather than left out. Nothing is
-			// included with it, since there will be no thoughts.
+			// off rung has to be said out loud rather than left out.
 			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: budgetOf(0)}
 		}
 	}

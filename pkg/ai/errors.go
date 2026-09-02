@@ -255,11 +255,9 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 }
 
 // Classify assembles an *Error from what a driver has to hand. It applies the
-// checks in the order that keeps each from masking the next: an error already
-// classified is passed through untouched, a caller's cancel outranks whatever
-// the transport made of it, the message is read only where the answer could
-// live in it, then the status decides, and the transport has the last word
-// when there was no status at all.
+// checks in the order that keeps each from masking the next: an already
+// classified error, then a cancel, then the message, then the status, with the
+// transport as the last word.
 func Classify(driver string, status int, resp *http.Response, code, message string, err error) *Error {
 	var typed *Error
 	if errors.As(err, &typed) {
@@ -275,10 +273,8 @@ func Classify(driver string, status int, resp *http.Response, code, message stri
 		return out
 	}
 	// A context overflow arrives as an ordinary 400 with no machine-readable
-	// code, so the message is the only place it can be read from — but only
-	// where a 400 is what happened. A 401 or a 503 whose body happens to
-	// mention tokens is still an expired key or a busy server, and calling
-	// either a context overflow makes a retryable failure fatal.
+	// code, so the message is the only place to read it from — but only on a
+	// 400: a 401 or 503 mentioning tokens is a key or a busy server, not this.
 	if status == 0 || status == http.StatusBadRequest {
 		if kind, ok := ClassifyMessage(out.Message); ok {
 			out.Kind = kind

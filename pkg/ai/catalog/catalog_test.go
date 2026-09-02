@@ -24,9 +24,8 @@ var protocols = map[ai.API]string{
 
 // compatName reports which protocol a compat value belongs to, by its concrete
 // type. Compat is an any, so nothing but this stops a row from carrying the
-// wrong protocol's flags — the driver reads its own type out of the interface
-// and finds the zero value, which looks exactly like "this endpoint is
-// ordinary" rather than like a mistake.
+// wrong protocol's flags: the driver would read its own type out and find the
+// zero value, which looks like an ordinary endpoint rather than a mistake.
 func compatName(c any) string {
 	switch c.(type) {
 	case nil:
@@ -44,11 +43,10 @@ func compatName(c any) string {
 	}
 }
 
-// TestCatalogInvariants checks the properties the table is written on and
-// nothing enforces. Every row is hand-written data, and a mistake in one is
-// invisible until somebody's request comes back wrong — a duplicated Order
-// shuffles a picker, a mistyped Compat is read as the zero value and ignored,
-// a ladder with no dialect never reaches the wire at all.
+// TestCatalogInvariants checks the properties the hand-written table is written
+// on and nothing enforces: a duplicated Order shuffles a picker, a mistyped
+// Compat is read as the zero value and ignored, a ladder with no dialect never
+// reaches the wire.
 func TestCatalogInvariants(t *testing.T) {
 	seenID := map[string]string{}
 	seenOrder := map[int]string{}
@@ -114,10 +112,8 @@ func checkVendorProtocol(t *testing.T, v Vendor) {
 
 func checkVendorCredential(t *testing.T, v Vendor) {
 	t.Helper()
-	// A vendor with no credential variable is either local, signed into
-	// through a browser, or authenticated by a cloud's own credentials. Which
-	// of those it is cannot be guessed from the row, so the row has to say —
-	// otherwise the caller meets a 401 with nothing to act on.
+	// A vendor with no credential variable is local, browser-signed-in, or on a
+	// cloud's own credentials. The row has to say which; nothing else can.
 	if len(v.KeyEnv) == 0 && v.Note == "" && v.Deployment == nil {
 		t.Error("no KeyEnv and no Note: a vendor that takes no API key has to say what it takes instead")
 	}
@@ -127,8 +123,7 @@ func checkVendorCredential(t *testing.T, v Vendor) {
 		}
 	}
 	// The two halves of a deployment have to agree: DeploymentEnv is what a
-	// caller is told to set and Deployment is what actually reads it, and a
-	// row with only one of them either asks for nothing or reads nothing.
+	// caller is told to set and Deployment is what reads it.
 	if v.NeedsDeployment() != (v.Deployment != nil) {
 		t.Errorf("DeploymentEnv %v and Deployment %v disagree about whether this vendor needs one",
 			v.DeploymentEnv, v.Deployment != nil)
@@ -145,9 +140,8 @@ func checkVendorEndpoint(t *testing.T, v Vendor) {
 			t.Errorf("BaseURL = %q, want an absolute URL with a scheme and host", v.BaseURL)
 		}
 	}
-	// Every vendor reached with a key has to be redirectable: a gateway, a
-	// proxy, a regional host and a recorded test all depend on it, and a
-	// vendor without the variable is the one nobody can point elsewhere.
+	// Every vendor reached with a key has to be redirectable: a gateway, a proxy,
+	// a regional host and a recorded test all depend on it.
 	if len(v.KeyEnv) > 0 && v.BaseURLEnv == "" {
 		t.Error("has a credential variable but no BaseURLEnv, so its host cannot be redirected")
 	}
@@ -168,11 +162,9 @@ func checkVendorReasoning(t *testing.T, v Vendor) {
 		checkLadder(t, "model "+m.ID, m.Reasoning)
 	}
 
-	// A ladder is only a vocabulary; the dialect is what puts a rung on the
-	// wire. On a Chat Completions endpoint that dialect is Compat.Thinking,
-	// and its zero value means "this endpoint has no reasoning switch" — so a
-	// ladder without one is a promise the driver drops on the floor, with no
-	// error anywhere.
+	// A ladder is only a vocabulary; the dialect is what puts a rung on the wire.
+	// On Chat Completions that is Compat.Thinking, whose zero value means "no
+	// reasoning switch" — so a ladder without one is dropped, silently.
 	if v.API != ai.APIOpenAIChat {
 		return
 	}
@@ -305,9 +297,8 @@ func TestABareModelNameSkipsVendorsNeedingDeployment(t *testing.T) {
 }
 
 // TestStaleReportsUnverifiedEntries covers the freshness check the Verified
-// column exists for. Nothing in this SDK calls it at runtime; it is the tool a
-// maintainer runs to find the rows that have gone unchecked, and the reason
-// every row carries a date.
+// column exists for. Nothing calls it at runtime; it is the tool a maintainer
+// runs to find rows that have gone unchecked.
 func TestStaleReportsUnverifiedEntries(t *testing.T) {
 	newest := ""
 	for _, v := range All() {
@@ -421,9 +412,8 @@ func TestInferOpenAI(t *testing.T) {
 		"gpt-4":         {in: ai.Model{ID: "gpt-4-0613"}, window: 8_192, output: 8_192},
 		"gpt-3.5 turbo": {in: ai.Model{ID: "gpt-3.5-turbo-0125"}, window: 16_385, output: 4_096},
 		"o3":            {in: ai.Model{ID: "o3-mini"}, window: 200_000, output: 100_000},
-		// The prefix this replaced sized a point release nobody has published
-		// at the original GPT-4's 8k, which is wrong by two orders and acted
-		// on silently.
+		// A point release nobody has published must not be sized at the original
+		// GPT-4's 8k, which is wrong by two orders.
 		"an unpublished gpt-4 point release": {in: ai.Model{ID: "gpt-4.5-preview"}},
 		"an ID from another vendor entirely": {in: ai.Model{ID: "openai.gpt-oss-120b-1:0"}},
 	}
@@ -502,9 +492,8 @@ func TestInferMoonshot(t *testing.T) {
 	}{
 		"a generation":   {in: ai.Model{ID: "kimi-k3-turbo"}, window: 1_048_576},
 		"the one before": {in: ai.Model{ID: "kimi-k2-0905"}, window: 262_144},
-		// The suffix is a whole token: "8k" lives inside "128k", and reading
-		// it as a substring sized a 128k model at 8k as soon as the cases were
-		// reordered.
+		// The suffix is a whole token: "8k" lives inside "128k", so a substring
+		// test sizes a 128k model at 8k.
 		"a 128k suffix":             {in: ai.Model{ID: "moonshot-v1-128k"}, window: 131_072, output: 8_192},
 		"a 32k suffix":              {in: ai.Model{ID: "moonshot-v1-32k"}, window: 32_768, output: 8_192},
 		"an 8k suffix":              {in: ai.Model{ID: "moonshot-v1-8k"}, window: 8_192, output: 3_000},
@@ -595,10 +584,8 @@ func runInfer(t *testing.T, infer func(ai.Model) ai.Model, tests map[string]stru
 	}
 }
 
-// TestAVendorProviderKeepsWhatTheCatalogKnows is the defect a consumer had to
-// work around: a provider built from a vendor handed back live-listed models
-// carrying nothing but an ID, so every one of them had to be resolved through
-// the catalog a second time.
+// TestAVendorProviderKeepsWhatTheCatalogKnows pins that a provider built from a
+// vendor hands back live-listed models already carrying what the catalog knows.
 func TestAVendorProviderKeepsWhatTheCatalogKnows(t *testing.T) {
 	v, ok := Find("openai")
 	if !ok {

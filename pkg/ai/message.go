@@ -45,9 +45,8 @@ const (
 	BlockToolResult BlockType = "tool_result"
 
 	// BlockReasoning is reasoning state you cannot read, in Block.Reasoning.
-	// Assistant turns only: the OpenAI Responses protocol carries it, and so
-	// does Anthropic's redacted thinking, which is thinking the model produced
-	// and encrypted rather than showed.
+	// Assistant turns only: the OpenAI Responses protocol carries it, as does
+	// Anthropic's redacted thinking.
 	BlockReasoning BlockType = "reasoning"
 )
 

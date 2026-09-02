@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
@@ -24,7 +23,7 @@ func TestToolEndCarriesTheToolsOwnResult(t *testing.T) {
 			return agent.TextResult("raw"), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("call-1", "echo", `{}`),
 		text("done"),
 	}}, agent.WithTools(echo), agent.WithHooks(agent.Hook{
@@ -73,7 +72,7 @@ func TestParallelToolsEndInCompletionOrderButRecordInSourceOrder(t *testing.T) {
 			return agent.TextResult("done: " + args.Key), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "wait", Input: `{"key":"a"}`})},
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "wait", Input: `{"key":"b"}`})},
@@ -116,7 +115,7 @@ func TestParallelToolsEndInCompletionOrderButRecordInSourceOrder(t *testing.T) {
 }
 
 func TestAnUnknownToolIsReportedRatherThanFatal(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("call-1", "nosuchtool", `{}`),
 		text("sorry"),
 	}})
@@ -139,7 +138,7 @@ func TestBadArgumentsAreCaughtBeforeTheToolRuns(t *testing.T) {
 			return agent.Result{}, nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("call-1", "strict", `{"count":"not a number"}`),
 		text("retrying"),
 	}}, agent.WithTools(strict))
@@ -162,7 +161,7 @@ func TestAToolReportsWhileItWorks(t *testing.T) {
 			return agent.TextResult("built"), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "build", `{}`),
 		text("done"),
 	}}, agent.WithTools(slow))
@@ -274,7 +273,7 @@ func TestASequentialToolRunsAloneThroughADecorator(t *testing.T) {
 			return agent.TextResult("ok"), nil
 		})
 
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "touch", Input: "{}"})},
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "touch", Input: "{}"})},
@@ -357,7 +356,7 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 			return agent.TextResult("still here"), nil
 		})
 
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "boom", Input: "{}"})},
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "fine", Input: "{}"})},
@@ -405,10 +404,8 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 }
 
 // SetTools takes effect on the next inference, and a batch answers the last
-// one: the calls a model already asked for are run against the toolset it was
-// offered. A gate that narrows the toolset as it vets the first call would
-// otherwise turn the second into "no tool named that", which the model would
-// read as its own mistake.
+// one. A gate that narrowed the toolset while vetting the first call would
+// otherwise turn the second into "no tool named that".
 func TestAToolsetChangedMidBatchStillAnswersTheBatch(t *testing.T) {
 	var a *agent.Agent
 	read := agent.ToolFunc("read", "Read a file.",
@@ -416,7 +413,7 @@ func TestAToolsetChangedMidBatchStillAnswersTheBatch(t *testing.T) {
 	write := agent.ToolFunc("write", "Write a file.",
 		func(context.Context, struct{}) (agent.Result, error) { return agent.TextResult("written"), nil })
 
-	d := &scripted.Driver{Scripts: [][]ai.Delta{
+	d := &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "read", Input: `{}`})},
 			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "write", Input: `{}`})},
@@ -454,9 +451,8 @@ func TestAToolsetChangedMidBatchStillAnswersTheBatch(t *testing.T) {
 }
 
 // A report is droppable rather than something a tool can be held up by: it
-// goes if the exchange is listening, and is dropped if it is not. Nothing about
-// that may block the tool or panic, including a report that arrives after the
-// call it belongs to has been answered.
+// goes if the exchange is listening and is dropped if it is not, without ever
+// blocking the tool or panicking — a report that arrives late included.
 func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 	var late context.Context
 	tool := agent.ToolFunc("scan", "Scan things.",
@@ -465,7 +461,7 @@ func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 			agent.Report(ctx, agent.TextResult("halfway"))
 			return agent.TextResult("done scanning"), nil
 		})
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "scan", `{}`),
 		text("finished"),
 	}}, agent.WithTools(tool))
@@ -492,8 +488,7 @@ func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 	}
 
 	// The exchange is over and its channel is nobody's now. Far more reports
-	// than it could hold, from the goroutine that would deadlock if any of them
-	// waited to be read.
+	// than it could hold, from a goroutine that would deadlock if any blocked.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

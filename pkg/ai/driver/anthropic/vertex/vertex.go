@@ -49,21 +49,16 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	// reaches the network to mint a token, so a failure here is a credential
 	// problem, not a request one.
 	//
-	// The context is the process's own: this is construction, not a call, and
-	// the seam a driver factory is built through carries no context. A caller
-	// who needs one can mint the credential itself and hand the client over
-	// through anthropic.NewWithClient.
+	// The context is the process's own: the driver-factory seam carries none. A
+	// caller who needs one mints the credential and uses anthropic.NewWithClient.
 	auth, err := googleAuth(context.Background(), region, deployment.Project)
 	if err != nil {
 		return nil, err
 	}
 
-	// The auth option carries a base URL and an http.Client of its own, so it
-	// goes first and the Config's endpoint and headers land over it. Its
-	// http.Client is the one part that cannot be layered: the Google token is
-	// injected by that client's transport, so a Config.HTTPClient would replace
-	// the credential rather than wrap it, and is dropped here instead of
-	// silently removing the authentication.
+	// The auth option goes first so the Config's endpoint and headers land over
+	// it. Its http.Client is the one part that cannot be layered — the Google
+	// token rides that transport — so a Config.HTTPClient is dropped instead.
 	cfg.HTTPClient = nil
 	opts := anthropic.ClientOptions(cfg, auth)
 	return anthropic.NewWithClient(anthropic.NewSDKClient(opts...), cfg, ai.APIAnthropicVertex)

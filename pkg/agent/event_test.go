@@ -11,13 +11,12 @@ import (
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 // The plain exchange from the design's first sequence diagram.
 func TestTurnEmitsTheDocumentedTextSequence(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("hello there")}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("hello there")}})
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -55,7 +54,7 @@ func TestTurnWithAToolRunsASecondInference(t *testing.T) {
 			return agent.TextResult("echoed: " + args.Text), nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("call-1", "echo", `{"text":"hi"}`),
 		text("done"),
 	}}, agent.WithTools(echo))
@@ -103,7 +102,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 		also func(*testing.T, []agent.Event)
 	}{
 		{"the model answered", func(t *testing.T) *agent.Agent {
-			return newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{text("done")}})
+			return newAgent(t, &scripted{Scripts: [][]ai.Delta{text("done")}})
 		}, agent.StopEndTurn, nil},
 
 		{"the step budget ran out", func(t *testing.T) *agent.Agent {
@@ -115,7 +114,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 			for i := range scripts {
 				scripts[i] = toolCall(fmt.Sprintf("c%d", i), "again", `{}`)
 			}
-			client := ai.NewClientWithDriver(&scripted.Driver{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
+			client := ai.NewClientWithDriver(&scripted{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
 			a, err := agent.New(client, agent.WithTools(again), agent.WithMaxSteps(2))
 			if err != nil {
 				t.Fatalf("New: %v", err)
@@ -132,7 +131,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 				func(context.Context, struct{}) (agent.Result, error) {
 					return agent.Result{Content: ai.TextContent("finished"), Terminate: true}, nil
 				})
-			return newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{toolCall("c1", "finish", `{}`)}},
+			return newAgent(t, &scripted{Scripts: [][]ai.Delta{toolCall("c1", "finish", `{}`)}},
 				agent.WithTools(done))
 		}, agent.StopTerminated, func(t *testing.T, events []agent.Event) {
 			if n := steps(events); n != 1 {
@@ -141,7 +140,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 		}},
 
 		{"the model call failed", func(t *testing.T) *agent.Agent {
-			return newAgent(t, &scripted.Driver{Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}}})
+			return newAgent(t, &scripted{Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}}})
 		}, agent.StopError, func(t *testing.T, events []agent.Event) {
 			last := events[len(events)-1].(agent.TurnEnd)
 			if !ai.IsAuth(last.Err) {
@@ -171,7 +170,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 // A failed attempt still spent whatever it spent. Folding the retry into the
 // step made that visible: usage now accumulates per attempt, not per step.
 func TestAFailedAttemptStillCountsWhatItCost(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{
+	a := newAgent(t, &scripted{
 		Errs: []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
 		Scripts: [][]ai.Delta{
 			{{Usage: &ai.Usage{Input: 40, Output: 0}}}, // the attempt that failed
@@ -215,7 +214,7 @@ func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 			return agent.Result{Content: ai.TextContent("done"), Terminate: true}, nil
 		})
 
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		{
 			{Block: ai.TextBlock("wrapping up")},
 			{EndBlock: true},
@@ -256,7 +255,7 @@ func TestATruncatedAnswerSaysSo(t *testing.T) {
 		{EndBlock: true},
 		{StopReason: ai.StopMaxTokens},
 	}
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{cut}})
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{cut}})
 
 	events, err := collect(t, a, ai.UserMessage("write me an essay"))
 	if err != nil {
@@ -305,7 +304,7 @@ func TestEveryStopReasonIsTranslatedDeliberately(t *testing.T) {
 			continue
 		}
 		t.Run(string(reason), func(t *testing.T) {
-			d := &scripted.Driver{Scripts: [][]ai.Delta{{
+			d := &scripted{Scripts: [][]ai.Delta{{
 				{Block: ai.TextBlock("as far as it got")},
 				{EndBlock: true},
 				{StopReason: reason},
@@ -363,7 +362,7 @@ func stopReasonsDeclaredIn(t *testing.T, path string) []ai.StopReason {
 // And when nothing refuses, the span is announced with the request that was
 // actually sent — every hook's edit included.
 func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: [][]ai.Delta{text("fine")}},
+	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("fine")}},
 		ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
@@ -423,11 +422,10 @@ func TestAMessageUpdateSaysWhatFragmentItCarries(t *testing.T) {
 }
 
 // A turn's own failure travels on TurnEnd and nowhere else. The iterator's
-// error is for what happens outside a turn — ErrBusy — so that a caller who
-// renders both does not report one failure twice, which is what made the chat
-// example print "(canceled)" and then "context canceled" on every Ctrl-C.
+// error is for what happens outside a turn — ErrBusy — so a caller rendering
+// both does not report one failure twice.
 func TestAFailedTurnIsReportedOnceAndOnTheStream(t *testing.T) {
-	a := newAgent(t, &scripted.Driver{Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}}})
+	a := newAgent(t, &scripted{Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}}})
 
 	var events []agent.Event
 	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
@@ -450,16 +448,15 @@ func TestAFailedTurnIsReportedOnceAndOnTheStream(t *testing.T) {
 }
 
 // Every event says which exchange it belongs to, so a consumer following
-// several does not have to remember which one it is in. MessageUpdate was the
-// exception for a while, and a fragment that cannot say what it belongs to is
-// one an interface has to guess about.
+// several does not have to remember which one it is in: a fragment that cannot
+// say what it belongs to is one an interface has to guess about.
 func TestEveryEventCarriesItsTurn(t *testing.T) {
 	slow := agent.ToolFunc("look", "Look something up.",
 		func(ctx context.Context, _ struct{}) (agent.Result, error) {
 			agent.Report(ctx, agent.TextResult("halfway"))
 			return agent.TextResult("found it"), nil
 		})
-	a := newAgent(t, &scripted.Driver{Scripts: [][]ai.Delta{
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
 		toolCall("c1", "look", `{}`),
 		text("here it is"),
 		text("and again"),

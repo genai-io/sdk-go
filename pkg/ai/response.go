@@ -36,14 +36,12 @@ type Usage struct {
 	CacheRead  int `json:"cache_read,omitempty"`
 
 	// CacheWrite1h is the slice of CacheWrite written to a long-lifetime entry,
-	// which is billed at twice the input rate rather than the cache-write one.
-	// It travels separately because the totals cannot be told apart afterwards,
-	// and pricing a long-cache turn at the short rate understates it.
+	// billed at twice the input rate rather than the cache-write one. It travels
+	// separately because the two cannot be told apart afterwards.
 	CacheWrite1h int `json:"cache_write_1h,omitempty"`
 
 	// Reasoning is the tokens spent thinking, where the provider reports them
-	// apart from the answer. Cost prices Output, not this, so it is diagnostic:
-	// how much of a turn went on working the caller never saw.
+	// apart from the answer. Cost prices Output, not this, so it is diagnostic.
 	Reasoning int `json:"reasoning,omitempty"`
 }
 

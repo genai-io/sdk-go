@@ -3,23 +3,61 @@ package session_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/agent/session/memory"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-var text = scripted.Text
+// scripted is a model that streams a script per call — enough for a session
+// test, which cares about the events an exchange produced and not about how
+// the model produced them.
+type scripted struct {
+	scripts [][]ai.Delta
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *scripted) Name() string { return "scripted" }
+
+func (d *scripted) Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
+	d.mu.Lock()
+	n := d.calls
+	d.calls++
+	d.mu.Unlock()
+	return func(yield func(ai.Delta, error) bool) {
+		if n >= len(d.scripts) {
+			yield(ai.Delta{}, errors.New("scripted: no script for call "+strconv.Itoa(n)))
+			return
+		}
+		for _, delta := range d.scripts[n] {
+			if !yield(delta, nil) {
+				return
+			}
+		}
+	}
+}
+
+func text(s string) []ai.Delta {
+	return []ai.Delta{
+		{Block: ai.TextBlock(s)},
+		{EndBlock: true},
+		{StopReason: ai.StopEndTurn},
+	}
+}
 
 func newAgent(t *testing.T, history []ai.Message, scripts ...[]ai.Delta) *agent.Agent {
 	t.Helper()
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(&scripted{scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client, agent.WithMessages(history))
 	if err != nil {
 		t.Fatalf("New: %v", err)

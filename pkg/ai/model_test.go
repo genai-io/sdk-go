@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// fullModel sets every field to something non-zero, so that a field the codec
-// forgets shows up as a missing key rather than as a zero value nobody looks
-// at. Adding a field to Model means adding it here.
+// fullModel sets every field non-zero, so a field the codec forgets shows up
+// as a missing key. Adding a field to Model means adding it here.
 func fullModel() Model {
 	return Model{
 		ID:            "claude-opus-5",
@@ -34,10 +33,8 @@ func fullModel() Model {
 	}
 }
 
-// The codec used to restate Model's fields by hand, twice, so a field added to
-// the struct was dropped from JSON without a word. Counting the keys is what
-// makes that a failing test rather than a bug found in a catalog file months
-// later.
+// Counting the encoded keys against the struct's fields is what catches a
+// field the codec does not write, rather than a catalog file failing later.
 func TestModelSurvivesAJSONRoundTrip(t *testing.T) {
 	want := fullModel()
 
@@ -115,9 +112,8 @@ func TestModelCompatIsRebuiltAsItsProtocolsType(t *testing.T) {
 	}
 }
 
-// A Model handed to a caller is a snapshot: the catalog's rows are a
-// package-level table, so an aliased slice or map would let one caller edit
-// what every other one reads.
+// A Model handed to a caller is a snapshot: the catalog's rows are a package
+// table, so an aliased slice or map lets one caller edit what all others read.
 func TestCloneDetachesEveryMutableField(t *testing.T) {
 	original := fullModel()
 	clone := original.Clone()
@@ -133,9 +129,8 @@ func TestCloneDetachesEveryMutableField(t *testing.T) {
 	}
 }
 
-// ResolveLevel is what happens when a caller asks for a rung this model does
-// not sell. Snapping up rather than down is deliberate: asking for more
-// thinking and getting less is the failure nobody notices.
+// ResolveLevel answers a caller asking for a rung this model does not sell. It
+// snaps up: asking for more thinking and getting less goes unnoticed.
 func TestResolveLevelSnapsToARungTheModelHas(t *testing.T) {
 	laddered := Model{Reasoning: []ReasoningLevel{
 		{Effort: EffortOff, Value: ""},
@@ -174,9 +169,8 @@ func TestResolveLevelSnapsToARungTheModelHas(t *testing.T) {
 	}
 }
 
-// Vertex serves the Anthropic Messages body, so every rule written about that
-// body has to recognise it. A rule that names one of the two silently stops
-// applying the moment a model moves between them.
+// Vertex serves the Anthropic Messages body, so every rule about that body has
+// to recognise it — one naming a single protocol stops applying silently.
 func TestTheAnthropicFamilyIsBothOfItsProtocols(t *testing.T) {
 	for api, want := range map[API]bool{
 		APIAnthropicMessages: true,

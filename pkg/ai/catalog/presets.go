@@ -177,9 +177,8 @@ func gemini(id, name string) ai.Model {
 }
 
 // priced attaches a rate card, by model ID, to a line of models two vendors
-// share. The rows themselves say nothing about price because the two bill
-// differently — the same Claude costs one thing from Anthropic and another
-// through a Google contract — and that is the only thing they differ in.
+// share. Price is the only thing they differ in: the same Claude costs one
+// thing from Anthropic and another through a Google contract.
 func priced(models []ai.Model, prices map[string]ai.Pricing) []ai.Model {
 	out := make([]ai.Model, len(models))
 	for i, m := range models {
@@ -199,11 +198,10 @@ const (
 	vertexRegionEnv  = "CLOUD_ML_REGION"
 )
 
-// vertexDeployment reads the project and region a Vertex-served model lives
-// in. The project has no default worth guessing: without one the request goes
-// to nobody's project, so it is refused here rather than 400 later. The
-// credential is not among these — Vertex takes Application Default
-// Credentials, not a variable.
+// vertexDeployment reads the project and region a Vertex-served model lives in.
+// The project has no default worth guessing, so a missing one is refused here
+// rather than 400 later. Vertex takes Application Default Credentials, so no
+// credential is among these.
 func vertexDeployment(env func(string) string) (ai.ProtocolConfig, error) {
 	project := strings.TrimSpace(env(vertexProjectEnv))
 	if project == "" {

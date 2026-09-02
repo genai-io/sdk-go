@@ -12,8 +12,7 @@ import (
 
 // TestMergeListing pins the rule the whole package exists for: the host is
 // authoritative about what exists and about any figure it reported, and the
-// catalog fills the rest. Getting it backwards either strips a model of the
-// quirks it needs to work, or overwrites a live figure with a stale one.
+// catalog fills the rest.
 func TestMergeListing(t *testing.T) {
 	base := ai.Model{
 		ID: "acme-pro", Name: "Acme Pro",
@@ -91,10 +90,8 @@ func TestMergeListingDoesNotAliasEitherSide(t *testing.T) {
 	}
 }
 
-// TestModelResolvesAnUnlistedID is the defect this package had: an ID the
-// endpoint serves but the baseline does not list came back carrying nothing
-// but its name, so every caller had to resolve it a second time somewhere
-// else.
+// TestModelResolvesAnUnlistedID pins that an ID the endpoint serves but the
+// baseline does not list still comes back resolved, not bare.
 func TestModelResolvesAnUnlistedID(t *testing.T) {
 	p := New(Config{
 		ID:  "acme",

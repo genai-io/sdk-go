@@ -15,10 +15,8 @@ type Pricing struct {
 }
 
 // PricingTier is a rate card that takes over above a prompt-size threshold. It
-// states only the rates it changes: a rate left at zero keeps the base card's,
-// so a tier that doubles input alone does not quietly make output free. A rate
-// that genuinely becomes zero above the threshold cannot be said this way, and
-// no published card does that.
+// states only the rates it changes: one left at zero keeps the base card's, so
+// a rate that genuinely becomes zero cannot be said this way. None is published.
 type PricingTier struct {
 	// AboveInputTokens is the total input token count this tier applies past.
 	AboveInputTokens int     `json:"above_input_tokens"`

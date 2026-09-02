@@ -22,16 +22,11 @@ import (
 // prepends DefaultClientOptions — and that reads OPENAI_API_KEY,
 // OPENAI_BASE_URL, OPENAI_ORG_ID and OPENAI_PROJECT_ID out of the process
 // environment. A Config is meant to be the whole truth about where a request
-// goes and what it presents; a server holding one tenant's credential per
-// client cannot have another arrive from the ambient environment. Overriding
-// each variable as it is discovered would leave the next one to leak, so none
-// is ever read.
+// goes and what it presents, so none of them is ever read.
 func NewClient(cfg ai.Config) sdk.Client {
 	opts := clientOptions(cfg)
-	// Only the three services the two drivers use are wired. Reaching through
-	// this client for a fourth would find one carrying no options at all, and
-	// fail on its first call — loudly, rather than by quietly taking a
-	// credential from somewhere else.
+	// Only the three services the two drivers use are wired; a fourth would find
+	// a client carrying no options and fail loudly on its first call.
 	client := sdk.Client{Options: opts}
 	client.Chat = sdk.NewChatService(opts...)
 	client.Models = sdk.NewModelService(opts...)
@@ -51,9 +46,8 @@ func clientOptions(cfg ai.Config) []option.RequestOption {
 	if url := cfg.URL(); url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
-	// Keyless endpoints exist — a local Ollama ignores the header entirely — and
-	// they now get no credential header at all rather than a placeholder, since
-	// there is no longer an environment default for the placeholder to beat.
+	// Keyless endpoints exist — a local Ollama ignores the header entirely — so
+	// no key means no credential header rather than a placeholder.
 	if cfg.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(cfg.APIKey))
 	}

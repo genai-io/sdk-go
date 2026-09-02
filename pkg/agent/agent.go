@@ -44,10 +44,8 @@ type Agent struct {
 	tools    []Tool
 	hooks    []Hook
 	// replaced and pending are the two ways the conversation changes from
-	// outside an exchange, waiting for one to announce them: a replacement at
-	// the start of the next exchange, since everything before it is gone, and
-	// queued messages at the next step boundary, or ahead of the next
-	// exchange's own input when no step boundary is left.
+	// outside an exchange: a replacement is announced at the start of the next
+	// one, queued messages at the next step boundary or ahead of its input.
 	replaced bool
 	pending  []ai.Message
 	// stopTurn ends the turn in flight. Never nil: between turns it is a
@@ -177,8 +175,7 @@ func WithRetry(attempts int, backoff time.Duration) Option {
 }
 
 // New builds an agent on a model handle, which is the parameter because an
-// agent without one can do nothing. A missing client is an error rather than a
-// panic: a library that panics takes its caller's process down with it.
+// agent without one can do nothing. A missing client is an error, not a panic.
 func New(client *ai.Client, opts ...Option) (*Agent, error) {
 	if client == nil {
 		return nil, errors.New("agent: a client is required")
@@ -220,11 +217,9 @@ func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.setMessages(msgs)
 }
 
-// setMessages is the rule WithMessages and SetMessages both follow. Replacing
-// a conversation is not appending to it and anything watching has to be told
-// which happened — but replacing nothing with nothing happened to nobody, and
-// announcing it records a snapshot of an empty conversation, which is what left
-// a session seeded from its own empty history unreadable.
+// setMessages is the rule WithMessages and SetMessages both follow: a
+// replacement is announced, but replacing nothing with nothing is not — that
+// happened to nobody, and announcing it records an empty conversation.
 //
 // The caller holds a.mu, except at construction, where there is nobody to race.
 func (a *Agent) setMessages(msgs []ai.Message) {
@@ -252,9 +247,8 @@ func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 // AddMessages puts messages into the conversation from outside an exchange —
 // typed while the model worked, or routed in from elsewhere. They enter at the
 // next step boundary, which is the one place it is safe to change what the
-// model is about to see; queued after the last one, they enter ahead of the
-// next exchange's own input, which is the order they were said in. Between
-// exchanges, pass them to Run instead.
+// model is about to see, or ahead of the next exchange's own input once no step
+// boundary is left. Between exchanges, pass them to Run instead.
 func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -365,8 +359,7 @@ func toolNamed(tools []Tool, name string) (Tool, bool) {
 //	a.SetMessages(fresh)
 //
 // A tool already running is asked to stop through its context and then waited
-// for, because it reports through the exchange. One that ignores cancellation
-// holds this channel open for as long as it takes to return.
+// for: one that ignores cancellation holds this channel open until it returns.
 //
 // Between exchanges there is nothing to interrupt: the channel is already
 // closed and this does nothing.

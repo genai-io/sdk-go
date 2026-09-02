@@ -7,10 +7,8 @@ import (
 
 // Repair returns a conversation every protocol will accept: tool calls and
 // their results paired, results with no call dropped, invalid UTF-8 replaced,
-// and any turn left with nothing a protocol would put on the wire — an empty
-// one, or an assistant turn holding only thinking — dropped with it. Several
-// OpenAI-compatible endpoints reject such a turn outright rather than ignoring
-// it, so leaving it in fails the whole request.
+// and any turn that would put nothing on the wire dropped with them — several
+// OpenAI-compatible endpoints reject such a turn rather than ignoring it.
 func Repair(msgs []Message) []Message {
 	out := repairToolPairing(msgs)
 	for i := range out {
@@ -27,9 +25,7 @@ func repairToolPairing(msgs []Message) []Message {
 		msg := msgs[i]
 
 		// Tool results are only ever emitted alongside the assistant message
-		// they answer, below. One reaching here answers no call, so it goes —
-		// but only it: the same turn commonly carries what the user typed
-		// next, and dropping the message whole would lose that too.
+		// they answer, below. One reaching here answers no call, so only it goes.
 		if msg.HasToolResults() {
 			msg.Content = filterBlocks(msg.Content, func(block Block) bool {
 				return block.Type != BlockToolResult

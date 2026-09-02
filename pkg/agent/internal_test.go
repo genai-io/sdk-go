@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"iter"
 	"runtime"
+	"strconv"
+	"sync"
 	"testing"
 
-	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
@@ -106,7 +109,7 @@ func TestManyExchangesDoNotAccumulate(t *testing.T) {
 
 func newTestAgent(t *testing.T, scripts ...[]ai.Delta) *Agent {
 	t.Helper()
-	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(&scripted{scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
 	a, err := New(client)
 	if err != nil {
 		t.Fatal(err)
@@ -114,4 +117,40 @@ func newTestAgent(t *testing.T, scripts ...[]ai.Delta) *Agent {
 	return a
 }
 
-var text = scripted.Text
+// scripted is a model that streams a script per call. These two tests are
+// in-package because the invariant they check is a field, so they cannot use
+// the stub the external tests share.
+type scripted struct {
+	scripts [][]ai.Delta
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *scripted) Name() string { return "scripted" }
+
+func (d *scripted) Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
+	d.mu.Lock()
+	n := d.calls
+	d.calls++
+	d.mu.Unlock()
+	return func(yield func(ai.Delta, error) bool) {
+		if n >= len(d.scripts) {
+			yield(ai.Delta{}, errors.New("scripted: no script for call "+strconv.Itoa(n)))
+			return
+		}
+		for _, delta := range d.scripts[n] {
+			if !yield(delta, nil) {
+				return
+			}
+		}
+	}
+}
+
+func text(s string) []ai.Delta {
+	return []ai.Delta{
+		{Block: ai.TextBlock(s)},
+		{EndBlock: true},
+		{StopReason: ai.StopEndTurn},
+	}
+}

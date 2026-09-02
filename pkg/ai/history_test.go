@@ -51,8 +51,7 @@ func shape(msgs []Message) string {
 }
 
 // Every protocol rejects a call with no result and a result with no call, and
-// most reject a turn that would send nothing. What Repair must not do is throw
-// away anything the caller can still see.
+// most reject a turn that would send nothing. Nothing else may be dropped.
 func TestRepairKeepsEverythingItDoesNotHaveToDrop(t *testing.T) {
 	for name, tc := range map[string]struct {
 		in   []Message

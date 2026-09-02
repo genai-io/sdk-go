@@ -12,8 +12,7 @@ import (
 // Set is a set of providers, keyed by ID.
 //
 // The key is matched without regard to case, as the catalog matches a vendor
-// ID: a reference is typed by a person, and "DeepSeek/deepseek-v4-pro" has to
-// mean the same thing here as it does there.
+// ID: a reference like "DeepSeek/deepseek-v4-pro" is typed by a person.
 type Set struct {
 	mu sync.RWMutex
 	m  map[string]*Provider

@@ -110,8 +110,8 @@ func main() {
 	steps := 0
 	for e, err := range a.Run(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
 		if err != nil {
-			// Only a failure that is not part of the exchange arrives here;
-			// how the exchange itself went is on TurnEnd, below.
+			// Only failures outside the exchange arrive here; how it went is
+			// on TurnEnd, below.
 			log.Fatalf("\n%v", err)
 		}
 		rec.Handle(ctx, e)

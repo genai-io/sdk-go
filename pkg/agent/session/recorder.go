@@ -34,9 +34,8 @@ type Recorder struct {
 }
 
 // newRecorder returns a recorder writing into one session. Unexported because
-// Open is the way in: a recorder built without what Open read back would
-// number its turns from one again and record a copy of the history it was
-// resumed from.
+// Open is the way in: without what Open read back it would number turns from
+// one again and re-record the history it was resumed from.
 func newRecorder(store Store, id string) *Recorder {
 	return &Recorder{store: store, id: id}
 }
@@ -112,12 +111,10 @@ func (r *Recorder) Err() error {
 	return r.err
 }
 
-// write stores one entry, stamping when the event happened and which turn it
-// belongs to. The agent numbers turns from one on every run; the mapping onto
-// the session's own numbering happens here, once, rather than at each of the
-// five call sites where forgetting it would be silent. The time is taken here
-// rather than left to the store because it is when the agent said this, not
-// when a store that may be slow or remote got round to it.
+// write stores one entry, stamping the turn it belongs to and when the agent
+// said it, rather than when a slow store got round to it. The agent numbers
+// turns from one on every run; that mapping happens here, once, rather than at
+// each of the five call sites where forgetting it would be silent.
 func (r *Recorder) write(ctx context.Context, turn int, e Entry) {
 	e.Turn = r.turnsBefore + turn
 	e.At = time.Now().UTC()

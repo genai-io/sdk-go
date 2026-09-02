@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -262,7 +263,9 @@ func TestDeviceReadsAFormEncodedReply(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/code") {
-			_, _ = fmt.Fprint(w, "device_code=dc&user_code=UC-2&verification_uri=https%3A%2F%2Fprovider.test&interval=1&expires_in=600")
+			// io.WriteString, not fmt.Fprint: the body is form-encoded, and the
+			// %2F in it reads to vet as a formatting directive.
+			_, _ = io.WriteString(w, "device_code=dc&user_code=UC-2&verification_uri=https%3A%2F%2Fprovider.test&interval=1&expires_in=600")
 			return
 		}
 		_, _ = fmt.Fprint(w, `{"access_token":"at"}`)

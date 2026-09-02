@@ -44,6 +44,9 @@ lint:
 # lint so that go vet, which needs no download, still runs on a machine that
 # cannot fetch the binary.
 golangci-lint: check-lint-tools
+	# verify first: CI's action refuses a config the schema rejects before it
+	# lints anything, and `run` alone does not check that.
+	golangci-lint config verify
 	golangci-lint run ./...
 
 test:

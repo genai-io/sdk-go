@@ -133,6 +133,10 @@ func render(e agent.Event) {
 			fmt.Print("\033[0m\n")
 		}
 	case agent.TurnEnd:
+		// A turn that failed says so here and nowhere else.
+		if v.Err != nil {
+			fmt.Fprintf(os.Stderr, "\n%v\n", v.Err)
+		}
 		fmt.Printf("\n\n\033[2m— %s · %d tokens\033[0m\n", v.StopReason, v.Usage.Total())
 	}
 }

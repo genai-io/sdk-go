@@ -17,14 +17,17 @@ import (
 	"slices"
 
 	sdk "github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/errs"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
 // Name is the driver's identifier.
 const Name = string(ai.APIOpenAIChat)
+
+// fail classifies this protocol's failures.
+var fail = errs.For(Name, oai.Details)
 
 func init() { ai.RegisterAPI(ai.APIOpenAIChat, New) }
 
@@ -45,27 +48,8 @@ func New(cfg ai.Config) (ai.Driver, error) {
 		return nil, err
 	}
 
-	opts := []option.RequestOption{option.WithMaxRetries(0)}
-	if url := cfg.URL(); url != "" {
-		opts = append(opts, option.WithBaseURL(url))
-	}
-	// Keyless endpoints exist — a local Ollama ignores the header entirely —
-	// but the SDK still wants a value, so send a placeholder rather than an
-	// empty credential that reads as a configuration mistake.
-	key := cfg.APIKey
-	if key == "" {
-		key = "unused"
-	}
-	opts = append(opts, option.WithAPIKey(key))
-	if cfg.HTTPClient != nil {
-		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
-	}
-	for k, v := range cfg.MergedHeaders() {
-		opts = append(opts, option.WithHeader(k, v))
-	}
-
 	return &Driver{
-		client: sdk.NewClient(opts...),
+		client: oai.NewClient(cfg),
 		model:  cfg.Model,
 		compat: ai.CompatOf[ai.OpenAIChatCompat](cfg.Model),
 	}, nil
@@ -85,22 +69,23 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		params := d.buildParams(req, level)
 
 		stream := d.client.Chat.Completions.NewStreaming(ctx, params)
-		defer stream.Close()
+		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Tool calls arrive as indexed argument fragments spread across
 		// chunks, so they can only be emitted once the stream ends.
 		calls := make(map[int]*ai.ToolCall)
-		reasoning := d.compat.Thinking != ai.ThinkingNone && thinkingOn(level)
 
 		for stream.Next() {
 			chunk := stream.Current()
 
 			for _, choice := range chunk.Choices {
-				if reasoning {
-					if text := reasoningContent(choice.Delta.RawJSON()); text != "" {
-						if !yield(ai.Delta{Block: ai.ThinkingBlock(text, "")}, nil) {
-							return
-						}
+				// Reasoning is read whatever the request asked for. Gating it
+				// on the rung dropped it from endpoints that reason with no
+				// switch to declare — a local model, a gateway deciding for
+				// itself — and an endpoint that sends none costs nothing here.
+				if text := reasoningText(choice.Delta.RawJSON()); text != "" {
+					if !yield(ai.Delta{Block: ai.ThinkingBlock(text, "")}, nil) {
+						return
 					}
 				}
 				if choice.Delta.Content != "" {
@@ -160,16 +145,25 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			}
 		}
 
-		if err := stream.Err(); err != nil {
-			yield(ai.Delta{}, errs.WrapStream(Name, err))
-			return
+		flush := func() bool {
+			for _, idx := range slices.Sorted(maps.Keys(calls)) {
+				if !yield(ai.Delta{Block: ai.ToolCallBlock(*calls[idx])}, nil) {
+					return false
+				}
+			}
+			return true
 		}
 
-		for _, idx := range slices.Sorted(maps.Keys(calls)) {
-			if !yield(ai.Delta{Block: ai.ToolCallBlock(*calls[idx])}, nil) {
-				return
+		if err := stream.Err(); err != nil {
+			// Everything produced stays on the Response, so the calls collected
+			// before the cut are handed over ahead of the failure that ends the
+			// stream.
+			if flush() {
+				yield(ai.Delta{}, fail.WrapStream(err))
 			}
+			return
 		}
+		flush()
 	}
 }
 
@@ -178,9 +172,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 // includes context_length it is read out of the raw JSON, since the typed SDK
 // struct has no field for a non-standard extension.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
+	// One request is the whole listing: the SDK's page type for /models reports
+	// no next page ever, because the endpoint does not paginate.
 	page, err := d.client.Models.List(ctx)
 	if err != nil {
-		return nil, errs.Wrap(Name, err)
+		return nil, fail.Wrap(err)
 	}
 	out := make([]ai.Model, 0, len(page.Data))
 	for _, m := range page.Data {
@@ -198,21 +194,32 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	return out, nil
 }
 
-// reasoningContent reads the reasoning_content extension out of a raw stream
-// delta. It is not part of the standard schema, so the typed SDK struct has no
-// field for it, but Moonshot, DeepSeek, Alibaba and Z.ai all stream reasoning
-// there.
-func reasoningContent(rawJSON string) string {
+// reasoningText reads the reasoning a stream delta carries. Neither spelling is
+// part of the standard schema, so the typed SDK struct has no field for either:
+// Moonshot, DeepSeek, Alibaba and Z.ai stream reasoning_content, while
+// OpenRouter and Ollama stream reasoning. An endpoint sending both sends the
+// same words twice, so the first one wins.
+func reasoningText(rawJSON string) string {
 	if rawJSON == "" {
 		return ""
 	}
 	var delta struct {
 		ReasoningContent string `json:"reasoning_content"`
+		// Reasoning is decoded lazily because some gateways put an object
+		// there; only the string form is text to show.
+		Reasoning json.RawMessage `json:"reasoning"`
 	}
 	if err := json.Unmarshal([]byte(rawJSON), &delta); err != nil {
 		return ""
 	}
-	return delta.ReasoningContent
+	if delta.ReasoningContent != "" {
+		return delta.ReasoningContent
+	}
+	var text string
+	if json.Unmarshal(delta.Reasoning, &text) != nil {
+		return ""
+	}
+	return text
 }
 
 func mapFinishReason(reason string) ai.StopReason {
@@ -225,8 +232,6 @@ func mapFinishReason(reason string) ai.StopReason {
 		return ai.StopMaxTokens
 	case "content_filter":
 		return ai.StopRefusal
-	case "":
-		return ""
 	default:
 		return ai.StopReason(reason)
 	}

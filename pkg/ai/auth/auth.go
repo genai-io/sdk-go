@@ -27,6 +27,12 @@ func Available() []catalog.Vendor {
 		if v.RequiresBaseURL && BaseURL(v) == "" {
 			continue
 		}
+		// And one whose models live in a cloud project is unusable until it is
+		// told which. Reporting it as available and then refusing the first
+		// call is the same lie in two places.
+		if _, err := Deployment(v); err != nil {
+			continue
+		}
 		if len(v.KeyEnv) == 0 {
 			out = append(out, v)
 			continue
@@ -60,11 +66,12 @@ func Config(ref string) (ai.Config, error) {
 	if key == "" && len(v.KeyEnv) > 0 {
 		return ai.Config{}, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
 	}
-	cfg := ai.Config{Model: model, APIKey: key, BaseURL: BaseURL(v), ProtocolConfig: Deployment(v)}
-	if err := checkBaseURL(v, cfg); err != nil {
+	deployment, err := Deployment(v)
+	if err != nil {
 		return ai.Config{}, err
 	}
-	if err := checkDeployment(v, cfg); err != nil {
+	cfg := ai.Config{Model: model, APIKey: key, BaseURL: BaseURL(v), ProtocolConfig: deployment}
+	if err := checkBaseURL(v, cfg); err != nil {
 		return ai.Config{}, err
 	}
 	return cfg, nil
@@ -107,5 +114,5 @@ func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ai.NewClient(cfg, opts...)
+	return ai.New(cfg, opts...)
 }

@@ -1,0 +1,49 @@
+# golangci-lint for this repository.
+#
+# Strict where it is cheap and quiet where it would argue with the way this
+# code is written. Formatting is not here: `make format-check` is the one
+# authority on gofmt and goimports, and two tools disagreeing about a blank
+# line is worse than either.
+#
+# Everything enabled below reports nothing. There is no exclusion list: an
+# error this repository means to drop is written `_ =` with the reason beside
+# it, so the silence is in the code where a reader meets it rather than in a
+# file they have to go and find.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    # A wrapped error compared with == silently stops matching, and this SDK
+    # wraps: an ai.Error travels through several layers before a caller sees it.
+    - errorlint
+    # Returning nil right after checking an error is never what was meant.
+    - nilerr
+    # An error type not named FooError, or a sentinel not named ErrFoo, is one
+    # a caller has to read the source to recognise.
+    - errname
+    # time.Since(x) * time.Second is a unit mistake the compiler allows.
+    - durationcheck
+    # make([]T, n) followed by append is nearly always a leading run of zeros.
+    - makezero
+    - copyloopvar
+    - usetesting
+    - misspell
+
+  settings:
+    errcheck:
+      # An ignored error should say so as `_ =`, with a comment giving the
+      # reason. Reporting the blank assignment too would make that impossible.
+      check-blank: false
+    misspell:
+      # No locale: this codebase writes British English on purpose, and
+      # pinning one would turn "recognise" and "honouring" into findings.
+      locale: ""
+
+  exclusions:
+    generated: lax

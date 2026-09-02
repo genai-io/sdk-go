@@ -60,7 +60,7 @@ func (d *Driver) do(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	if res.StatusCode >= 400 {
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }() // the error below is the one worth reporting
 		return nil, readAPIError(res)
 	}
 	return res, nil

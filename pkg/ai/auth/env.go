@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -30,18 +31,25 @@ func BaseURL(v catalog.Vendor) string {
 
 // Deployment reads a vendor's deployment-scoped settings — the ones that name
 // where a model runs rather than who is calling — into the value its driver
-// expects as Config.ProtocolConfig. It returns nil for a vendor that has none.
-func Deployment(v catalog.Vendor) ai.ProtocolConfig {
-	if len(v.DeploymentEnv) == 0 {
-		return nil
+// expects as Config.ProtocolConfig, and fails when one the endpoint cannot run
+// without is unset. It returns nil for a vendor that has none.
+//
+// Which variables those are, and what shape they make, is the row's business:
+// this package supplies the lookup and knows nothing else about it. Deciding
+// here would mean auth carrying a list of every driver's private arrangements.
+func Deployment(v catalog.Vendor) (ai.ProtocolConfig, error) {
+	if v.Deployment == nil {
+		return nil, nil
 	}
-	if v.API == ai.APIAnthropicVertex {
-		return ai.VertexConfig{
-			Project: strings.TrimSpace(os.Getenv(v.DeploymentEnv["project"])),
-			Region:  strings.TrimSpace(os.Getenv(v.DeploymentEnv["region"])),
-		}
+	cfg, err := v.Deployment(os.Getenv)
+	var missing *catalog.MissingDeploymentError
+	if errors.As(err, &missing) {
+		// Reported as a missing credential because that is what it is from
+		// where the caller stands: a variable they have to set before this
+		// vendor works, with the same one error shape to handle.
+		return nil, &MissingKeyError{Vendor: v.ID, EnvVars: missing.EnvVars, Note: missing.Note}
 	}
-	return nil
+	return cfg, err
 }
 
 // checkBaseURL fails early when a vendor that has no default endpoint was not
@@ -52,25 +60,4 @@ func checkBaseURL(v catalog.Vendor, cfg ai.Config) error {
 		return nil
 	}
 	return &MissingEndpointError{Vendor: v.ID, EnvVar: v.BaseURLEnv, Note: v.Note}
-}
-
-// checkDeployment fails early when a deployment-scoped setting a driver
-// requires is missing, so the caller learns which variable to set instead of
-// meeting an auth error on the first request.
-func checkDeployment(v catalog.Vendor, cfg ai.Config) error {
-	if v.API != ai.APIAnthropicVertex {
-		return nil
-	}
-	deployment, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
-	if err != nil {
-		return err
-	}
-	if deployment.Project == "" {
-		return &MissingKeyError{
-			Vendor:  v.ID,
-			EnvVars: []string{v.DeploymentEnv["project"]},
-			Note:    "Vertex needs a Google Cloud project. Credentials themselves come from Application Default Credentials, not from a variable.",
-		}
-	}
-	return nil
 }

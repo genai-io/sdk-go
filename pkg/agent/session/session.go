@@ -25,7 +25,11 @@ var ErrNotFound = errors.New("session: not found")
 // Meta is what a session is, apart from what happened in it. Small on purpose:
 // it has to be listable without reading any session's entries.
 type Meta struct {
-	ID        string    `json:"id"`
+	ID string `json:"id"`
+	// Title and Model are the application's to set, through whatever its store
+	// offers for that — jsonl has SetMeta. Nothing in this package writes
+	// them: which model answered is on each Inference entry, where it can
+	// differ from one turn to the next.
 	Title     string    `json:"title,omitempty"`
 	Model     string    `json:"model,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -76,15 +80,17 @@ type Entry struct {
 	Outcome   *Outcome     `json:"outcome,omitempty"`
 }
 
-// Payload reports whether the entry carries what its Type says. A wire format
+// payload reports whether the entry carries what its Type says. A wire format
 // can be given anything, and folding a record of nothing silently is how a
 // conversation comes back with a hole in it.
-func (e Entry) Payload() bool {
+func (e Entry) payload() bool {
 	switch e.Type {
 	case EntryMessage:
 		return e.Message != nil
 	case EntrySnapshot:
-		return e.Snapshot != nil
+		// An empty one is a conversation cleared, which is a state a session
+		// has to be able to hold and come back from.
+		return true
 	case EntryInference:
 		return e.Inference != nil
 	case EntryToolRun:
@@ -128,6 +134,38 @@ type Outcome struct {
 	Err        string           `json:"err,omitempty"`
 }
 
+// Stamped is the entry as a store writes it: numbered, and timestamped if
+// whoever handed it over did not do so already.
+//
+// This and the two below are the store contract's own arithmetic, kept here
+// rather than in each store: a third implementation that got any of them subtly
+// different would be a store this package's tests pass on and nothing else
+// works with.
+func (e Entry) Stamped(seq int64, at time.Time) Entry {
+	if e.Seq == 0 {
+		e.Seq = seq
+	}
+	if e.At.IsZero() {
+		e.At = at
+	}
+	return e
+}
+
+// Created is the metadata a store starts a session with: what it was asked
+// for, with the fields the store owns set.
+func (m Meta) Created(at time.Time) Meta {
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = at
+	}
+	m.UpdatedAt = at
+	m.Entries = 0
+	return m
+}
+
+// ByRecency orders sessions the way a list of them is read: most recently
+// updated first.
+func ByRecency(a, b Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) }
+
 // Store is what a recorder writes to and a session is restored from — nothing
 // more. Listing, renaming, forking and deleting are the application's business
 // with the store it chose, and belong to that store's own type: an interface
@@ -167,7 +205,7 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 		if err != nil {
 			return nil, 0, err
 		}
-		if !entry.Payload() {
+		if !entry.payload() {
 			return nil, 0, fmt.Errorf("session: %s entry %d says %q and carries nothing",
 				id, entry.Seq, entry.Type)
 		}
@@ -199,7 +237,7 @@ func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message,
 		if err != nil {
 			return nil, nil, err
 		}
-		return NewRecorder(store, meta.ID), nil, nil
+		return newRecorder(store, meta.ID), nil, nil
 	}
 
 	if _, err := store.Meta(ctx, id); err != nil {
@@ -210,7 +248,7 @@ func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message,
 		return nil, nil, err
 	}
 
-	rec := NewRecorder(store, id)
+	rec := newRecorder(store, id)
 	// The agent numbers turns from one every time it runs, because what came
 	// back from storage was someone else's counting. The session is the one
 	// place that knows both numbers, so it is where they are reconciled —

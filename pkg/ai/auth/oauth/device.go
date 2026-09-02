@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -70,7 +71,7 @@ func Device(ctx context.Context, cfg Config, endpoints DeviceEndpoints, ui Inter
 		}
 	}
 
-	interval := time.Duration(max(code.Interval, 1)) * time.Second
+	interval := max(time.Duration(code.Interval)*time.Second, pollFloor)
 	for {
 		select {
 		case <-ctx.Done():
@@ -91,7 +92,7 @@ func Device(ctx context.Context, cfg Config, endpoints DeviceEndpoints, ui Inter
 		}
 
 		var oauthErr *Error
-		if !asOAuthError(err, &oauthErr) {
+		if !errors.As(err, &oauthErr) {
 			return Token{}, err
 		}
 		switch oauthErr.Code {
@@ -100,7 +101,7 @@ func Device(ctx context.Context, cfg Config, endpoints DeviceEndpoints, ui Inter
 		case "slow_down":
 			// The provider is telling us we are polling too fast; ignoring it
 			// is how an attempt gets refused outright.
-			interval += 5 * time.Second
+			interval += slowDownStep
 		default:
 			return Token{}, oauthErr
 		}
@@ -125,7 +126,7 @@ func requestDeviceCode(ctx context.Context, cfg Config, endpoint string) (device
 	if err != nil {
 		return deviceCodeResponse{}, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
 		return deviceCodeResponse{}, err
@@ -160,3 +161,13 @@ func requestDeviceCode(ctx context.Context, cfg Config, endpoint string) (device
 // minutes is the specification's own example and what every provider seen here
 // uses.
 const defaultDeviceLifetimeSeconds = 900
+
+// pollFloor is the shortest interval Device waits between polls whatever the
+// provider asks for, and slowDownStep is what it adds when the provider says
+// to back off — RFC 8628's own figure. They are variables rather than
+// constants only so a test can drive several polls without spending seconds on
+// each; nothing in this package changes them.
+var (
+	pollFloor    = 1 * time.Second
+	slowDownStep = 5 * time.Second
+)

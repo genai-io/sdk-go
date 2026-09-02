@@ -153,7 +153,7 @@ func TestReachingEachVendor(t *testing.T) {
 			defer server.Close()
 
 			cfg.BaseURL = server.URL
-			client, err := ai.NewClient(cfg)
+			client, err := ai.New(cfg)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -301,7 +301,7 @@ func TestOnePromptThreeWireShapes(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.NewClient(ai.Config{Model: tc.model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: tc.model, APIKey: "k", BaseURL: server.URL})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -355,7 +355,7 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.NewClient(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -387,8 +387,8 @@ func TestAGenerationInTheIDIsEnoughToSizeAModel(t *testing.T) {
 		output int
 	}{
 		// Neither line is a row; both are what the endpoints still serve.
-		"minimax m2":           {"minmax/MiniMax-M2.1", 204_800, 8_192},
-		"minimax m2 highspeed": {"minmax/MiniMax-M2.5-highspeed", 204_800, 8_192},
+		"minimax m2":           {"minimax/MiniMax-M2.1", 204_800, 8_192},
+		"minimax m2 highspeed": {"minimax/MiniMax-M2.5-highspeed", 204_800, 8_192},
 		"mimo v2 pro":          {"mimo/mimo-v2-pro", 1_048_576, 131_072},
 		"mimo v2 flash":        {"mimo/mimo-v2-flash", 262_144, 65_536},
 		// The same MiMo model under the name its own listing returns.
@@ -413,7 +413,7 @@ func TestAGenerationInTheIDIsEnoughToSizeAModel(t *testing.T) {
 
 	// And a generation nobody has checked reports nothing rather than
 	// borrowing the figure of whichever line it sorts next to.
-	unknown, err := catalog.Model("minmax/MiniMax-M9")
+	unknown, err := catalog.Model("minimax/MiniMax-M9")
 	if err != nil {
 		t.Fatalf("catalog.Model: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.NewClient(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
 			if err != nil {
 				t.Fatalf("NewClient: %v", err)
 			}
@@ -585,7 +585,7 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	model.BaseURL = server.URL
-	client, err := ai.NewClient(ai.Config{Model: model, APIKey: "k"})
+	client, err := ai.New(ai.Config{Model: model, APIKey: "k"})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

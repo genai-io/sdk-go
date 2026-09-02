@@ -1,6 +1,8 @@
 package jsonschema
 
 import (
+	"encoding"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"reflect"
@@ -177,6 +179,12 @@ func parseEnum(value string, t reflect.Type, where string) []any {
 				panic(fmt.Sprintf("jsonschema: %s has enum member %q, which is not a number", where, m))
 			}
 			out = append(out, n)
+		case reflect.Bool:
+			b, err := strconv.ParseBool(m)
+			if err != nil {
+				panic(fmt.Sprintf("jsonschema: %s has enum member %q, which is not a boolean", where, m))
+			}
+			out = append(out, b)
 		default:
 			out = append(out, m)
 		}
@@ -196,7 +204,12 @@ var marshalsAs = map[reflect.Type]map[string]any{
 	reflect.TypeFor[[]byte]():        {"type": "string"},
 }
 
-// deriveSchema builds a JSON Schema from a Go type.
+var (
+	jsonMarshalerType = reflect.TypeFor[json.Marshaler]()
+	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
+)
+
+// For builds a JSON Schema from a Go type.
 func For[T any]() map[string]any { return ForType(reflect.TypeFor[T]()) }
 
 // ForType is For for a type only known at run time, which is what a set of
@@ -212,6 +225,20 @@ func schemaForType(t reflect.Type, seen map[reflect.Type]bool, where string) map
 	}
 	if fixed, ok := marshalsAs[t]; ok {
 		return maps.Clone(fixed)
+	}
+	// A MarshalJSON writes whatever it likes and reflection cannot see what:
+	// big.Int would be described as an empty object and json.RawMessage as an
+	// array of bytes, each a schema that rejects the JSON its own type writes.
+	// Only the caller knows the shape, so ask for it rather than guess.
+	if reflect.PointerTo(t).Implements(jsonMarshalerType) {
+		panic(fmt.Sprintf("jsonschema: %s is %s, which marshals through MarshalJSON, so its "+
+			"fields are not its JSON — give the field a type that marshals to itself, or "+
+			"write the schema by hand", where, t))
+	}
+	// A MarshalText is knowable without asking: encoding/json quotes whatever
+	// it writes, so the type is a string however its fields look.
+	if reflect.PointerTo(t).Implements(textMarshalerType) {
+		return map[string]any{"type": "string"}
 	}
 
 	var out map[string]any
@@ -289,7 +316,10 @@ func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[
 	defer delete(seen, t)
 
 	properties := map[string]any{}
-	var required []any
+	// Empty rather than nil: two of the drivers forward this map to the
+	// endpoint verbatim, and a struct with no fields would send
+	// "required": null.
+	required := []any{}
 	collectFields(t, seen, where, properties, &required)
 
 	return map[string]any{
@@ -341,9 +371,6 @@ func collectFields(t reflect.Type, seen map[reflect.Type]bool, where string,
 	}
 }
 
-// jsonFieldName applies encoding/json's naming rules: the tag's first segment
-// names the property, "-" drops the field, and omitempty or omitzero makes it
-// optional.
 // namedByTag reports whether a json tag gave the field an explicit name, which
 // is what stops an embedded struct from being flattened.
 func namedByTag(field reflect.StructField) bool {
@@ -362,25 +389,31 @@ func droppedByTag(field reflect.StructField) bool {
 	return ok && tag == "-"
 }
 
+// jsonFieldName applies encoding/json's naming rules: the tag's first segment
+// names the property, "-" drops the field, and omitempty or omitzero makes it
+// optional. A pointer is optional too, but says so in schemaForType, where
+// every pointer passes — including the ones inside a slice or a map.
 func jsonFieldName(field reflect.StructField) (name string, optional, skip bool) {
 	tag, ok := field.Tag.Lookup("json")
 	if !ok {
 		if !field.IsExported() {
 			return "", false, true
 		}
-		return field.Name, field.Type.Kind() == reflect.Pointer, false
+		return field.Name, false, false
 	}
 	name, rest, _ := strings.Cut(tag, ",")
 	if name == "-" && rest == "" {
 		return "", false, true
 	}
+	// A tag that sets only options names nothing, and encoding/json falls back
+	// to the Go field name; a property called "" is one no model can fill in.
+	if name == "" {
+		name = field.Name
+	}
 	for _, opt := range strings.Split(rest, ",") {
 		if opt == "omitempty" || opt == "omitzero" {
 			optional = true
 		}
-	}
-	if field.Type.Kind() == reflect.Pointer {
-		optional = true
 	}
 	return name, optional, false
 }

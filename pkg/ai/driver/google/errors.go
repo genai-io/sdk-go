@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
 )
 
 // readAPIError turns a failed response into the driver's own error, keeping
@@ -40,23 +40,16 @@ func (e *statusError) Error() string {
 	return e.message
 }
 
-func (d *Driver) wrap(err error) error {
-	status, resp, code, msg := errorDetails(err)
-	return ai.Classify(Name, status, resp, code, msg, err)
-}
+// fail classifies this protocol's failures.
+var fail = errs.For(Name, details)
 
-func (d *Driver) wrapStream(err error) error {
-	status, resp, code, msg := errorDetails(err)
-	return ai.StreamError(Name, status, resp, code, msg, err)
-}
-
-// errorDetails reads what the endpoint reported. Unlike the SDK's error type,
-// the response is kept, so a 429 that carries Retry-After is honoured rather
-// than falling back to the caller's own backoff.
-func errorDetails(err error) (status int, resp *http.Response, code, message string) {
+// details reads what the endpoint reported. There is no vendor SDK here, so
+// the response travels on the driver's own error type and a 429 that carries
+// Retry-After is honoured rather than falling back to the caller's backoff.
+func details(err error) errs.Details {
 	var se *statusError
 	if errors.As(err, &se) {
-		return se.status, se.response, se.code, se.message
+		return errs.Details{Status: se.status, Code: se.code, Message: se.message, Response: se.response}
 	}
-	return 0, nil, "", ""
+	return errs.Details{}
 }

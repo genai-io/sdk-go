@@ -55,7 +55,22 @@ type Config struct {
 	// driver for this provider's protocol and call its Models. Set it for an
 	// endpoint whose listing lives somewhere other than the protocol's own
 	// models call.
+	//
+	// It is handed the *Provider it belongs to so it can read the credential
+	// and endpoint already configured here, which is the whole reason a
+	// listing can be fetched at all.
 	Fetch func(ctx context.Context, p *Provider) ([]ai.Model, error)
+
+	// Resolve fills in what is known about a model from its ID alone — the
+	// context window a vendor encodes in the name, the reasoning ladder its
+	// family takes. A host's listing carries almost none of that, and an ID
+	// nobody has listed carries none at all, so without this every live-listed
+	// model arrives stripped of everything but its name. catalog installs its
+	// own resolver here; nil leaves a model as the endpoint reported it.
+	//
+	// It must fill rather than replace: what the host reported is not unknown,
+	// and this layer's whole rule is that the host wins on any figure it gave.
+	Resolve func(ai.Model) ai.Model
 }
 
 // New builds a provider from its parts.
@@ -113,8 +128,9 @@ func (p *Provider) Models() []ai.Model {
 
 // Model looks one model up by ID. Unlike Models it also answers for an ID the
 // provider has never heard of, by decorating it with the provider's protocol
-// and provider — an unlisted model is nearly always one newer than the
-// catalog, not one that does not exist.
+// and provider and asking Resolve what else the ID implies — an unlisted model
+// is nearly always one newer than the catalog, not one that does not exist,
+// and it arrives with its window and ladder rather than only its name.
 func (p *Provider) Model(id string) (ai.Model, bool) {
 	for _, m := range p.Models() {
 		if strings.EqualFold(m.ID, id) {
@@ -151,7 +167,7 @@ func defaultFetch(ctx context.Context, p *Provider) ([]ai.Model, error) {
 	if len(p.cfg.Models) > 0 {
 		probe = p.cfg.Models[0]
 	}
-	client, err := ai.NewClient(p.ConfigFor(probe))
+	client, err := ai.New(p.ConfigFor(probe))
 	if err != nil {
 		return nil, err
 	}
@@ -181,16 +197,19 @@ func (p *Provider) Client(modelID string, opts ...ai.Option) (*ai.Client, error)
 		return nil, &ai.Error{Kind: ai.KindInvalidRequest, Message: fmt.Sprintf(
 			"ai: provider %q states no protocol, so it cannot open model %q", p.cfg.ID, modelID)}
 	}
-	return ai.NewClient(p.ConfigFor(m), opts...)
+	return ai.New(p.ConfigFor(m), opts...)
 }
 
-// decorate stamps a model with the provider's identity and protocol. It only
-// fills an API the model does not state, so a set of mixed-protocol models
-// keeps its own.
+// decorate stamps a model with the provider's identity and protocol, then
+// gives the resolver what it can add. It only fills an API the model does not
+// state, so a set of mixed-protocol models keeps its own.
 func (p *Provider) decorate(m ai.Model) ai.Model {
 	m.Vendor = p.cfg.ID
 	if m.API == "" {
 		m.API = p.cfg.API
+	}
+	if p.cfg.Resolve != nil {
+		m = p.cfg.Resolve(m)
 	}
 	return m
 }

@@ -2,7 +2,6 @@ package ai
 
 import (
 	"maps"
-	"reflect"
 	"slices"
 )
 
@@ -206,13 +205,19 @@ const (
 	// provider when the model states none.
 	EffortDefault Effort = ""
 	// EffortOff disables reasoning where the provider allows it.
-	EffortOff     Effort = "off"
+	EffortOff Effort = "off"
+	// EffortMinimal is the shortest thinking a model that must think will do.
 	EffortMinimal Effort = "minimal"
-	EffortLow     Effort = "low"
-	EffortMedium  Effort = "medium"
-	EffortHigh    Effort = "high"
-	EffortXHigh   Effort = "xhigh"
-	EffortMax     Effort = "max"
+	// EffortLow, EffortMedium and EffortHigh are the three rungs every
+	// reasoning vendor offers under one name or another, and the ones a
+	// portable caller should reach for.
+	EffortLow    Effort = "low"
+	EffortMedium Effort = "medium"
+	EffortHigh   Effort = "high"
+	// EffortXHigh and EffortMax are the rungs above high, for the few models
+	// that sell one. ResolveLevel snaps them down on a model that does not.
+	EffortXHigh Effort = "xhigh"
+	EffortMax   Effort = "max"
 )
 
 // Efforts is the canonical ordering, least to most, excluding EffortDefault.
@@ -271,32 +276,11 @@ type ProtocolOptions interface {
 //	native, err := ai.ProtocolOptionsAs[anthropic.Options](req)
 //	if native.ThinkingDisplay != "" { … }
 func ProtocolOptionsAs[T ProtocolOptions](req *Request) (T, error) {
-	var zero T
-	if req.ProtocolOptions == nil {
-		return zero, nil
-	}
-	native, ok := req.ProtocolOptions.(T)
-	if ok {
-		return native, nil
-	}
-	return zero, &Error{
-		Kind: KindInvalidRequest,
-		Message: "ai: native options have type " + reflect.TypeOf(req.ProtocolOptions).String() +
-			"; driver expects " + reflect.TypeFor[T]().String(),
-	}
+	return protocolValueAs[T](req.ProtocolOptions, "native request options")
 }
 
 // RejectProtocolOptions returns an invalid-request error when a protocol with no native
 // option type receives one. Drivers call it before building their wire request.
 func RejectProtocolOptions(req *Request, driver string) error {
-	if req.ProtocolOptions == nil {
-		return nil
-	}
-	return &Error{
-		Driver:  driver,
-		Kind:    KindInvalidRequest,
-		Message: "ai: driver " + driver + " does not define native request options",
-	}
+	return rejectProtocolValue(req.ProtocolOptions, driver, "native request options")
 }
-
-func cloneStringMap(source map[string]any) map[string]any { return maps.Clone(source) }

@@ -1,5 +1,32 @@
 version: 2
 updates:
+  # The vendor SDKs this module wraps move fast, and a driver bug is as often
+  # a version behind as a mistake here.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:27"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    open-pull-requests-limit: 5
+    groups:
+      # The indirect graph is mostly Google Cloud and OpenTelemetry moving
+      # together; one PR a week for all of it, and a separate one for each
+      # SDK this module actually calls.
+      indirect:
+        patterns: ["*"]
+        exclude-patterns:
+          - "github.com/anthropics/anthropic-sdk-go"
+          - "github.com/openai/openai-go/*"
+        update-types: ["minor", "patch"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

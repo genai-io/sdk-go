@@ -25,7 +25,11 @@ func open(t *testing.T, dir string) *jsonl.Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 	return s
 }
 
@@ -453,7 +457,11 @@ func BenchmarkAppendOneEntry(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			b.Error(err)
+		}
+	}()
 	meta, err := s.Create(context.Background(), session.Meta{})
 	if err != nil {
 		b.Fatal(err)
@@ -463,6 +471,200 @@ func BenchmarkAppendOneEntry(b *testing.B) {
 	for b.Loop() {
 		if err := s.Append(context.Background(), meta.ID, e); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// Ids come from application input — a -resume flag, a request, a filename — so
+// one that is not a single path element is refused rather than joined onto the
+// root. Empty would name the store itself, and Delete removes what it is given.
+func TestAnIdThatIsNotOneIsRefused(t *testing.T) {
+	root := t.TempDir()
+	beside := filepath.Join(root, "beside")
+	if err := os.MkdirAll(filepath.Join(beside, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s := open(t, filepath.Join(root, "sessions"))
+	kept := create(t, s)
+	if err := s.Append(ctx(), kept.ID, msg("worth keeping")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	for _, id := range []string{"", ".", "..", "../beside", "a/b", `a\b`} {
+		t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
+			// Create is the one exception: a blank id is how a caller asks the
+			// store to name the session itself.
+			if _, err := s.Create(ctx(), session.Meta{ID: id}); err == nil && id != "" {
+				t.Error("Create accepted it")
+			}
+			if err := s.Append(ctx(), id, msg("x")); err == nil {
+				t.Error("Append accepted it")
+			}
+			if err := s.Delete(ctx(), id); err == nil {
+				t.Error("Delete accepted it")
+			}
+			if _, err := s.Meta(ctx(), id); err == nil {
+				t.Error("Meta accepted it")
+			}
+			if err := s.SetMeta(ctx(), session.Meta{ID: id}); err == nil {
+				t.Error("SetMeta accepted it")
+			}
+			if _, err := s.Fork(ctx(), id, 0); err == nil {
+				t.Error("Fork accepted it")
+			}
+			var failed bool
+			for _, err := range s.Entries(ctx(), id) {
+				failed = failed || err != nil
+			}
+			if !failed {
+				t.Error("Entries accepted it")
+			}
+		})
+	}
+
+	// Nothing was reached: not the directory beside the store, not the store
+	// itself, not the session in it.
+	if _, err := os.Stat(beside); err != nil {
+		t.Errorf("a directory outside the store was removed: %v", err)
+	}
+	if got := read(t, s, kept.ID); len(got) != 1 {
+		t.Errorf("the store holds %d entries for its one session, want 1", len(got))
+	}
+}
+
+// A process killed mid-append leaves a half-written last line. That entry is
+// lost either way; what must not be lost is the next one, which a store that
+// appended straight onto the wreckage would bury inside an unreadable line.
+func TestAnAppendAfterATornTailIsReadableAndNumbered(t *testing.T) {
+	dir := t.TempDir()
+	first := open(t, dir)
+	meta := create(t, first)
+	if err := first.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	path := filepath.Join(dir, meta.ID, "entries.jsonl")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	torn := raw[:len(raw)-20] // the third line, cut off mid-word
+	if err := os.WriteFile(path, torn, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A new process, which is the only kind that meets a torn file.
+	second := open(t, dir)
+	if err := second.Append(ctx(), meta.ID, msg("after the crash")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	var seqs []int64
+	var texts []string
+	for _, e := range read(t, second, meta.ID) {
+		seqs = append(seqs, e.Seq)
+		texts = append(texts, e.Message.Text())
+	}
+	if want := []int64{1, 2, 3}; !slices.Equal(seqs, want) {
+		t.Errorf("sequence numbers = %v, want %v — numbering restarted or the torn line was counted",
+			seqs, want)
+	}
+	if want := []string{"one", "two", "after the crash"}; !slices.Equal(texts, want) {
+		t.Errorf("entries = %v, want %v", texts, want)
+	}
+}
+
+// Only the last line is allowed to be unreadable, because that is a process
+// that was killed. One in the middle is a hole, and a conversation with a hole
+// in it is not a shorter conversation — it is a broken one, so it is reported
+// rather than quietly cut short.
+func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	meta := create(t, s)
+	if err := s.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	path := filepath.Join(dir, meta.ID, "entries.jsonl")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	lines[1] = lines[1][:len(lines[1])/2]
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened := open(t, dir)
+	var read int
+	var failure error
+	for _, err := range reopened.Entries(ctx(), meta.ID) {
+		if err != nil {
+			failure = err
+			break
+		}
+		read++
+	}
+	if failure == nil {
+		t.Fatalf("the session read back as %d entries and said nothing; the middle of it is missing", read)
+	}
+	if _, err := session.Messages(ctx(), reopened, meta.ID); err == nil {
+		t.Error("the fold returned a conversation with a hole in it")
+	}
+}
+
+// Delete closes the file a session is being appended to. An append that was
+// already under way has to fail rather than corrupt the store or take the
+// process with it — and whether the directory goes with it is the race, since
+// an appender that got there first recreates the file inside it.
+func TestAppendRacingDeleteFailsCleanly(t *testing.T) {
+	s := store(t)
+	meta := create(t, s)
+
+	var wg sync.WaitGroup
+	for w := range 4 {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := range 25 {
+				// Whether it lands or is refused is the race; either is fine.
+				_ = s.Append(ctx(), meta.ID, msg(fmt.Sprintf("w%d-%d", w, i)))
+			}
+		}(w)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.Delete(ctx(), meta.ID); err != nil {
+			t.Logf("Delete lost the race and said so: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	// However it went, the store is one of the two states a reader can handle.
+	if _, err := s.Meta(ctx(), meta.ID); err != nil && !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("Meta = %v, want the session or ErrNotFound", err)
+	}
+
+	// The session is gone, or what survived of it reads back as entries rather
+	// than as wreckage. Which of the two is the race; neither is a broken store.
+	for e, err := range s.Entries(ctx(), meta.ID) {
+		if errors.Is(err, session.ErrNotFound) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("what the race left does not read: %v", err)
+		}
+		if e.Message == nil {
+			t.Errorf("entry %d came back empty", e.Seq)
 		}
 	}
 }

@@ -10,6 +10,10 @@ import (
 )
 
 // Set is a set of providers, keyed by ID.
+//
+// The key is matched without regard to case, as the catalog matches a vendor
+// ID: a reference is typed by a person, and "DeepSeek/deepseek-v4-pro" has to
+// mean the same thing here as it does there.
 type Set struct {
 	mu sync.RWMutex
 	m  map[string]*Provider
@@ -31,23 +35,27 @@ func (s *Set) Set(pr *Provider) {
 	if s.m == nil {
 		s.m = make(map[string]*Provider)
 	}
-	s.m[pr.ID()] = pr
+	s.m[key(pr.ID())] = pr
 }
 
 // Delete removes a provider.
 func (s *Set) Delete(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.m, id)
+	delete(s.m, key(id))
 }
 
 // Get returns one provider by ID.
 func (s *Set) Get(id string) (*Provider, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	e, ok := s.m[id]
+	e, ok := s.m[key(id)]
 	return e, ok
 }
+
+// key normalizes a provider ID for lookup. The provider keeps its own
+// spelling for display; only the map key is folded.
+func key(id string) string { return strings.ToLower(strings.TrimSpace(id)) }
 
 // All returns every provider, sorted by ID for a stable listing.
 func (s *Set) All() []*Provider {

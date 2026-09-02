@@ -48,8 +48,24 @@ func All() []Vendor {
 	return out
 }
 
-// Find returns the vendor with the given ID.
+// Find returns the vendor with the given ID, or one it used to be called.
 func Find(id string) (Vendor, bool) {
+	id = strings.TrimSpace(id)
+	if v, ok := row(id); ok {
+		return v, true
+	}
+	// A spelling the table has since dropped. Honouring it costs one lookup
+	// and saves every configuration pinned to the old one; the model it
+	// resolves to still reports the current vendor ID, so nothing propagates.
+	if to, ok := aliases[strings.ToLower(id)]; ok {
+		return row(to)
+	}
+	return Vendor{}, false
+}
+
+// row is the table lookup itself, without the aliases, so an alias can only
+// ever point at a real row and never at another alias.
+func row(id string) (Vendor, bool) {
 	for _, v := range vendors {
 		if strings.EqualFold(v.ID, id) {
 			return v.clone(), true

@@ -4,13 +4,21 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
 
-// validateAgainst checks a decoded JSON value against a schema. An empty
-// schema constrains nothing, which is what a tool declaring no parameters
-// wants.
+// Check measures a decoded JSON value against a schema. An empty schema
+// constrains nothing, which is what a tool declaring no parameters wants.
+//
+// Required is read more loosely than it is written. A derived schema puts
+// every property in required, optional ones included, because that is what
+// OpenAI's strict mode demands — optionality is the ["T","null"] type union
+// instead. The other providers are not strict, and a model there answers the
+// same schema by leaving an optional argument out rather than sending null. So
+// coming back, a property is missing only when its own schema refuses null;
+// one that admits null is read as null and checked as such.
 func Check(schema map[string]any, value any) error {
 	if len(schema) == 0 {
 		return nil
@@ -62,9 +70,16 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 
 	var missing []string
 	for _, name := range stringList(schema["required"]) {
-		if _, ok := value[name]; !ok {
-			missing = append(missing, name)
+		if _, ok := value[name]; ok {
+			continue
 		}
+		// An optional property is required and nullable, so leaving it out
+		// says what null says. Only a property whose schema refuses null is
+		// genuinely absent.
+		if sub, ok := properties[name].(map[string]any); ok && admitsNull(sub) {
+			continue
+		}
+		missing = append(missing, name)
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
@@ -186,6 +201,12 @@ func jsonTypeOf(value any) string {
 		return "object"
 	}
 	return fmt.Sprintf("%T", value)
+}
+
+// admitsNull reports a schema that accepts null, which is how a derived schema
+// writes an optional field: the type is a ["T","null"] union.
+func admitsNull(schema map[string]any) bool {
+	return slices.Contains(typeNames(schema["type"]), "null")
 }
 
 func typeNames(value any) []string {

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -25,40 +26,61 @@ func inferAnthropic(m ai.Model) ai.Model {
 	return m
 }
 
+// openAIGenerations sizes an OpenAI model by its generation, most specific
+// first.
+//
+// Each pattern matches the generation as a whole token rather than as a
+// prefix, and that is the whole point of them being patterns:
+//
+//   - a prefix of "gpt-4" also matches a gpt-4.5 nobody has published yet, and
+//     would size it at the original GPT-4's 8k. The 4-series patterns below
+//     stop at a following digit or dot, so an unrecognised point release
+//     reports unknown instead of a figure that is off by two orders.
+//   - a fine-tune is named for what it was tuned from and wrapped in a job
+//     ("ft:gpt-5.4-2026-01-01:acme::abc"), so the generation is not at the
+//     front. Matching anywhere in the ID sizes it as its base model.
+var openAIGenerations = []struct {
+	generation     *regexp.Regexp
+	window, output int
+	reasons        bool
+}{
+	{regexp.MustCompile(`(^|[^a-z0-9])gpt-[56](\.[0-9]+)?([^.0-9]|$)`), 1_050_000, 128_000, true},
+	// The generations before GPT-5. They are not listed as rows — nobody
+	// starts a project on one — but /v1/models still serves them, and a caller
+	// who names one deserves a window rather than silence.
+	{regexp.MustCompile(`(^|[^a-z0-9])o[134]([^.0-9]|$)`), 200_000, 100_000, true},
+	{regexp.MustCompile(`(^|[^a-z0-9])gpt-4\.1([^.0-9]|$)`), 1_047_576, 32_768, false},
+	{regexp.MustCompile(`(^|[^a-z0-9])gpt-4o([^.0-9]|$)`), 128_000, 16_384, false},
+	{regexp.MustCompile(`(^|[^a-z0-9])gpt-4-turbo([^.0-9]|$)`), 128_000, 4_096, false},
+	{regexp.MustCompile(`(^|[^a-z0-9])gpt-4([^.0-9o]|$)`), 8_192, 8_192, false},
+	{regexp.MustCompile(`(^|[^a-z0-9])gpt-3\.5-turbo([^.0-9]|$)`), 16_385, 4_096, false},
+}
+
 // inferOpenAI fills limits and reasoning for a model ID the table does not
 // list. The /v1/models listing carries neither, so both come from the
 // published per-model pages.
+//
+// An ID whose generation is not recognised is left alone, ladder included. A
+// nil Reasoning says nothing is known about this model, which is what is
+// true; stamping it "does not reason" would answer a question nobody here can
+// answer, and the caller would believe it.
 func inferOpenAI(m ai.Model) ai.Model {
 	id := strings.ToLower(strings.TrimSpace(m.ID))
-	reasons := false
-	switch {
-	case strings.HasPrefix(id, "gpt-6"), strings.HasPrefix(id, "gpt-5"):
-		m.ContextWindow, m.MaxOutput, reasons = orDefault(m.ContextWindow, 1_050_000), orDefault(m.MaxOutput, 128_000), true
-	case strings.HasPrefix(id, "gpt-4.1"):
-		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 1_047_576), orDefault(m.MaxOutput, 32_768)
-	case strings.HasPrefix(id, "gpt-4o"):
-		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 128_000), orDefault(m.MaxOutput, 16_384)
-
-	// The generations before GPT-5. They are not listed as rows — nobody
-	// starts a project on one — but /v1/models still serves them, and a
-	// caller who names one deserves a window rather than silence.
-	case strings.HasPrefix(id, "o1"), strings.HasPrefix(id, "o3"), strings.HasPrefix(id, "o4"):
-		m.ContextWindow, m.MaxOutput, reasons = orDefault(m.ContextWindow, 200_000), orDefault(m.MaxOutput, 100_000), true
-	case strings.HasPrefix(id, "gpt-4-turbo"):
-		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 128_000), orDefault(m.MaxOutput, 4_096)
-	case strings.HasPrefix(id, "gpt-4"):
-		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 8_192), orDefault(m.MaxOutput, 8_192)
-	case strings.HasPrefix(id, "gpt-3.5-turbo"):
-		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 16_385), orDefault(m.MaxOutput, 4_096)
-	}
-	if m.Reasoning != nil {
+	for _, g := range openAIGenerations {
+		if !g.generation.MatchString(id) {
+			continue
+		}
+		m.ContextWindow = orDefault(m.ContextWindow, g.window)
+		m.MaxOutput = orDefault(m.MaxOutput, g.output)
+		if m.Reasoning == nil {
+			if g.reasons {
+				m.Reasoning = openAIEfforts
+			} else {
+				m.Reasoning = noReasoning
+			}
+		}
 		return m
 	}
-	if reasons {
-		m.Reasoning = openAIEfforts
-		return m
-	}
-	m.Reasoning = NoReasoning
 	return m
 }
 
@@ -85,20 +107,36 @@ func inferGoogle(m ai.Model) ai.Model {
 	return m
 }
 
+// moonshotWindow reads the window suffix out of a Kimi model ID as a whole
+// number rather than as a substring. "8k" occurs inside "128k", so a
+// substring test only worked because of the order the cases happened to be
+// written in — one reordering away from sizing a 128k model at 8k.
+var moonshotWindow = regexp.MustCompile(`(^|[^0-9])([0-9]+)k($|[^a-z0-9])`)
+
 // inferMoonshot reads the window out of a Kimi model ID, which is where
 // Moonshot puts it when /v1/models omits context_length.
 func inferMoonshot(m ai.Model) ai.Model {
 	id := strings.ToLower(m.ID)
+	// The current line names its generation instead of its size, and the
+	// generation is the more specific fact, so it is read first.
 	switch {
 	case strings.Contains(id, "k3"):
 		m.ContextWindow = orDefault(m.ContextWindow, 1_048_576)
+		return m
 	case strings.Contains(id, "k2"):
 		m.ContextWindow = orDefault(m.ContextWindow, 262_144)
-	case strings.Contains(id, "128k"):
+		return m
+	}
+	match := moonshotWindow.FindStringSubmatch(id)
+	if match == nil {
+		return m
+	}
+	switch match[2] {
+	case "128":
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 131_072), orDefault(m.MaxOutput, 8_192)
-	case strings.Contains(id, "32k"):
+	case "32":
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 32_768), orDefault(m.MaxOutput, 8_192)
-	case strings.Contains(id, "8k"):
+	case "8":
 		m.ContextWindow, m.MaxOutput = orDefault(m.ContextWindow, 8_192), orDefault(m.MaxOutput, 3_000)
 	}
 	return m

@@ -8,7 +8,13 @@ import (
 	"sync"
 )
 
-// FileStore keeps credentials in one JSON file.
+// FileStore keeps credentials in one JSON file, readable only by its owner.
+//
+// It is the only thing this SDK writes to disk, and what it writes is a
+// sign-in that cannot be recovered without doing it again — so the file is
+// created 0600 and replaced by writing a temporary file and renaming it. A
+// torn write would leave every vendor's credential unreadable, not just the
+// one being saved.
 type FileStore struct {
 	path string
 	mu   sync.Mutex
@@ -129,18 +135,21 @@ func (s *FileStore) write(all map[string]Credential) error {
 	if err != nil {
 		return err
 	}
-	// Write-and-rename, for the reason on FileStore.
+	// Write-and-rename: the rename is atomic, so a crash mid-write leaves the
+	// previous file whole rather than half of a new one.
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".credentials-*")
 	if err != nil {
 		return fmt.Errorf("auth: writing %s: %w", s.path, err)
 	}
-	defer os.Remove(tmp.Name())
+	// Removing the temporary file is cleanup after either outcome: on success
+	// it has already been renamed away and there is nothing left to remove.
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

@@ -7,6 +7,274 @@ follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, the API may change between minor releases.
 Each such change is listed under **Changed** with what to write instead.
 
+## [Unreleased]
+
+An audit release. Nothing here is a new capability; it is the defects an audit
+of every package turned up, and the tests that would have caught them. Thirteen
+of the fixes below were reproduced before they were made — one of them a panic
+that took the caller's process down.
+
+The cause was uniform: `pkg/ai`, `pkg/ai/jsonschema`, `pkg/ai/catalog`,
+`pkg/ai/provider`, `pkg/ai/auth`, `pkg/ai/auth/oauth` and all five drivers had
+no test file of their own. Everything was verified through one black-box suite
+that exercised the paths a request takes when it works. So the fixes come with
+a unit-test layer per package, and statement coverage moves from 58% to 80%.
+
+Eight things break. In the order you will meet them:
+
+1. `ai.NewClient` is `ai.New`.
+2. A hook returning an error ends the exchange, as the documentation always said.
+3. `Run` no longer yields a turn's own failure on the iterator.
+4. `auth.Deployment` returns a value and an error.
+5. `catalog.NoReasoning` and `catalog.CopilotHeaders` are gone.
+6. `anthropic.NewWithClient` takes the protocol it is speaking.
+7. The MiniMax vendor is spelled `minimax`.
+8. A schema derived from a type this package cannot describe now panics.
+
+### Fixed
+
+- **A consumer that stops reading mid-stream no longer panics the process.**
+  On a driver error `Client.Stream` closed the open blocks and then yielded
+  `EventDone` without asking whether the first yield had been refused — so a
+  caller who broke out of the range on that closing block crashed with "range
+  function continued iteration after function for loop body returned false".
+  Every yield in the file now honours its answer. This is the one defect here
+  that could not be worked around from outside.
+- **A cut-off or failed OpenAI Responses turn is no longer silence.** The driver
+  read only `response.completed` and switched on the status inside it, but the
+  endpoint reports those outcomes as their own events — so a request that hit
+  `max_output_tokens` arrived as an empty success with no usage, no
+  `StopMaxTokens` and no error, and a server-side failure arrived as nothing at
+  all. `response.incomplete`, `response.failed` and `response.refusal.delta` are
+  each handled now.
+- **`pkg/ai` no longer reads the environment.** It never did so itself, but both
+  vendor SDKs prepend their own defaults, which read `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
+  `OPENAI_BASE_URL`, `OPENAI_ORG_ID` and `OPENAI_PROJECT_ID`. So
+  `ai.New(ai.Config{Model: m})` with an empty key silently used a process-wide
+  credential and host — which made the promise the package is built on, and the
+  multi-tenant server it exists for, false. All three drivers now assemble their
+  client from the struct form, and no environment variable is consulted.
+- **Anthropic overloads are retried again.** `Retry` treats a call as unreplayable
+  once output has reached the caller, but it counted any delta as output, and
+  the Anthropic driver's first delta carries only a model ID and a usage figure.
+  A 529 after `message_start` was therefore never retried. Only content counts
+  now.
+- **A model may omit an optional tool argument.** Every field goes into
+  `required` because OpenAI's strict mode demands it, with optionality expressed
+  as a null union instead — that is correct, and unchanged on the wire. But
+  `RunTools` validated the model's arguments against that same schema, so a
+  model on Anthropic, Gemini or Ollama that simply left `limit` out was told
+  "missing required property" and made to try again. `Check` now reads an absent
+  property as null when the schema admits null.
+- **Thinking replays on Vertex.** Three validation rules named the Anthropic
+  Messages protocol and not Anthropic on Vertex, so a signed thinking block was
+  refused there — ending any conversation that continued past the model's first
+  thinking turn — an unsigned one passed and was then dropped by the driver, and
+  sampling parameters validated but were never sent.
+- **Vertex honours the endpoint you gave it.** The Google credential option was
+  applied after the caller's, and it sets a base URL and an HTTP client of its
+  own, so `Config.BaseURL` was silently discarded. The order is reversed. A
+  caller's `HTTPClient` is still dropped, because the credential *is* that
+  client's transport and layering one over it would remove the authentication —
+  that is now said out loud rather than claimed otherwise.
+- **A Vertex driver says it is one.** It returned the Anthropic driver
+  unchanged, so `Name()`, every `Error.Driver` and every listed model reported
+  `anthropic-messages`.
+- **Gemini's thinking tokens are counted.** The driver read only
+  `candidatesTokenCount`; Gemini reports reasoning separately as
+  `thoughtsTokenCount`, so every thinking turn under-reported its output and its
+  cost. `Usage.Reasoning` is now filled here and by the Responses driver, and is
+  a memo inside `Output` rather than a figure beside it, because `Pricing.Cost`
+  prices `Output` alone.
+- **Two parallel tool calls no longer collapse into one.** Gemini omits
+  `functionCall.id`, and the Anthropic request builder minted the same
+  compatibility ID for every call that lacked one, so a batch of two came out as
+  a batch of one.
+- **A session created empty can be reopened.** `SetMessages` announced a
+  replacement unconditionally, so seeding a fresh agent with the empty history a
+  new session hands back recorded a snapshot of nothing — which the fold then
+  read as a corrupt file and refused. Both shipped examples did exactly that,
+  and `examples/agent-session`'s promise that a second run continues the first
+  was not true. A replacement is now announced only when something was actually
+  replaced, and an empty conversation is a state a session can hold.
+- **A session id cannot escape its store.** `jsonl` joined the id onto the root
+  with no validation, so `Delete("")` removed the entire store and `"../x"`
+  reached outside it — with ids that come from application input, the `-resume`
+  flag in the example included. Empty, `.`, `..` and anything carrying a
+  separator are refused by every method.
+- **A session survives the process dying mid-write.** The reader gave up on a
+  torn final line and reported no sequence number, and the writer appended
+  straight onto those bytes with no newline between — so the next entry was
+  swallowed into an unreadable line and numbering restarted at one. The tail is
+  truncated when the file is opened, and the sequence is recovered from the last
+  line that parses.
+- **A corrupt line in the middle of a session is an error, not a shorter
+  session.** Reading stopped silently at the first line that would not parse, so
+  damage in the middle came back as a conversation with its end missing — the
+  hole a fold cannot survive. Only an unparsable *final* line is still tolerated.
+- **A hook that fails ends the exchange.** `PreTool` and `PostTool` turned an
+  error into a tool error the model was shown and carried on, while every
+  document said an error ends the exchange. It does now, with `StopError`, and
+  the calls that will never run report as much. `Decision{Block: true}` remains
+  the other answer: a refusal the model is told about and may work around. That
+  is the whole difference between the two things a gate returns.
+- **A cancelled batch stops between tools.** A sequential batch ran every
+  remaining tool after `Interrupt`, because nothing checked the turn's context
+  between them.
+- **An interrupted call is still paid for.** The turn returned before adding the
+  response's usage, so the tokens a cancelled stream had already spent vanished
+  from `TurnEnd`.
+- **A message added at the end of a turn arrives before the next turn's, not
+  after it.** `AddMessages` queued past the last step boundary was drained one
+  step into the following exchange, which put it after that exchange's own
+  input — a conversation in an order nobody said things in.
+- **`SetTools` takes effect where it says.** The toolset was read per call, so a
+  change landed in the middle of a batch the model had already been offered; it
+  is snapshotted when the batch begins.
+- **Deleting a session no longer breaks the store.** A vanished `meta.json` was
+  treated as fatal, so one session removed while another was appending made
+  every later `Meta` and `List` on that store fail.
+- **`bedrock-openai` can reason.** It declared a reasoning ladder with no
+  thinking dialect, so the driver returned before ever reading the field — an
+  inert row that looked configured. A catalog invariant now refuses that
+  combination.
+- **`catalog.Model("minimax/…")` resolves.** The vendor was keyed `minmax`, a
+  misspelling of the brand every other field spells correctly. The row is
+  `minimax`; the old key still resolves through an alias.
+- **A live-listed model keeps what the catalog knows.** `provider.Provider`
+  decorated an unlisted ID with its protocol and vendor only, dropping the
+  window and reasoning ladder the vendor's own resolver would have inferred from
+  the ID — so a model newer than the table came back stripped. `Config.Resolve`
+  carries that resolver, and `Vendor.Provider` installs it.
+- **Two clients no longer race to refresh one token.** Each call built its own
+  token source, so two clients for the same interactive vendor renewed
+  independently with the same rotating refresh token: the second renewal failed
+  and the last write won. There is one source per vendor and store, the store is
+  re-read immediately before renewing, and a failed save of a rotated token is
+  now an error rather than a silently spent credential.
+- **A tier no longer zeroes the rates it does not mention.** Pricing tiers
+  replaced all four rates wholesale, so a tier that stated only an input rate
+  priced everything else at nothing.
+- **A 401 whose body mentions tokens is still a 401.** Message matching ran
+  ahead of the status code, so any failure whose text contained a
+  context-exceeded phrase was classified as one — and as not retryable. The
+  message is consulted only when the status cannot answer.
+- **A cancelled call is classified.** `context.Canceled` came back bare from the
+  client and from `Retry`, so `IsKind(err, KindCanceled)` was false for the one
+  cancel a caller causes on purpose, while the same cancel from a driver was
+  classified.
+- **A message carrying an orphaned tool result keeps its text.** `Repair`
+  dropped the whole turn; it now removes the orphaned blocks and keeps the turn
+  if anything wire-visible is left. Invalid UTF-8 in the system prompt, in a
+  tool result's name and in a reasoning summary is now replaced too — previously
+  only message content was.
+- **`json:",omitempty"` names its field.** The deriver read the tag's empty name
+  as the property name, so the field was called `""` and the model could never
+  fill it. An empty struct also derived `"required": null`, which two drivers
+  forwarded verbatim.
+- **A field the deriver cannot describe is refused, not guessed.** A type with
+  its own `MarshalJSON` was described by its Go fields, so `big.Int` became an
+  empty object and `json.RawMessage` an array of integers — schemas that reject
+  the JSON their own type writes. `MarshalText` is still derived, as a string,
+  because that shape is knowable. An `enum` tag on a bool field is parsed as
+  booleans rather than producing members it can never match.
+- **Gemini can be told not to think.** The off rung sent no thinking
+  configuration at all, so the model kept its default reasoning; an explicit
+  zero budget is sent now.
+- **Reasoning under the `reasoning` key is not dropped.** The Chat Completions
+  driver read only `reasoning_content`, losing what OpenRouter and Ollama send,
+  and read neither unless the model declared a ladder.
+- **Tool calls survive a cut stream.** Chat Completions returned on the error
+  before yielding the calls it had accumulated.
+- **An Anthropic error carries its code.** The message was the SDK's rendering
+  of the whole request line and raw body, and the code was always empty; both
+  are read from the error payload now.
+- **`disable_parallel_tool_use` is sent only when it is true**, rather than as
+  `false` on every constrained tool choice — a field a third-party
+  Anthropic-compatible host may not accept.
+- **Redacted thinking survives a tool call.** The driver ignored it on the way in
+  and had no way to send it back, though Anthropic requires it echoed.
+- **Gemini lists the models it can generate with**, by asking whether
+  `generateContent` is among a model's supported methods rather than by matching
+  substrings in its name.
+- **`Entries` honours its context** in both stores. It ignored cancellation.
+
+### Changed
+
+- **`ai.NewClient` is now `ai.New`.** Every constructor here is named for what it
+  returns — that is the rule `doc.go` states and every driver package and
+  `provider.New` already followed — and this one was the exception that made the
+  rule read as a description of something else. `NewClient` remains for one
+  release as a deprecated alias. Write `ai.New(cfg)`.
+- **A hook's error ends the exchange.** See Fixed. Code that relied on `PreTool`
+  or `PostTool` returning an error to tell the model something should return
+  `Decision{Block: true, Reason: …}` instead, which is what that value is for.
+- **`Run` reports a turn's failure once.** The iterator yielded `out.Err` after
+  `TurnEnd` had already carried it, so every caller saw a failure twice — the
+  shipped chat example printed a Ctrl-C as both "(canceled)" and "context
+  canceled". The iterator's error is now reserved for what happens outside a
+  turn, `ErrBusy` today. Read `TurnEnd.Err`.
+- **`auth.Deployment` returns `(ai.ProtocolConfig, error)`**, and no longer knows
+  what a Vertex deployment is. Which environment variables a vendor needs, and
+  what to build from them, is a `Deployment` function on the catalog row —
+  `auth` reads the table rather than special-casing one protocol.
+- **`catalog.NoReasoning` and `catalog.CopilotHeaders` are gone.** Both were
+  exported package-level values any caller could mutate for the whole process.
+  The headers are read off the vendor row, which is returned by value.
+- **`auth.Transport` is unexported.** It had no constructor and no exported
+  field, so nothing outside the package could make or read one.
+- **`anthropic.NewWithClient` takes the protocol it speaks** as a third
+  argument, so a driver built on the Anthropic client can report a different
+  `API` — which is what `anthropic/vertex` needs.
+- **`session.NewRecorder` is unexported**, and `Entry.Payload` with it. The
+  recorder it built had neither the turn offset nor the restored history, so on
+  a resumed session it double-counted turns and rewrote the conversation it had
+  just read. `session.Open` is the way in.
+- **`ai.Content.IsEmpty`, `ai.Content.Images`, `ai.Client.ContextWindow` and
+  `ai.IsOverflow` are gone.** None had a caller; `IsEmpty` also disagreed with
+  the package's own notion of an empty message about whether thinking counts.
+- **`openai/internal/errs` is `openai/internal/oai`**, and now holds what the two
+  OpenAI drivers share — the client constructor, the error reader, the inline
+  image framing — instead of three would-be packages. Failure classification
+  moved up to `driver/internal/errs`, where all five drivers can reach it and
+  nothing outside `driver/` can.
+- **`MessageUpdate` carries its `Turn`.** It was the one event that did not,
+  against what `event.go` said about all of them.
+
+### Added
+
+- **A unit-test layer in every package that lacked one** — the stream lifecycle
+  and the consumer that breaks mid-stream, `Repair`, `Classify`, `Retry`, schema
+  derivation and checking, the Gemini SSE parser, tool-call fragment
+  accumulation, error classification across all five drivers, the credential
+  store and the token refresh, the provider merge, and the catalog's invariants.
+  Statement coverage across `pkg/` goes from 58% to 80%; `pkg/ai/auth/oauth` from
+  nothing at all to 87%.
+- **`TestCatalogInvariants` and a golden table.** Vendor rows are data, and
+  nothing checked them — which is how an inert reasoning ladder and a misspelled
+  brand survived. The invariants pin unique ids and display order, a protocol
+  this SDK serves, a `Compat` whose type matches it, a parseable `Verified`
+  date, at most one default rung, and a thinking dialect wherever a ladder is
+  declared. `golden_test.go` holds the whole resolved table, so a change to one
+  row that moves another shows up as a diff.
+- **`catalog.Vendor.Resolve` and `provider.Config.Resolve`**, so a host's live
+  listing keeps what the catalog knows about a model the table has never named.
+- **`catalog.Vendor.Deployment` and `catalog.MissingDeploymentError`.**
+- **`auth.Flow` and `auth.RegisterFlow`**, following `ai.RegisterAPI`'s shape.
+  Interactive sign-in was a closed set of two hard-coded vendors; a consumer can
+  add a third now.
+- **`oauth.ExpiryMargin`**, the one expiry rule. There were three, disagreeing.
+- **`golangci-lint` in CI**, with a configuration for this repository and a
+  `make golangci-lint` target. The findings it reports on files this release did
+  not touch are excluded by name with a note saying they are outstanding work,
+  not accepted.
+- **Dependabot watches `gomod`.** Only GitHub Actions were watched, and the two
+  vendor SDKs had drifted forty minor releases behind — which is how the
+  Responses driver came to be reading events the endpoint had stopped sending
+  that way.
+
+
 ## [0.2.0] - 2026-08-31
 
 This release is `pkg/agent`: the loop around a model call, its events, its

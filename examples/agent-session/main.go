@@ -54,7 +54,7 @@ func main() {
 	}
 }
 
-func run(model, dir, resume string, fresh, list bool, keep int, prompt string) error {
+func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (err error) {
 	ctx := context.Background()
 
 	// A store is a directory. Nothing about it is agent-specific: it holds
@@ -63,7 +63,13 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) e
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() {
+		// Close is what writes the metadata a later listing reads, so losing
+		// its error loses the session index.
+		if cerr := store.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	if list {
 		return listSessions(ctx, store)
@@ -122,6 +128,8 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) e
 	var end agent.TurnEnd
 	for e, err := range a.Run(ctx, ai.UserMessage(prompt)) {
 		if err != nil {
+			// Outside-the-turn failures only; the exchange reports its own on
+			// TurnEnd, which is what end holds when the loop finishes.
 			return err
 		}
 		rec.Handle(ctx, e)
@@ -137,7 +145,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) e
 		fmt.Fprintf(os.Stderr, "\nthe session was not fully written: %v\n", err)
 	}
 	fmt.Printf("\n\n\033[2m— %s · %d tokens · %s\033[0m\n", end.StopReason, end.Usage.Total(), rec.ID())
-	return nil
+	return end.Err
 }
 
 // compact throws most of the conversation away, and tells the session nothing

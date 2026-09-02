@@ -69,23 +69,38 @@ type Error struct {
 	Err error
 }
 
+// Error renders whichever of the four parts are set. Each separator belongs to
+// the part that follows it, so an error carrying no kind reads as an error
+// rather than as "driver: : message".
 func (e *Error) Error() string {
 	var sb strings.Builder
 	if e.Driver != "" {
 		sb.WriteString(e.Driver)
-		sb.WriteString(": ")
 	}
-	sb.WriteString(string(e.Kind))
+	if e.Kind != "" {
+		if sb.Len() > 0 {
+			sb.WriteString(": ")
+		}
+		sb.WriteString(string(e.Kind))
+	}
 	if e.Status != 0 {
-		fmt.Fprintf(&sb, " (http %d)", e.Status)
+		if sb.Len() > 0 {
+			sb.WriteByte(' ')
+		}
+		fmt.Fprintf(&sb, "(http %d)", e.Status)
 	}
 	msg := e.Message
 	if msg == "" && e.Err != nil {
 		msg = e.Err.Error()
 	}
 	if msg != "" {
-		sb.WriteString(": ")
+		if sb.Len() > 0 {
+			sb.WriteString(": ")
+		}
 		sb.WriteString(msg)
+	}
+	if sb.Len() == 0 {
+		return "ai: unspecified error"
 	}
 	return sb.String()
 }
@@ -240,7 +255,11 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 }
 
 // Classify assembles an *Error from what a driver has to hand. It applies the
-// checks in the order that keeps each from masking the next:
+// checks in the order that keeps each from masking the next: an error already
+// classified is passed through untouched, a caller's cancel outranks whatever
+// the transport made of it, the message is read only where the answer could
+// live in it, then the status decides, and the transport has the last word
+// when there was no status at all.
 func Classify(driver string, status int, resp *http.Response, code, message string, err error) *Error {
 	var typed *Error
 	if errors.As(err, &typed) {
@@ -255,9 +274,16 @@ func Classify(driver string, status int, resp *http.Response, code, message stri
 		out.Kind = KindCanceled
 		return out
 	}
-	if kind, ok := ClassifyMessage(out.Message); ok {
-		out.Kind = kind
-		return out
+	// A context overflow arrives as an ordinary 400 with no machine-readable
+	// code, so the message is the only place it can be read from — but only
+	// where a 400 is what happened. A 401 or a 503 whose body happens to
+	// mention tokens is still an expired key or a busy server, and calling
+	// either a context overflow makes a retryable failure fatal.
+	if status == 0 || status == http.StatusBadRequest {
+		if kind, ok := ClassifyMessage(out.Message); ok {
+			out.Kind = kind
+			return out
+		}
 	}
 	if status != 0 {
 		out.Kind, out.RetryAfter = classifyStatus(status, resp)

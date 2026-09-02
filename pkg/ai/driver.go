@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
-	"sort"
 	"sync"
 )
 
@@ -58,8 +57,11 @@ type TokenCounter interface {
 //     Switching from one type to the other closes the open one first, so a
 //     driver need not send EndBlock to change what it is producing.
 //   - The last block need not be closed. The stream ending closes it.
-//   - Usage accumulates across deltas rather than replacing, so a protocol that
-//     reports input and output separately may send them separately.
+//   - Usage is merged field by field, last non-zero wins, so a protocol that
+//     reports input at the start and output at the end may send them
+//     separately, and a zero never erases a figure already in hand. Each field
+//     must carry the running total for the call, not an increment: two deltas
+//     of ten output tokens leave the count at ten.
 //   - StopReason, Model and ID are last-write-wins, and an empty one is
 //     ignored — a driver repeating them costs nothing.
 //   - Yielding an error ends the stream. Everything already yielded stays on
@@ -139,8 +141,8 @@ var registry struct {
 
 // RegisterAPI registers the driver factory for a wire protocol. Driver
 // packages call it from init, so a blank import is enough to make a protocol
-// reachable through Open. Registering the same API twice panics: two factories
-// for one protocol means one of them is silently dead.
+// reachable through New and NewDriver. Registering the same API twice panics:
+// two factories for one protocol means one of them is silently dead.
 func RegisterAPI(api API, f Factory) {
 	if f == nil {
 		panic("ai: RegisterAPI with nil factory for " + string(api))
@@ -164,7 +166,7 @@ func RegisteredAPIs() []API {
 	for api := range registry.m {
 		out = append(out, api)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 
@@ -184,12 +186,12 @@ func NewDriver(cfg Config) (Driver, error) {
 	return f(cfg)
 }
 
-// NewClient builds the driver for cfg.Model's protocol and wraps it in a Client. It
+// New builds the driver for cfg.Model's protocol and wraps it in a Client. It
 // is NewDriver plus NewClientWithDriver, and it is the constructor most callers
 // want: reach for NewDriver and NewClientWithDriver only when the driver has to pass
 // through your hands on the way, which is what wrapping it in Middleware
 // needs.
-func NewClient(cfg Config, opts ...Option) (*Client, error) {
+func New(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err
@@ -197,10 +199,18 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 	return NewClientWithDriver(d, cfg.Model, opts...), nil
 }
 
+// NewClient is the former name of New, kept for one release so the rename is
+// not a compile error in every caller at once.
+//
+// Deprecated: call New.
+func NewClient(cfg Config, opts ...Option) (*Client, error) { return New(cfg, opts...) }
+
 // UnregisteredAPIError reports a model whose protocol has no driver linked
 // into the binary — nearly always a missing blank import.
 type UnregisteredAPIError struct {
-	API        API
+	API API
+	// Registered is what is linked in, in the order RegisteredAPIs gave it,
+	// which is sorted.
 	Registered []API
 }
 
@@ -210,12 +220,7 @@ func (e *UnregisteredAPIError) Error() string {
 			"that implements it from %s — or %s/all for every protocol, which costs "+
 			"every protocol's dependencies", e.API, driverPath, driverPath)
 	}
-	names := make([]string, len(e.Registered))
-	for i, a := range e.Registered {
-		names[i] = string(a)
-	}
-	slices.Sort(names)
-	return fmt.Sprintf("ai: no driver registered for API %q (registered: %v)", e.API, names)
+	return fmt.Sprintf("ai: no driver registered for API %q (registered: %v)", e.API, e.Registered)
 }
 
 // ProtocolConfig is one driver's protocol-specific construction settings — the
@@ -231,28 +236,45 @@ type ProtocolConfig interface {
 //
 //	vertex, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
 func ProtocolConfigAs[T ProtocolConfig](config Config) (T, error) {
-	var zero T
-	if config.ProtocolConfig == nil {
-		return zero, nil
-	}
-	native, ok := config.ProtocolConfig.(T)
-	if ok {
-		return native, nil
-	}
-	return zero, &Error{
-		Kind:    KindInvalidRequest,
-		Message: fmt.Sprintf("ai: native config has type %T; driver expects %s", config.ProtocolConfig, reflect.TypeFor[T]()),
-	}
+	return protocolValueAs[T](config.ProtocolConfig, "native driver configuration")
 }
 
 // RejectProtocolConfig returns an invalid-request error for a protocol with no
 // native construction options.
 func RejectProtocolConfig(config Config, driver string) error {
-	if config.ProtocolConfig == nil {
+	return rejectProtocolValue(config.ProtocolConfig, driver, "native configuration")
+}
+
+// The two escape hatches are the same handful of lines twice — a type
+// assertion that must not fail quietly. Whichever side is being read, a value
+// the driver cannot use is the caller asking for something they will not get,
+// and saying so beats falling back to the zero value.
+
+// protocolValueAs pulls one driver's own value out of the interface carrying
+// it. what names the side for the error message.
+func protocolValueAs[T any](held any, what string) (T, error) {
+	var zero T
+	if held == nil {
+		return zero, nil
+	}
+	if native, ok := held.(T); ok {
+		return native, nil
+	}
+	return zero, &Error{
+		Kind: KindInvalidRequest,
+		Message: fmt.Sprintf("ai: got %s of type %T; driver expects %s",
+			what, held, reflect.TypeFor[T]()),
+	}
+}
+
+// rejectProtocolValue reports a driver-specific value handed to a protocol that
+// defines none.
+func rejectProtocolValue(held any, driver, what string) error {
+	if held == nil {
 		return nil
 	}
 	return &Error{
 		Driver: driver, Kind: KindInvalidRequest,
-		Message: "ai: driver " + driver + " does not define native configuration",
+		Message: "ai: driver " + driver + " does not define " + what,
 	}
 }

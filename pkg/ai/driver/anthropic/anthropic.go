@@ -22,6 +22,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
 )
 
 // Name is the driver's identifier, matching the protocol it speaks.
@@ -39,25 +40,35 @@ type Driver struct {
 	client sdk.Client
 	model  ai.Model
 	compat ai.AnthropicCompat
+	// api is the protocol as the caller reached it. Vertex serves this same
+	// wire format from Google's cloud, and says so.
+	api  ai.API
+	fail errs.Classifier
 }
 
 // New builds a driver from a Config. It is registered as the factory for
-// ai.APIAnthropicMessages, so ai.NewClient reaches it without an explicit call.
+// ai.APIAnthropicMessages, so ai.New reaches it without an explicit call.
 func New(cfg ai.Config) (ai.Driver, error) {
 	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
-	return NewWithClient(sdk.NewClient(ClientOptions(cfg)...), cfg)
+	return NewWithClient(NewSDKClient(ClientOptions(cfg)...), cfg, ai.APIAnthropicMessages)
 }
 
 // ClientOptions builds the SDK options a Config asks for: endpoint,
-// credential, transport and headers.
-func ClientOptions(cfg ai.Config) []option.RequestOption {
+// credential, transport and headers. Anything in deployment — the Vertex auth
+// option is the only one — is applied ahead of them, so a Config's own endpoint
+// still wins over the host such an option carries with it.
+func ClientOptions(cfg ai.Config, deployment ...option.RequestOption) []option.RequestOption {
 	opts := []option.RequestOption{
+		// The SDK's own host. NewSDKClient skips the constructor that would
+		// otherwise supply it, along with the environment it reads.
+		option.WithEnvironmentProduction(),
 		// Retries belong to the caller, which alone knows the budget for the
 		// whole turn. An SDK retrying underneath would multiply it silently.
 		option.WithMaxRetries(0),
 	}
+	opts = append(opts, deployment...)
 	if url := cfg.URL(); url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
@@ -79,21 +90,49 @@ func ClientOptions(cfg ai.Config) []option.RequestOption {
 	return opts
 }
 
-// NewWithClient builds a driver over an already-constructed SDK client.
-func NewWithClient(client sdk.Client, cfg ai.Config) (ai.Driver, error) {
+// NewSDKClient assembles the SDK client for a set of options.
+//
+// It does not call sdk.NewClient, which prepends DefaultClientOptions — and
+// that reads ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL out
+// of the process environment. A Config is meant to be the whole truth about
+// where a request goes and what it presents; a server holding one tenant's
+// credential per client cannot have another arrive from the ambient
+// environment. Overriding each variable as it is discovered would leave the
+// next one to leak, so none is ever read.
+//
+// Only the two services the driver uses are wired. Reaching through this client
+// for a third would find one carrying no options at all, and fail on its first
+// call — loudly, rather than by quietly taking a credential from somewhere
+// else.
+func NewSDKClient(opts ...option.RequestOption) sdk.Client {
+	client := sdk.Client{Options: opts}
+	client.Messages = sdk.NewMessageService(opts...)
+	client.Models = sdk.NewModelService(opts...)
+	return client
+}
+
+// NewWithClient builds a driver over an already-constructed SDK client. api is
+// the protocol the client actually reaches: the Vertex deployment speaks this
+// wire format from a different host under different credentials, and an error
+// or a model listing labelled with the direct API would send a caller to the
+// wrong console.
+func NewWithClient(client sdk.Client, cfg ai.Config, api ai.API) (ai.Driver, error) {
 	if cfg.Model.ID == "" {
-		return nil, fmt.Errorf("%s: model ID is required", Name)
+		return nil, fmt.Errorf("%s: model ID is required", api)
 	}
 
 	return &Driver{
 		client: client,
 		model:  cfg.Model,
 		compat: ai.CompatOf[ai.AnthropicCompat](cfg.Model),
+		api:    api,
+		fail:   errs.For(string(api), details),
 	}, nil
 }
 
-// Name identifies the driver.
-func (d *Driver) Name() string { return Name }
+// Name identifies the driver: the protocol it speaks, from the deployment it
+// speaks it to.
+func (d *Driver) Name() string { return string(d.api) }
 
 // Stream runs one Messages call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
@@ -117,7 +156,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		}
 
 		stream := d.client.Messages.NewStreaming(ctx, *params, reqOpts...)
-		defer stream.Close()
+		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		var toolID, toolName string
 		var toolInput strings.Builder
@@ -145,10 +184,21 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "content_block_start":
 				block := event.AsContentBlockStart()
-				if block.ContentBlock.Type == "tool_use" {
+				switch block.ContentBlock.Type {
+				case "tool_use":
 					toolID = block.ContentBlock.ID
 					toolName = block.ContentBlock.Name
 					toolInput.Reset()
+				case "redacted_thinking":
+					// Thinking the safety classifier withheld. It arrives whole
+					// and unreadable, and the API rejects a later tool-use turn
+					// whose history drops it, so it is carried as opaque state
+					// rather than discarded.
+					if !yield(ai.Delta{Block: ai.ReasoningBlock(ai.ReasoningItem{
+						EncryptedContent: block.ContentBlock.Data,
+					})}, nil) {
+						return
+					}
 				}
 
 			case "content_block_delta":
@@ -190,11 +240,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "message_delta":
 				md := event.AsMessageDelta()
-				// Anthropic reports only output tokens here. Some
-				// Anthropic-compatible endpoints (SenseNova) instead send
-				// input tokens in message_delta rather than message_start;
-				// zeros are ignored on merge, so passing both is safe either
-				// way.
+				// Every figure here is the running total for the call, which is
+				// what a Delta's usage is meant to carry. Input tokens are
+				// repeated rather than new: Anthropic sends them at
+				// message_start, and some compatible endpoints (SenseNova) only
+				// here, so passing both is right either way.
 				if !yield(ai.Delta{
 					StopReason: mapStopReason(string(md.Delta.StopReason)),
 					Usage: &ai.Usage{
@@ -210,7 +260,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		}
 
 		if err := stream.Err(); err != nil {
-			yield(ai.Delta{}, d.wrapStream(err))
+			yield(ai.Delta{}, d.fail.WrapStream(err))
 		}
 	}
 }
@@ -228,8 +278,6 @@ func mapStopReason(reason string) ai.StopReason {
 		return ai.StopSequence
 	case "refusal":
 		return ai.StopRefusal
-	case "":
-		return ""
 	default:
 		return ai.StopReason(reason)
 	}
@@ -259,7 +307,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	}
 	res, err := d.client.Messages.CountTokens(ctx, count)
 	if err != nil {
-		return 0, d.wrap(err)
+		return 0, d.fail.Wrap(err)
 	}
 	return int(res.InputTokens), nil
 }
@@ -293,12 +341,12 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		out = append(out, ai.Model{
 			ID:     m.ID,
 			Name:   name,
-			API:    ai.APIAnthropicMessages,
+			API:    d.api,
 			Vendor: d.model.Vendor,
 		})
 	}
 	if err := pager.Err(); err != nil {
-		return nil, d.wrap(err)
+		return nil, d.fail.Wrap(err)
 	}
 	return out, nil
 }

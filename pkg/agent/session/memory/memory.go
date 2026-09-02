@@ -1,13 +1,7 @@
-// Package memory keeps sessions in the process that made them.
-//
-// It is the second implementation of session.Store, which is what makes the
-// first one replaceable: an interface with one implementation has never been
-// asked whether it describes anything but that implementation. It is also what
-// the session package's own tests record into, so they exercise the contract
-// rather than the filesystem.
-//
-// Nothing here survives the process. For a session that should, see the jsonl
-// store beside it.
+// Package memory keeps sessions in the process that made them: the second
+// implementation of session.Store, which is what keeps the first one
+// replaceable, and what the session package's own tests record into. Nothing
+// here survives the process — for a session that should, see jsonl beside it.
 package memory
 
 import (
@@ -55,13 +49,7 @@ func (s *Store) Create(_ context.Context, meta session.Meta) (session.Meta, erro
 		return session.Meta{}, fmt.Errorf("memory: session %s already exists", meta.ID)
 	}
 
-	now := time.Now().UTC()
-	if meta.CreatedAt.IsZero() {
-		meta.CreatedAt = now
-	}
-	meta.UpdatedAt = now
-	meta.Entries = 0
-
+	meta = meta.Created(time.Now().UTC())
 	s.sessions[meta.ID] = &held{meta: meta}
 	return meta, nil
 }
@@ -83,22 +71,18 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 	now := time.Now().UTC()
 	for _, e := range entries {
 		h.meta.Entries++
-		if e.Seq == 0 {
-			e.Seq = h.meta.Entries
-		}
-		if e.At.IsZero() {
-			e.At = now
-		}
 		// Cloned on the way in: a caller that reuses the slice it handed over
 		// must not be able to rewrite what was recorded.
-		h.entries = append(h.entries, cloneEntry(e))
+		h.entries = append(h.entries, cloneEntry(e.Stamped(h.meta.Entries, now)))
 	}
 	h.meta.UpdatedAt = now
 	return nil
 }
 
-// Entries reads a session from the beginning.
-func (s *Store) Entries(_ context.Context, id string) iter.Seq2[session.Entry, error] {
+// Entries reads a session from the beginning. A cancelled context ends the
+// read with its error rather than quietly, because a read that stopped early
+// and said nothing is indistinguishable from a shorter session.
+func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
 	s.mu.Lock()
 	h, ok := s.sessions[id]
 	var snapshot []session.Entry
@@ -113,6 +97,10 @@ func (s *Store) Entries(_ context.Context, id string) iter.Seq2[session.Entry, e
 			return
 		}
 		for _, e := range snapshot {
+			if err := ctx.Err(); err != nil {
+				yield(session.Entry{}, err)
+				return
+			}
 			if !yield(cloneEntry(e), nil) {
 				return
 			}
@@ -141,7 +129,7 @@ func (s *Store) List(_ context.Context) ([]session.Meta, error) {
 	for _, h := range s.sessions {
 		out = append(out, h.meta)
 	}
-	slices.SortFunc(out, func(a, b session.Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	slices.SortFunc(out, session.ByRecency)
 	return out, nil
 }
 

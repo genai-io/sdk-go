@@ -24,10 +24,15 @@ var ErrBusy = errors.New("agent: an exchange is already running")
 //	    render(e)
 //	}
 //
-// Breaking out of the range ends the exchange, the same as Interrupt. Events
-// arrive on the ranging goroutine, so a caller who needs the agent to run
-// ahead of a slow reader forwards them to a buffer of its own — how deep, and
-// what to drop, being decisions only the caller can make.
+// A turn that fails says so on TurnEnd, which carries the reason and the
+// error. The iterator's own error is for what happens outside a turn — ErrBusy
+// today — so that one failure is reported once, in one place.
+//
+// Breaking out of the range ends the exchange, the same as Interrupt, and
+// returns once the tools still running have returned: they report through this
+// loop. Events arrive on the ranging goroutine, so a caller who needs the
+// agent to run ahead of a slow reader forwards them to a buffer of its own —
+// how deep, and what to drop, being decisions only the caller can make.
 //
 // Repeating it is a for loop, and that loop is the caller's: how messages are
 // batched, what a failure means and when to stop are things the application
@@ -72,10 +77,7 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 			}
 		}
 
-		out := a.turn(ctx, emit, in)
-		if out.Err != nil && !gone {
-			yield(nil, out.Err)
-		}
+		a.turn(ctx, emit, in)
 	}
 }
 
@@ -116,17 +118,18 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 
 		resp, err := a.stream(ctx, emit, inf)
 
+		// A failed call is paid for too, and so is an abandoned one: the
+		// tokens are spent whatever became of the answer.
+		if resp != nil {
+			spent.Add(resp.Usage)
+		}
+
 		if ctx.Err() != nil {
 			// Abandoned, not failed — but the span still closes: the reader
 			// that saw it open has not gone anywhere.
 			emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 				Response: resp, Err: ctx.Err()})
 			return nil, spent, ctx.Err()
-		}
-
-		// A failed call is paid for too: the tokens are spent either way.
-		if resp != nil {
-			spent.Add(resp.Usage)
 		}
 
 		// Read before PostInfer can overwrite err: a failed call earns another
@@ -206,7 +209,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 		// once PostInfer has had it.
 		switch evt.Type {
 		case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd:
-			emit(MessageUpdate{Delta: evt})
+			emit(MessageUpdate{Turn: a.turnNow(), Delta: evt})
 		case ai.EventDone:
 			resp = evt.Response
 		}
@@ -223,6 +226,10 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 	return resp, nil
 }
 
+// errAbandoned is a call that was vetted and then never run, because a hook
+// failed elsewhere in the batch and the exchange is ending with it.
+var errAbandoned = errors.New("agent: the exchange ended before this call ran")
+
 // call is one tool call and what became of it, kept in the model's order.
 type call struct {
 	ai.ToolCall // as any PreTool hook rewrote it
@@ -238,10 +245,23 @@ type call struct {
 }
 
 // act runs the tools a model asked for: vet the batch, run what survives,
-// close each as it lands, reply.
-func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) ([]ai.ToolResult, bool) {
+// close each as it lands, reply. A hook that failed is returned as the third
+// value and ends the exchange; nothing else here does.
+func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) ([]ai.ToolResult, bool, error) {
 	batch := make([]call, len(calls))
 	messages := a.Messages()
+	// The toolset this batch is answered against, read once: SetTools takes
+	// effect on the next inference, and a call already asked for belongs to
+	// the last one.
+	tools := a.Tools()
+
+	// hookErr is a hook that could not do its job, which is infrastructure and
+	// not the model's business: the batch stops and the exchange ends with it.
+	var hookErr error
+
+	// opened is how many calls have a span to close. A batch abandoned partway
+	// leaves the rest unstarted, and an unstarted call is not reported at all.
+	opened := 0
 
 	// Vet: the batch cannot choose a concurrency until it knows every tool.
 	// One at a time here, so a gate never reasons about concurrency.
@@ -249,8 +269,9 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		batch[i] = call{ToolCall: calls[i]}
 		c := &batch[i]
 		emit(ToolStart{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input})
+		opened = i + 1
 
-		tool, ok := a.toolNamed(c.Name)
+		tool, ok := toolNamed(tools, c.Name)
 		if !ok {
 			c.err = fmt.Errorf("no tool named %q is available", c.Name)
 			continue
@@ -273,7 +294,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 				Call: c.ToolCall, Tool: tool, Messages: messages,
 			})
 			if err != nil {
-				c.err = err
+				c.err, hookErr = err, err
 				break
 			}
 			c.stop = c.stop || decision.Terminate
@@ -290,6 +311,25 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 				c.Input = decision.Arguments
 			}
 		}
+		if hookErr != nil {
+			break
+		}
+	}
+
+	// A failed hook abandons the batch. The spans that opened still close — a
+	// reader that saw a call start has not gone anywhere — but the after-hooks
+	// are not asked about calls nobody will hear the answer to, and the model
+	// is told nothing, because it is not being asked again.
+	if hookErr != nil {
+		for i := range opened {
+			c := &batch[i]
+			if c.err == nil {
+				c.err = errAbandoned
+			}
+			emit(ToolEnd{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input,
+				Result: c.result, Err: c.err})
+		}
+		return nil, false, hookErr
 	}
 
 	// Closing a call: its span, the after-hooks, its vote. Refused above or
@@ -307,7 +347,9 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 				Call: c.ToolCall, Tool: c.tool, Result: c.result, Err: c.err, Messages: messages,
 			})
 			if err != nil {
-				c.err = err
+				// The batch is still drained — the tools running are writing
+				// to a channel this loop reads — and then the exchange ends.
+				hookErr = err
 				break
 			}
 			if replacement != nil {
@@ -380,6 +422,15 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		} else {
 			go func() {
 				for _, i := range pending {
+					// An ended turn stops the queue where it is. The calls
+					// that never ran say so the way one that watched its
+					// context would have, so the batch still answers in full.
+					if err := ctx.Err(); err != nil {
+						c := &batch[i]
+						c.result, c.err = Result{}, err
+						ch <- update{index: i}
+						continue
+					}
 					run(i)
 				}
 			}()
@@ -397,6 +448,10 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		}
 	}
 
+	if hookErr != nil {
+		return nil, false, hookErr
+	}
+
 	// Reply: in the model's order, and the batch stops only on a full vote.
 	results := make([]ai.ToolResult, len(batch))
 	terminate := true
@@ -410,7 +465,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		}
 		terminate = terminate && c.stop
 	}
-	return results, terminate
+	return results, terminate, nil
 }
 
 // turn runs one exchange: the input goes in, then reason and act alternate
@@ -450,11 +505,25 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 
 	// Read again rather than pinned: only this function advances it, so both
 	// ends of the turn carry the same number.
+	//
+	// Every way out of the loop below names a reason. None means the stack is
+	// unwinding through here — a hook panicked — and an exchange that is not
+	// ending but exploding has no outcome to report.
 	defer func() {
+		if out.StopReason == "" {
+			return
+		}
 		out.Turn = a.turnNow()
 		emit(out)
 	}()
 
+	// Anything queued after the last exchange's final step boundary enters
+	// ahead of this one's input, which is the order it was said in. Left to
+	// the boundary below it would be announced after a message that came
+	// later, and a fold is only the conversation if that order is the truth.
+	for _, m := range a.taken() {
+		a.add(emit, m)
+	}
 	for _, m := range in {
 		a.add(emit, m)
 	}
@@ -502,7 +571,13 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			return out.stopped(endedBecause(resp.StopReason))
 		}
 
-		results, terminate := a.act(turnCtx, emit, calls)
+		results, terminate, err := a.act(turnCtx, emit, calls)
+		if err != nil {
+			// A hook failed. Nothing is answered to the model: the exchange
+			// ends here, and the unanswered call is ai.Repair's to tidy if
+			// this conversation is used again.
+			return out.failed(err)
+		}
 		a.add(emit, ai.ToolResultsMessage(results...))
 		if terminate {
 			return out.stopped(StopTerminated)

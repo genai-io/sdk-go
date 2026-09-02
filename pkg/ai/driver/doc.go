@@ -23,7 +23,7 @@
 //
 // # What follows
 //
-// A vendor is a row in the catalog, not a package. Seventeen of the vendors
+// A vendor is a row in the catalog, not a package. Eighteen of the vendors
 // this SDK reaches — DeepSeek, Moonshot, Ollama, Groq, xAI, Alibaba, Z.ai,
 // OpenRouter and the rest — speak OpenAI Chat Completions, so they share
 // openai/chat and differ only in data. Adding one is an entry in
@@ -31,9 +31,15 @@
 //
 // A directory that groups rather than implements earns its place when it
 // scopes an internal package to exactly the code allowed to use it. openai/
-// holds two protocols because OpenAI defines two, and openai/internal/openaierr
-// reads the shape of an error from the SDK they share — the compiler, not a
-// convention, is what keeps the Anthropic and Gemini drivers out of it.
+// holds two protocols because OpenAI defines two, and openai/internal/oai holds
+// what they share — the client, the shape of an error from the SDK they both
+// use, the framing of an inline image. The compiler, not a convention, is what
+// keeps the Anthropic and Gemini drivers out of it.
+//
+// internal/errs is the same move one directory up. Turning a failure into an
+// ai.Error is identical everywhere once the protocol's own error type has been
+// read, and every driver here is entitled to it — so it sits where every driver,
+// and nothing outside driver/, can reach it.
 //
 // A protocol served from somebody else's cloud is a deployment, not a protocol.
 // anthropic/vertex speaks Anthropic Messages, calls into package anthropic for
@@ -57,4 +63,5 @@
 //	openai/chat       OpenAI Chat Completions — the industry interchange format
 //	openai/responses  OpenAI Responses — the only one that replays reasoning state
 //	all               a blank import that registers every one of them
+//	internal/errs     failure classification, shared by all of them
 package driver

@@ -44,20 +44,18 @@ type Agent struct {
 	tools    []Tool
 	hooks    []Hook
 	// replaced and pending are the two ways the conversation changes from
-	// outside an exchange, waiting for one to announce them. They are
-	// separate because they are announced at different moments: a
-	// replacement at the start of the next exchange, since everything before
-	// it is gone, and queued messages at the next step boundary, which is the
-	// one place it is safe to change what the model is about to see.
+	// outside an exchange, waiting for one to announce them: a replacement at
+	// the start of the next exchange, since everything before it is gone, and
+	// queued messages at the next step boundary, or ahead of the next
+	// exchange's own input when no step boundary is left.
 	replaced bool
 	pending  []ai.Message
 	// stopTurn ends the turn in flight. Never nil: between turns it is a
 	// no-op, so Interrupt needs no case for having nothing to interrupt.
 	stopTurn context.CancelFunc
-	// stopped closes when the exchange in flight has finished — after the
-	// last event, and after the agent is free to run another. Between
-	// exchanges it is an already-closed channel, for the same reason stopTurn
-	// is a no-op there.
+	// stopped closes when the exchange in flight has finished, and between
+	// exchanges is an already-closed channel — for the same reason stopTurn is
+	// a no-op there.
 	stopped chan struct{}
 
 	// Their own synchronisation, because they are read outside mu.
@@ -103,10 +101,7 @@ func WithHooks(hooks ...Hook) Option {
 // The first exchange announces these as MessagesReplaced: they entered without
 // ever being appended, so a fold over what was appended would not have them.
 func WithMessages(msgs []ai.Message) Option {
-	return func(a *Agent) {
-		a.messages = slices.Clone(msgs)
-		a.replaced = len(msgs) > 0
-	}
+	return func(a *Agent) { a.setMessages(msgs) }
 }
 
 // WithMaxSteps caps model calls per exchange. Zero means no cap.
@@ -181,10 +176,9 @@ func WithRetry(attempts int, backoff time.Duration) Option {
 	}
 }
 
-// New builds an agent on a model handle. The client is the parameter because
-// an agent without one can do nothing, and it is bound to that model for its
-// lifetime. A missing one is an error rather than a panic: a library that
-// panics on bad configuration takes the caller's process down with it.
+// New builds an agent on a model handle, which is the parameter because an
+// agent without one can do nothing. A missing client is an error rather than a
+// panic: a library that panics takes its caller's process down with it.
 func New(client *ai.Client, opts ...Option) (*Agent, error) {
 	if client == nil {
 		return nil, errors.New("agent: a client is required")
@@ -218,15 +212,26 @@ func (a *Agent) Messages() []ai.Message {
 // both work. To add to it instead use AddMessages: reading Messages and
 // setting the result back races with the exchange that may be running.
 //
-// The next exchange announces this as MessagesReplaced.
+// The next exchange announces this as MessagesReplaced, unless there was
+// nothing to replace and nothing to replace it with.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.setMessages(msgs)
+}
+
+// setMessages is the rule WithMessages and SetMessages both follow. Replacing
+// a conversation is not appending to it and anything watching has to be told
+// which happened — but replacing nothing with nothing happened to nobody, and
+// announcing it records a snapshot of an empty conversation, which is what left
+// a session seeded from its own empty history unreadable.
+//
+// The caller holds a.mu, except at construction, where there is nobody to race.
+func (a *Agent) setMessages(msgs []ai.Message) {
+	if len(a.messages) > 0 || len(msgs) > 0 {
+		a.replaced = true
+	}
 	a.messages = slices.Clone(msgs)
-	// Replacing a conversation is not appending to it, and anything watching
-	// has to be told which happened. There is nowhere to say so from here —
-	// no exchange is running — so it is said at the start of the next one.
-	a.replaced = true
 }
 
 // takeReplaced reports a replacement since the last exchange, and what it left.
@@ -247,7 +252,9 @@ func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 // AddMessages puts messages into the conversation from outside an exchange —
 // typed while the model worked, or routed in from elsewhere. They enter at the
 // next step boundary, which is the one place it is safe to change what the
-// model is about to see. Between exchanges, pass them to Run instead.
+// model is about to see; queued after the last one, they enter ahead of the
+// next exchange's own input, which is the order they were said in. Between
+// exchanges, pass them to Run instead.
 func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -264,14 +271,16 @@ func (a *Agent) taken() []ai.Message {
 	return msgs
 }
 
+// Tools returns a snapshot of what the model may call.
 func (a *Agent) Tools() []Tool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return slices.Clone(a.tools)
 }
 
-// SetTools replaces what the model may call. It takes effect on the next
-// inference, not mid-stream.
+// SetTools replaces what the model may call, from the next inference on. The
+// batch of calls a model already asked for is answered by the toolset it was
+// offered, not this one.
 func (a *Agent) SetTools(tools ...Tool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -287,6 +296,7 @@ func (a *Agent) definitions() []ai.Tool {
 	return defs
 }
 
+// System returns the system prompt as it stands.
 func (a *Agent) System() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -328,11 +338,10 @@ func (a *Agent) inference() *Inference {
 	}
 }
 
-// toolNamed finds a tool by the name the model used.
-func (a *Agent) toolNamed(name string) (Tool, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, t := range a.tools {
+// toolNamed finds a tool by the name the model used, in the set the batch is
+// being answered against rather than whatever SetTools has left since.
+func toolNamed(tools []Tool, name string) (Tool, bool) {
+	for _, t := range tools {
 		if t.Schema().Name == name {
 			return t, true
 		}
@@ -354,6 +363,10 @@ func (a *Agent) toolNamed(name string) (Tool, bool) {
 //
 //	<-a.Interrupt()      // the turn is over; the agent is idle
 //	a.SetMessages(fresh)
+//
+// A tool already running is asked to stop through its context and then waited
+// for, because it reports through the exchange. One that ignores cancellation
+// holds this channel open for as long as it takes to return.
 //
 // Between exchanges there is nothing to interrupt: the channel is already
 // closed and this does nothing.

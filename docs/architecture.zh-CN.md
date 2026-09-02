@@ -46,7 +46,7 @@ ai.Client           一个模型
 | --- | --- | --- |
 | `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
 | `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
-| `ai.Config` | `ai.NewClient(cfg)` | `*ai.Client` |
+| `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
 | `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
 | 一个引用字符串 | `auth.Client(ref)` | `*ai.Client` |
 | 一个厂商 ID | `auth.Provider(id)` | `*provider.Provider` |
@@ -56,7 +56,7 @@ ai.Client           一个模型
 两个包级入口，区别只有一个——**允不允许环境变量说话**：
 
 ```go
-ai.NewClient(Config)         // 模型、密钥、主机都由你提供
+ai.New(Config)               // 模型、密钥、主机都由你提供
 auth.Client("vendor/model")  // catalog 和环境变量提供
 ```
 
@@ -103,7 +103,7 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
   openrouter  huggingface      |
   bedrock-openai               |
 
-  anthropic   minmax           |
+  anthropic   minimax          |
   mimo        volcengine       +--> anthropic-messages      --> driver/anthropic
                                             4 家
 
@@ -285,8 +285,12 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **`ResolveLevel` 的吸附是静默的。** 在一个只提供 off 和 high 的模型上要 `medium`，会拿到 high，而没有任何东西告诉调用方。方向是有意的——**静默地想得比要求的少，是更让人意外的那种失败**——但这份静默目前调用方观察不到。
 
+**目录里多数条目没有价格。** 五十五行里有三十三行的价目表是零，八行没有上下文窗口。其中一部分是对的——Vertex 由 Google 按项目计费，本地 Ollama 不由任何人计费——剩下的就是一张没人填完的表。对未定价的模型，`Pricing.Cost` 返回零而不是估算值，理由和未知窗口报告零余量是同一个：**猜出来的数字在两个方向上都会静默地错**。所以靠这个计费的调用方，得先确认价目表不是空的，再信那个总额。
+
 ## 测试
 
-一个黑盒包，`test/`。它像应用一样 import 这个 SDK，并且只断言两件事：**到达端点的字节，和回来的那个值。** 每个端点都是一个桩 HTTP 服务器，所以整套测试不需要网络、不需要凭证。
+**两层，而且这个划分是刻意的。**
 
-这个形状是刻意的。伸进内部去看的测试，验证的是它被写出来时对着的那份实现；这些测试验证的是契约，所以一个在相同线上行为背后被重写的 driver，仍然能跑过。
+`test/` 是一个黑盒包。它像应用一样 import 这个 SDK，并且只断言两件事：**到达端点的字节，和回来的那个值。** 每个端点都是一个桩 HTTP 服务器，所以整套测试不需要网络、不需要凭证。伸进内部去看的测试，验证的是它被写出来时对着的那份实现；这些测试验证的是契约，所以一个在相同线上行为背后被重写的 driver，仍然能跑过。
+
+在它旁边，每个包测自己的单元——流式生命周期、历史修复、错误分类、schema 派生、SSE 解析、工具调用分片累积、目录的不变量、凭证存储。**契约测试说的是五个协议彼此一致，单元测试说的是每一个在别人碰不到的那个 case 上是对的。**

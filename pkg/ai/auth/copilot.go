@@ -17,6 +17,10 @@ import (
 // and renewed underneath the caller.
 const copilotClientID = "Iv1.b507a08c87ecfe98"
 
+// copilotVendor is the catalog row this flow signs into, and the row the
+// editor headers below are read from.
+const copilotVendor = "copilot"
+
 // copilotEndpoints is a struct rather than four constants so a test can point
 // the flow at a stub. Nothing else varies them.
 type copilotEndpoints struct {
@@ -30,12 +34,12 @@ var copilotDefaults = copilotEndpoints{
 	api:      "https://api.individual.githubcopilot.com",
 }
 
-var copilotFlow = newCopilotFlow(copilotDefaults)
+func init() { RegisterFlow(copilotVendor, newCopilotFlow(copilotDefaults)) }
 
-func newCopilotFlow(e copilotEndpoints) flow {
-	return flow{
-		method: "device code",
-		login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
+func newCopilotFlow(e copilotEndpoints) Flow {
+	return Flow{
+		Method: "device code",
+		Login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
 			cfg := oauth.Config{ClientID: copilotClientID, Scopes: []string{"read:user"}, HTTPClient: client}
 			token, err := oauth.Device(ctx, cfg, oauth.DeviceEndpoints{
 				Code:  e.device,
@@ -58,7 +62,7 @@ func newCopilotFlow(e copilotEndpoints) flow {
 			// in again every half hour.
 			return Credential{Access: token.Access, Endpoint: api}, nil
 		},
-		token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
+		Token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
 			api, expires, token, err := copilotSessionToken(ctx, client, e, c.Access)
 			if err != nil {
 				return "", time.Time{}, c, err
@@ -84,15 +88,19 @@ func copilotSessionToken(ctx context.Context, client *http.Client, e copilotEndp
 	}
 	req.Header.Set("Authorization", "Bearer "+githubToken)
 	req.Header.Set("Accept", "application/json")
-	for k, v := range catalog.CopilotHeaders {
-		req.Header.Set(k, v)
+	// The same editor headers the vendor row carries: this exchange refuses a
+	// caller that does not identify itself as one, exactly as the API does.
+	if v, ok := catalog.Find(copilotVendor); ok {
+		for name, value := range v.Headers {
+			req.Header.Set(name, value)
+		}
 	}
 
 	res, err := client.Do(req)
 	if err != nil {
 		return "", time.Time{}, "", err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
 		return "", time.Time{}, "", err

@@ -30,12 +30,10 @@ func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
 //	other := ai.NewClientWithDriver(driver, tweaked)                         // talk to a different model
 func (c *Client) Model() Model { return cloneModel(c.model) }
 
+// Driver returns the driver this client calls through, so a caller who built
+// the client from a Config can still reach the protocol seam — to wrap it in
+// Middleware, or to ask it for an optional capability.
 func (c *Client) Driver() Driver { return c.driver }
-
-// ContextWindow returns the model's maximum input tokens, or 0 when unknown.
-// Callers sizing a conversation against it must treat 0 as "cannot tell" — a
-// substituted guess is acted on silently and is wrong in both directions.
-func (c *Client) ContextWindow() int { return c.model.ContextWindow }
 
 // unsupportedBy reports that a driver does not implement an optional
 // capability, naming both so the message says what to do about it.
@@ -99,9 +97,14 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 
 		for delta, err := range c.driver.Stream(ctx, req) {
 			if err != nil {
+				// Closing first flushes the block the failure interrupted, and
+				// the consumer may well stop on it — yielding again after it
+				// said no panics the range loop.
+				if !blocks.close() {
+					return
+				}
 				// One yield carries both: the error fires the caller's error
 				// branch, and the event carries what was produced before it.
-				blocks.close()
 				yield(Event{Type: EventDone, Response: finish(err)}, err)
 				return
 			}
@@ -172,7 +175,10 @@ func Collect(events iter.Seq2[Event, error]) (*Response, error) {
 // be measured differently from how it is sent.
 func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option) (*Request, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		// Classified rather than handed back bare, so IsKind(err, KindCanceled)
+		// answers the same whether the cancel was caught here or came back
+		// through a driver.
+		return nil, &Error{Kind: KindCanceled, Err: err}
 	}
 	req := newRequest(c.model, messages, c.defaults, opts)
 	if err := c.model.validateStructure(req); err != nil {
@@ -180,7 +186,9 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 	}
 	// History repair is semantic preparation, not wire translation. Doing it
 	// once here makes exact counting, estimated counting, middleware and
-	// generation observe the same conversation.
+	// generation observe the same conversation. The system prompt reaches the
+	// wire outside Messages, so Repair never sees it and it is cleaned here.
+	req.System = sanitizeText(req.System)
 	req.Messages = Repair(req.Messages)
 
 	if err := c.model.validate(req); err != nil {

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,15 +37,15 @@ type Store struct {
 	live map[string]*openSession
 }
 
-// openSession is what a session costs to keep appending to: the entries file
-// held open, and the sequence number of the last entry written to it.
+// openSession is what a session costs to keep appending to: where it lives,
+// the entries file held open, and the sequence number of the last entry
+// written to it.
 //
-// meta.json is deliberately not on this path. Entries and UpdatedAt are a
-// cache of what the entries file already knows — how many lines it has, and
-// when it was last written — and rewriting a file atomically to maintain a
-// cache, once per recorded event, cost more than everything else here put
-// together. It is brought up to date when somebody reads it instead.
+// meta.json is deliberately not on this path: Entries and UpdatedAt only cache
+// what the entries file already knows, and rewriting a file atomically once
+// per recorded event cost more than everything else here put together.
 type openSession struct {
+	dir     string // validated when the session was opened
 	mu      sync.Mutex
 	file    *os.File
 	seq     int64
@@ -67,17 +68,15 @@ func (s *Store) Create(_ context.Context, meta session.Meta) (session.Meta, erro
 	if meta.ID == "" {
 		meta.ID = newID()
 	}
-	now := time.Now().UTC()
-	if meta.CreatedAt.IsZero() {
-		meta.CreatedAt = now
-	}
-	meta.UpdatedAt = now
-	meta.Entries = 0
+	meta = meta.Created(time.Now().UTC())
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dir := s.dir(meta.ID)
+	dir, err := s.dir(meta.ID)
+	if err != nil {
+		return session.Meta{}, err
+	}
 	if _, err := os.Stat(dir); err == nil {
 		return session.Meta{}, fmt.Errorf("jsonl: session %s already exists", meta.ID)
 	}
@@ -108,18 +107,15 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 	now := time.Now().UTC()
 	for _, e := range entries {
 		open.seq++
-		if e.Seq == 0 {
-			e.Seq = open.seq
-		}
-		if e.At.IsZero() {
-			e.At = now
-		}
+		e = e.Stamped(open.seq, now)
 		line, err := json.Marshal(e)
 		if err != nil {
 			return fmt.Errorf("jsonl: encoding entry %d: %w", e.Seq, err)
 		}
-		w.Write(line)
-		w.WriteByte('\n')
+		// bufio keeps the first write error and Flush below is where it is
+		// read, so checking each write here would report it twice.
+		_, _ = w.Write(line)
+		_ = w.WriteByte('\n')
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -130,7 +126,7 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 	// Another process listing sessions reads meta.json, so it cannot be left
 	// behind forever — but it can be left behind for a while.
 	if open.unsaved >= metaEvery {
-		return open.save(s.dir(id))
+		return open.save()
 	}
 	return nil
 }
@@ -140,12 +136,19 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 // bounds how stale it looks to a process reading the file directly.
 const metaEvery = 64
 
-// Entries reads a session from the beginning.
-func (s *Store) Entries(_ context.Context, id string) iter.Seq2[session.Entry, error] {
+// Entries reads a session from the beginning. A cancelled context ends the
+// read with its error rather than quietly, because a read that stopped early
+// and said nothing is indistinguishable from a shorter session.
+func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
 	return func(yield func(session.Entry, error) bool) {
-		f, err := os.Open(filepath.Join(s.dir(id), entriesFile))
+		dir, err := s.dir(id)
+		if err != nil {
+			yield(session.Entry{}, err)
+			return
+		}
+		f, err := os.Open(filepath.Join(dir, entriesFile))
 		if errors.Is(err, fs.ErrNotExist) {
-			if _, statErr := os.Stat(s.dir(id)); errors.Is(statErr, fs.ErrNotExist) {
+			if _, statErr := os.Stat(dir); errors.Is(statErr, fs.ErrNotExist) {
 				yield(session.Entry{}, fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound))
 			}
 			return // an existing session with nothing in it yet
@@ -154,18 +157,35 @@ func (s *Store) Entries(_ context.Context, id string) iter.Seq2[session.Entry, e
 			yield(session.Entry{}, err)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }() // read-only: nothing is lost by closing it
 
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		// A line that does not parse is held rather than acted on until the
+		// next one says which it was. As the last line it is a process killed
+		// mid-append and the session ends there, one entry short; with
+		// anything after it, it is a hole in the middle, and a conversation
+		// with a hole in it is worse than a short one.
+		var torn error
+		n := 0
 		for scanner.Scan() {
+			n++
+			if err := ctx.Err(); err != nil {
+				yield(session.Entry{}, err)
+				return
+			}
+			if torn != nil {
+				yield(session.Entry{}, torn)
+				return
+			}
 			line := scanner.Bytes()
 			if len(line) == 0 {
 				continue
 			}
 			var e session.Entry
 			if err := json.Unmarshal(line, &e); err != nil {
-				return // a torn tail ends the session, it does not fail it
+				torn = fmt.Errorf("jsonl: %s: line %d does not parse: %w", id, n, err)
+				continue
 			}
 			if !yield(e, nil) {
 				return
@@ -190,6 +210,10 @@ func (s *Store) SetMeta(_ context.Context, meta session.Meta) error {
 	if err := s.saveAll(); err != nil {
 		return err
 	}
+	dir, err := s.dir(meta.ID)
+	if err != nil {
+		return err
+	}
 	current, err := s.readMeta(meta.ID)
 	if err != nil {
 		return err
@@ -199,7 +223,7 @@ func (s *Store) SetMeta(_ context.Context, meta session.Meta) error {
 	meta.Entries = current.Entries
 	meta.CreatedAt = current.CreatedAt
 	meta.UpdatedAt = time.Now().UTC()
-	return writeMeta(s.dir(meta.ID), meta)
+	return writeMeta(dir, meta)
 }
 
 // List returns every session, most recently updated first.
@@ -222,7 +246,7 @@ func (s *Store) List(_ context.Context) ([]session.Meta, error) {
 		}
 		out = append(out, meta)
 	}
-	slices.SortFunc(out, func(a, b session.Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	slices.SortFunc(out, session.ByRecency)
 	return out, nil
 }
 
@@ -260,23 +284,33 @@ func (s *Store) Fork(ctx context.Context, id string, upto int64) (session.Meta, 
 	return s.Meta(ctx, forked.ID)
 }
 
-// Delete removes a session and everything in it.
+// Delete removes a session and everything in it. Deleting one that is being
+// appended to is a race the caller has to settle: the appender can recreate the
+// entries file inside the directory being removed, and this then fails saying
+// so rather than pretending the session is gone.
 func (s *Store) Delete(_ context.Context, id string) error {
+	dir, err := s.dir(id)
+	if err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	live, ok := s.live[id]
 	delete(s.live, id)
 	s.mu.Unlock()
 	if ok {
 		live.mu.Lock()
-		live.file.Close()
+		_ = live.file.Close() // the directory holding it is removed below
 		live.mu.Unlock()
 	}
-	return os.RemoveAll(s.dir(id))
+	return os.RemoveAll(dir)
 }
 
-// Close saves what was appended and releases the files. Not closing loses
-// nothing an entries file holds — those are on disk the moment Append returns
-// — only how up to date meta.json looks to somebody reading it from elsewhere.
+// Close saves what was appended and releases the files. Not closing loses no
+// entry: Append hands each one to the operating system, which serves it to
+// every other reader whether or not this store closed. What is lost is how up
+// to date meta.json looks from outside — and, since nothing here fsyncs, the
+// tail of a session on a machine that loses power.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	live := s.live
@@ -284,15 +318,24 @@ func (s *Store) Close() error {
 	s.mu.Unlock()
 
 	var firstErr error
-	for id, o := range live {
-		if err := o.close(s.dir(id)); err != nil && firstErr == nil {
+	for _, o := range live {
+		if err := o.close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
 }
 
-func (s *Store) dir(id string) string { return filepath.Join(s.root, id) }
+// dir is where a session lives. The id is checked rather than joined straight
+// in: ids come from application input, and Join would let "" name the store
+// itself and ".." name a directory beside it — either of which Delete would
+// then remove.
+func (s *Store) dir(id string) (string, error) {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
+		return "", fmt.Errorf("jsonl: %q is not a session id", id)
+	}
+	return filepath.Join(s.root, id), nil
+}
 
 // open returns the session's live state, opening the entries file and
 // recovering its sequence number the first time it is asked for.
@@ -304,11 +347,17 @@ func (s *Store) open(id string) (*openSession, error) {
 	}
 	s.mu.Unlock()
 
-	dir := s.dir(id)
+	dir, err := s.dir(id)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := os.Stat(filepath.Join(dir, metaFile)); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound)
 	}
 	path := filepath.Join(dir, entriesFile)
+	if err := trimTornTail(path); err != nil {
+		return nil, err
+	}
 	seq, err := lastSeq(path)
 	if err != nil {
 		return nil, err
@@ -321,40 +370,47 @@ func (s *Store) open(id string) (*openSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if live, ok := s.live[id]; ok { // somebody opened it while this one read
-		f.Close()
+		_ = f.Close() // nothing was written through it
 		return live, nil
 	}
-	live := &openSession{file: f, seq: seq}
+	live := &openSession{dir: dir, file: f, seq: seq}
 	s.live[id] = live
 	return live, nil
 }
 
 // save brings meta.json up to date with what has been appended. The caller
 // holds the session's lock.
-func (o *openSession) save(dir string) error {
+func (o *openSession) save() error {
 	if o.unsaved == 0 {
 		return nil
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, metaFile))
+	raw, err := os.ReadFile(filepath.Join(o.dir, metaFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		// The session was deleted under whoever is still appending to it: there
+		// is no metadata to bring up to date. Failing here would fail every
+		// Meta and List on the store, for every other session too.
+		o.unsaved = 0
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	var meta session.Meta
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return fmt.Errorf("jsonl: reading %s metadata: %w", filepath.Base(dir), err)
+		return fmt.Errorf("jsonl: reading %s metadata: %w", filepath.Base(o.dir), err)
 	}
 	meta.Entries, meta.UpdatedAt = o.seq, o.updated
-	if err := writeMeta(dir, meta); err != nil {
+	if err := writeMeta(o.dir, meta); err != nil {
 		return err
 	}
 	o.unsaved = 0
 	return nil
 }
 
-func (o *openSession) close(dir string) error {
+func (o *openSession) close() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	err := o.save(dir)
+	err := o.save()
 	if closeErr := o.file.Close(); err == nil {
 		err = closeErr
 	}
@@ -365,24 +421,66 @@ func (o *openSession) close(dir string) error {
 // to read it reads the truth.
 func (s *Store) saveAll() error {
 	s.mu.Lock()
-	ids := make([]string, 0, len(s.live))
 	live := make([]*openSession, 0, len(s.live))
-	for id, o := range s.live {
-		ids = append(ids, id)
+	for _, o := range s.live {
 		live = append(live, o)
 	}
 	s.mu.Unlock()
 
 	var firstErr error
-	for i, o := range live {
+	for _, o := range live {
 		o.mu.Lock()
-		err := o.save(s.dir(ids[i]))
+		err := o.save()
 		o.mu.Unlock()
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+// trimTornTail drops a half-written last line, so that the next entry begins a
+// line of its own rather than joining the wreckage of the one a killed process
+// left. That entry is lost either way; this is what stops it taking the next
+// one with it.
+func trimTornTail(path string) (err error) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// This function truncates, so a failure to close is a failure to truncate
+	// on any filesystem that reports one late.
+	defer func() { err = errors.Join(err, f.Close()) }()
+
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil || size == 0 {
+		return err
+	}
+	var last [1]byte
+	if _, err := f.ReadAt(last[:], size-1); err != nil {
+		return err
+	}
+	if last[0] == '\n' {
+		return nil
+	}
+	for window := int64(8 * 1024); ; window *= 4 {
+		if window > size {
+			window = size
+		}
+		buf := make([]byte, window)
+		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
+			return err
+		}
+		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+			return f.Truncate(size - window + int64(i) + 1)
+		}
+		if window == size {
+			return f.Truncate(0) // nothing was ever written whole
+		}
+	}
 }
 
 // lastSeq recovers the number to carry on from by reading the end of the
@@ -398,7 +496,7 @@ func lastSeq(path string) (int64, error) {
 		}
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only: nothing is lost by closing it
 
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil || size == 0 {
@@ -412,28 +510,43 @@ func lastSeq(path string) (int64, error) {
 		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
 			return 0, err
 		}
+		// Back over whole lines until one parses: numbering from where the
+		// readable part ended is the point, and a line that says nothing is
+		// not where it ended.
 		trimmed := bytes.TrimRight(buf, "\n")
-		if i := bytes.LastIndexByte(trimmed, '\n'); i >= 0 {
-			return seqOf(trimmed[i+1:]), nil
+		for {
+			i := bytes.LastIndexByte(trimmed, '\n')
+			if i < 0 {
+				break
+			}
+			if seq, ok := seqOf(trimmed[i+1:]); ok {
+				return seq, nil
+			}
+			trimmed = trimmed[:i]
 		}
-		if window == size {
-			return seqOf(trimmed), nil // the whole file is one line, or none
+		if window == size { // the whole file is one line, or none
+			seq, _ := seqOf(trimmed)
+			return seq, nil
 		}
 	}
 }
 
-func seqOf(line []byte) int64 {
+func seqOf(line []byte) (int64, bool) {
 	var e struct {
 		Seq int64 `json:"seq"`
 	}
 	if json.Unmarshal(line, &e) != nil {
-		return 0 // a torn tail numbers from where the readable part ended
+		return 0, false
 	}
-	return e.Seq
+	return e.Seq, true
 }
 
 func (s *Store) readMeta(id string) (session.Meta, error) {
-	raw, err := os.ReadFile(filepath.Join(s.dir(id), metaFile))
+	dir, err := s.dir(id)
+	if err != nil {
+		return session.Meta{}, err
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, metaFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return session.Meta{}, fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound)
 	}
@@ -458,10 +571,10 @@ func writeMeta(dir string, meta session.Meta) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }() // already renamed away on success
 
 	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // the write error is the one worth reporting
 		return err
 	}
 	if err := tmp.Close(); err != nil {

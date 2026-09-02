@@ -3,52 +3,23 @@ package session_test
 import (
 	"context"
 	"errors"
-	"iter"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
+	"github.com/genai-io/sdk-go/pkg/agent/internal/scripted"
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/agent/session/memory"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-type scripted struct {
-	mu      sync.Mutex
-	scripts [][]ai.Delta
-	calls   int
-}
-
-func (d *scripted) Name() string { return "scripted" }
-
-func (d *scripted) Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
-	d.mu.Lock()
-	n := d.calls
-	d.calls++
-	d.mu.Unlock()
-	return func(yield func(ai.Delta, error) bool) {
-		if n >= len(d.scripts) {
-			yield(ai.Delta{}, &ai.Error{Kind: ai.KindUnknown, Message: "no script"})
-			return
-		}
-		for _, delta := range d.scripts[n] {
-			if !yield(delta, nil) {
-				return
-			}
-		}
-	}
-}
-
-func text(s string) []ai.Delta {
-	return []ai.Delta{{Block: ai.TextBlock(s)}, {EndBlock: true}, {StopReason: ai.StopEndTurn}}
-}
+var text = scripted.Text
 
 func newAgent(t *testing.T, history []ai.Message, scripts ...[]ai.Delta) *agent.Agent {
 	t.Helper()
-	client := ai.NewClientWithDriver(&scripted{scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(&scripted.Driver{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client, agent.WithMessages(history))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -89,7 +60,11 @@ func jsonlStore(t *testing.T) *jsonl.Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 	return s
 }
 
@@ -325,7 +300,11 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer second.Close()
+	defer func() {
+		if err := second.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
 
 	// Finding it the way a program would, rather than by remembering the id.
 	sessions, err := second.List(ctx)

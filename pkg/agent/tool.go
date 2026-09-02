@@ -25,8 +25,11 @@ type Result struct {
 	Terminate bool
 }
 
+// TextResult is the answer most tools have: some text, for the model, and
+// nothing for the interface.
 func TextResult(text string) Result { return Result{Content: ai.TextContent(text)} }
 
+// Text is the part of the result the model is told, as a string.
 func (r Result) Text() string { return r.Content.Text() }
 
 // ResultText is what a tool call comes to say: its text, the error when it

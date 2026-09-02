@@ -34,17 +34,17 @@
 你实际会敲的那两个名字，是这条链上的**捷径**，而且每个都**literally 只有一行**：
 
 ```go
-// auth.Client = auth.Config + ai.NewClient
+// auth.Client = auth.Config + ai.New
 func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	cfg, err := Config(ref)
 	if err != nil {
 		return nil, err
 	}
-	return ai.NewClient(cfg, opts...)
+	return ai.New(cfg, opts...)
 }
 
-// ai.NewClient = ai.NewDriver + ai.NewClientWithDriver
-func NewClient(cfg Config, opts ...Option) (*Client, error) {
+// ai.New = ai.NewDriver + ai.NewClientWithDriver
+func New(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func NewClient(cfg Config, opts ...Option) (*Client, error) {
 client, err := auth.Client("openai/gpt-4.1")
 
 cfg, err := auth.Config("openai/gpt-4.1")
-client, err := ai.NewClient(cfg)
+client, err := ai.New(cfg)
 
 driver, err := ai.NewDriver(cfg)
 client := ai.NewClientWithDriver(driver, cfg.Model)
@@ -71,7 +71,7 @@ client := ai.NewClientWithDriver(driver, cfg.Model)
 | --- | --- | --- |
 | `auth.Client(ref)` | 命令行工具 | 一个引用。凭证由环境提供。 |
 | `auth.Config(ref)` | 同上，但端点或 `http.Client` 必须改 | 引用，外加你对 `Config` 的改动 |
-| `ai.NewClient(cfg)` | 服务端。**一点环境状态都不许读** | `Model` 和凭证 |
+| `ai.New(cfg)` | 服务端。**一点环境状态都不许读** | `Model` 和凭证 |
 | `ai.NewDriver(cfg)` | driver 必须经你的手——套 middleware | 同上，外加最后一步自己拼 |
 | `ai.NewClientWithDriver(driver, model)` | 你已经握着 driver 了，包括测试里的桩 | driver 和 `Model` |
 
@@ -99,19 +99,19 @@ cfg, err := auth.Config("openai/gpt-4.1")
 cfg.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
-client, err := ai.NewClient(cfg)
+client, err := ai.New(cfg)
 ```
 
 `auth.Config` 填好凭证和端点就停下，所以它返回的是一个**你可以随便改的普通 `ai.Config`**。
 
-## 停在 `ai.NewClient`
+## 停在 `ai.New`
 
 **`pkg/ai` 不读任何环境变量、不读任何文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：它做的任何事都不依赖环境状态，所以**两个请求不可能拿到彼此的凭证**。
 
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
-client, err := ai.NewClient(ai.Config{
+client, err := ai.New(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
 	BaseURL:    "https://gateway.internal/v1",

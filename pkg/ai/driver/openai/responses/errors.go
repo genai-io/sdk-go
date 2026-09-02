@@ -1,10 +1,16 @@
 package responses
 
 import (
-	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/errs"
 	wire "github.com/openai/openai-go/v3/responses"
+
+	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
+
+// fail classifies a transport or HTTP failure. The in-band kind below is this
+// protocol's own, and arrives inside a 200.
+var fail = errs.For(Name, oai.Details)
 
 // responseError converts an in-band API failure. These arrive inside a 200
 // response, so there is no status to classify from — the error code is the
@@ -29,5 +35,5 @@ func (d *Driver) responseError(code, message string) error {
 	return err
 }
 
-func wrap(err error) error       { return errs.Wrap(Name, err) }
-func wrapStream(err error) error { return errs.WrapStream(Name, err) }
+func wrap(err error) error       { return fail.Wrap(err) }
+func wrapStream(err error) error { return fail.WrapStream(err) }

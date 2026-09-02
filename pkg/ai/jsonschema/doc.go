@@ -24,7 +24,9 @@
 // A type that marshals to something other than its own fields is described by
 // what it marshals to: time.Time is a date-time string, not an object of
 // unexported fields. Getting that wrong produces a schema that rejects the JSON
-// its own Go type writes.
+// its own Go type writes. A MarshalText is knowable — encoding/json quotes it,
+// so the type is a string — but a MarshalJSON is not, so a type carrying one
+// that this package does not know is refused rather than guessed at.
 //
 // # The tags
 //
@@ -48,10 +50,11 @@
 // endpoint refuses.
 //
 // A key one edit from a keyword — enums, descrption — is refused rather than
-// ignored, and so is a jsonschema tag. Go drops an unrecognised key without a
-// word, which for these keys means losing the only thing the field was
-// annotated with. A key that is nobody's near miss is left alone: db, validate
-// and the rest belong to other tools.
+// ignored, and so are the jsonschema and ai tags, which name the two other
+// conventions a reader might expect to work here. Go drops an unrecognised key
+// without a word, which for these keys means losing the only thing the field
+// was annotated with. A key that is nobody's near miss is left alone: db,
+// validate and the rest belong to other tools.
 //
 // # Failing early
 //
@@ -64,10 +67,12 @@
 // Check is the other direction and does not panic. A model produced the value,
 // so a wrong one is expected traffic, and the error is phrased for the model
 // that has to correct it: "priority must be one of low, medium or high", named
-// by the path the caller wrote, not by a location inside the schema.
+// by the path the caller wrote, not by a location inside the schema. It also
+// reads required more loosely than the strict shape above writes it, since only
+// one of the providers makes the model answer that way; Check says why.
 //
 // # Where things live
 //
-//	derive.go  a Go type and its ai tags becoming a schema
+//	derive.go  a Go type and its tags becoming a schema
 //	check.go   a decoded value measured against one
 package jsonschema

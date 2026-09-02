@@ -29,6 +29,14 @@ const (
 	APIAnthropicVertex API = "anthropic-vertex"
 )
 
+// anthropicFamily reports whether this protocol carries an Anthropic Messages
+// body. Every rule about that body has to name both members, because Vertex
+// differs only in how the client authenticates and where it points — a rule
+// that lists one of them silently stops applying the moment a model moves.
+func (a API) anthropicFamily() bool {
+	return a == APIAnthropicMessages || a == APIAnthropicVertex
+}
+
 // VertexConfig is the deployment a Vertex-served model lives in. It is passed
 // as Config.ProtocolConfig to the anthropic/vertex driver.
 type VertexConfig struct {
@@ -222,36 +230,25 @@ func (m Model) String() string {
 
 // The JSON codec for Model.
 
-// modelJSON is Model without the custom marshalling, so the two methods below
-// can delegate the ordinary fields to the standard encoder.
+// plainModel is Model without its two methods, so the codec below can hand the
+// ordinary fields to the standard encoder instead of recursing into itself.
+type plainModel Model
+
+// modelJSON is the wire shape: every Model field as the standard encoder sees
+// it, with only Compat shadowed by its raw form. Restating the field list here
+// is what used to drop a newly added field from JSON without a word, so the
+// list is now the struct definition and cannot drift from it.
 type modelJSON struct {
-	ID             string            `json:"id"`
-	API            API               `json:"api"`
-	Name           string            `json:"name,omitempty"`
-	Vendor         string            `json:"vendor,omitempty"`
-	BaseURL        string            `json:"base_url,omitempty"`
-	ContextWindow  int               `json:"context_window,omitempty"`
-	MaxOutput      int               `json:"max_output,omitempty"`
-	Input          []Modality        `json:"input,omitempty"`
-	Reasoning      []ReasoningLevel  `json:"reasoning,omitempty"`
-	Pricing        Pricing           `json:"pricing,omitempty"`
-	Unsupported    Unsupported       `json:"unsupported,omitempty"`
-	Stage          Stage             `json:"stage,omitempty"`
-	Replacement    string            `json:"replacement,omitempty"`
-	SamplingParams map[string]any    `json:"sampling_params,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Compat         json.RawMessage   `json:"compat,omitempty"`
+	plainModel
+	Compat json.RawMessage `json:"compat,omitempty"`
 }
 
 // MarshalJSON writes the model, compat included.
 func (m Model) MarshalJSON() ([]byte, error) {
-	out := modelJSON{
-		ID: m.ID, API: m.API, Name: m.Name, Vendor: m.Vendor, BaseURL: m.BaseURL,
-		ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
-		Input: m.Input, Reasoning: m.Reasoning, Pricing: m.Pricing,
-		Unsupported: m.Unsupported, Stage: m.Stage, Replacement: m.Replacement,
-		SamplingParams: m.SamplingParams, Headers: m.Headers,
-	}
+	out := modelJSON{plainModel: plainModel(m)}
+	// The shadowed field is the one the encoder never reaches; clearing it says
+	// so, rather than leaving a second copy of compat to wonder about.
+	out.plainModel.Compat = nil
 	if m.Compat != nil {
 		raw, err := json.Marshal(m.Compat)
 		if err != nil {
@@ -269,13 +266,7 @@ func (m *Model) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
-	*m = Model{
-		ID: in.ID, API: in.API, Name: in.Name, Vendor: in.Vendor, BaseURL: in.BaseURL,
-		ContextWindow: in.ContextWindow, MaxOutput: in.MaxOutput,
-		Input: in.Input, Reasoning: in.Reasoning, Pricing: in.Pricing,
-		Unsupported: in.Unsupported, Stage: in.Stage, Replacement: in.Replacement,
-		SamplingParams: in.SamplingParams, Headers: in.Headers,
-	}
+	*m = Model(in.plainModel)
 	if len(in.Compat) == 0 || string(in.Compat) == "null" {
 		return nil
 	}
@@ -352,9 +343,8 @@ func cloneModel(model Model) Model {
 	out.Input = slices.Clone(model.Input)
 	out.Reasoning = slices.Clone(model.Reasoning)
 	out.Pricing.Tiers = slices.Clone(model.Pricing.Tiers)
-	out.SamplingParams = cloneStringMap(model.SamplingParams)
+	out.SamplingParams = maps.Clone(model.SamplingParams)
 	out.Headers = maps.Clone(model.Headers)
-	out.Compat = model.Compat
 	return out
 }
 

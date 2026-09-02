@@ -12,7 +12,6 @@ package oauth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,7 +32,7 @@ type Token struct {
 	Scope string `json:"scope,omitempty"`
 }
 
-// Valid reports whether the token can still be used, leaving a margin so a
+// Valid reports whether the token can still be used, leaving ExpiryMargin so a
 // request does not start with a token that expires while in flight.
 func (t Token) Valid() bool {
 	if t.Access == "" {
@@ -42,13 +41,17 @@ func (t Token) Valid() bool {
 	if t.Expires.IsZero() {
 		return true // no stated lifetime: the provider will say when it stops working
 	}
-	return time.Now().Add(expiryMargin).Before(t.Expires)
+	return time.Now().Add(ExpiryMargin).Before(t.Expires)
 }
 
-// expiryMargin is how early a token is treated as expired. A request that
+// ExpiryMargin is how early a token is treated as expired. A request that
 // starts with thirty seconds left can still finish after it has run out, and
 // the resulting 401 looks like a bad credential rather than a stale one.
-const expiryMargin = 60 * time.Second
+//
+// It is exported because it is the one answer to "is this still good": package
+// auth applies the same margin to a stored credential, and two packages
+// disagreeing about that by a few seconds is a failure nobody can reproduce.
+const ExpiryMargin = 60 * time.Second
 
 // Prompt is what a person has to do to finish signing in: a page to open and,
 // for the device grant, a code to type into it.
@@ -156,7 +159,9 @@ func postForm(ctx context.Context, client *http.Client, endpoint string, form ur
 	if err != nil {
 		return tokenResponse{}, err
 	}
-	defer res.Body.Close()
+	// Closing a body that has been read out is a formality; there is nothing
+	// to report and nothing to do about it.
+	defer func() { _ = res.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
@@ -204,11 +209,6 @@ func Refresh(ctx context.Context, cfg Config, endpoint, refreshToken string) (To
 		token.Refresh = refreshToken
 	}
 	return token, nil
-}
-
-// asOAuthError unwraps an *Error, if err is one.
-func asOAuthError(err error, target **Error) bool {
-	return errors.As(err, target)
 }
 
 func truncate(s string, n int) string {

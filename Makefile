@@ -1,8 +1,9 @@
 GOFILES := $(shell find . -path './vendor' -prune -o -path './.git' -prune -o -name '*.go' -print)
 # The newest x/tools that still builds on the go directive in go.mod.
 GOIMPORTS_VERSION := v0.42.0
+GOLANGCI_VERSION := v2.12.2
 
-.PHONY: build format format-check lint test cover ci clean install-format-tools check-format-tools
+.PHONY: build format format-check lint golangci-lint test cover ci clean install-format-tools check-format-tools check-lint-tools
 
 build:
 	go build ./...
@@ -31,9 +32,19 @@ install-format-tools:
 check-format-tools:
 	@command -v goimports >/dev/null || go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
 
+check-lint-tools:
+	@command -v golangci-lint >/dev/null || \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+
 lint:
 	go vet ./...
 	@$(MAKE) format-check
+
+# The linters in .golangci.yml — what CI's own lint job runs. Separate from
+# lint so that go vet, which needs no download, still runs on a machine that
+# cannot fetch the binary.
+golangci-lint: check-lint-tools
+	golangci-lint run ./...
 
 test:
 	go test -race -timeout 120s ./...
@@ -43,7 +54,7 @@ cover:
 		-coverpkg=./pkg/... -coverprofile=coverage.out \
 		./...
 
-ci: format-check build lint test
+ci: format-check build lint golangci-lint test
 
 clean:
 	rm -f coverage.out

@@ -169,28 +169,3 @@ func SplitPromptTokens(promptTokens, cachedTokens int) (fresh, cached int) {
 	cached = min(max(cachedTokens, 0), promptTokens)
 	return promptTokens - cached, cached
 }
-
-// IsOverflow reports whether a turn failed because the prompt exceeded the
-// model's context window.
-func IsOverflow(resp *Response, model Model) bool {
-	if resp == nil {
-		return false
-	}
-	if resp.Err != nil && IsContextExceeded(resp.Err) {
-		return true
-	}
-	window := model.ContextWindow
-	if window <= 0 {
-		return false
-	}
-	prompt := resp.Usage.TotalInput()
-	if prompt == 0 {
-		return false
-	}
-	// Accepted silently: billed for more prompt than the window holds.
-	if prompt > window {
-		return true
-	}
-	// Truncated to fit, then no room left to answer.
-	return resp.StopReason == StopMaxTokens && resp.Usage.Output == 0 && prompt >= window
-}

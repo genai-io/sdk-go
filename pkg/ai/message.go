@@ -45,7 +45,9 @@ const (
 	BlockToolResult BlockType = "tool_result"
 
 	// BlockReasoning is reasoning state you cannot read, in Block.Reasoning.
-	// Assistant turns only, and only on the OpenAI Responses protocol.
+	// Assistant turns only: the OpenAI Responses protocol carries it, and so
+	// does Anthropic's redacted thinking, which is thinking the model produced
+	// and encrypted rather than showed.
 	BlockReasoning BlockType = "reasoning"
 )
 
@@ -79,6 +81,7 @@ type Content []Block
 // TextBlock returns an answer or user-text block.
 func TextBlock(text string) Block { return Block{Type: BlockText, Text: text} }
 
+// ImageBlock returns a user-turn block carrying one inline picture.
 func ImageBlock(image Image) Block { return Block{Type: BlockImage, Image: &image} }
 
 // ThinkingBlock returns human-readable reasoning and its optional opaque
@@ -123,17 +126,6 @@ func (c Content) textOf(kind BlockType) string {
 		}
 	}
 	return out.String()
-}
-
-// Images returns image blocks in order.
-func (c Content) Images() []Image {
-	var out []Image
-	for _, block := range c {
-		if block.Type == BlockImage && block.Image != nil {
-			out = append(out, *block.Image)
-		}
-	}
-	return out
 }
 
 // ToolCalls returns tool-call blocks in order.
@@ -183,16 +175,6 @@ func (c Content) Has(kind BlockType) bool {
 
 // HasImages reports whether any block is an image.
 func (c Content) HasImages() bool { return c.Has(BlockImage) }
-
-// IsEmpty reports whether the content would send nothing.
-func (c Content) IsEmpty() bool {
-	for _, block := range c {
-		if !block.empty() {
-			return false
-		}
-	}
-	return true
-}
 
 func (b Block) empty() bool {
 	switch b.Type {

@@ -45,11 +45,17 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 	// budget. The rung carries whichever this model's endpoint wants.
 	if level, ok := d.model.ResolveLevel(req.Effort); ok {
 		switch {
-		case d.compat.ThinkingLevel && level.Value != "":
-			cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingLevel: level.Value}
-		case !d.compat.ThinkingLevel && level.Budget > 0:
-			budget := int32(level.Budget)
-			cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingBudget: &budget}
+		case d.compat.ThinkingLevel:
+			if level.Value != "" {
+				cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingLevel: level.Value}
+			}
+		case level.Budget > 0:
+			cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingBudget: budgetOf(level.Budget)}
+		case level.Effort == ai.EffortOff:
+			// A budget model reasons unless a zero budget says not to, so the
+			// off rung has to be said out loud rather than left out. Nothing is
+			// included with it, since there will be no thoughts.
+			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: budgetOf(0)}
 		}
 	}
 	// Gemini takes the schema as raw JSON Schema alongside a JSON mime type;
@@ -61,6 +67,13 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 		}
 	}
 	return cfg
+}
+
+// budgetOf is the pointer thinkingConfig wants, so that a budget of zero — off
+// — is sent rather than omitted.
+func budgetOf(tokens int) *int32 {
+	budget := int32(tokens)
+	return &budget
 }
 
 func declarations(tools []ai.Tool) []*tool {

@@ -159,7 +159,9 @@ func compact(a *agent.Agent, keep int) {
 	if len(msgs) <= keep {
 		return
 	}
-	// A real one summarises with a model call; this one just drops the middle.
+	// A real one summarises with a model call, and runs from a PreStep hook so
+	// that it can fire mid-turn, when a long run of tools is what filled the
+	// window. This one just drops the middle, between exchanges.
 	kept := msgs[len(msgs)-keep:]
 	a.SetMessages(kept)
 

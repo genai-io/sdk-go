@@ -175,7 +175,7 @@ Hook 是应用插进"循环与模型之间"的地方。**事件是通知,hook �
 
 ```mermaid
 flowchart LR
-    A[组装这次调用] --> B{{PreInfer}}
+    Z{{PreStep}} --> A[组装这次调用] --> B{{PreInfer}}
     B --> C[模型调用]
     C --> D{{PostInfer}}
     D --> E[消息]
@@ -186,6 +186,7 @@ flowchart LR
 
 | | 收到 | 交回 |
 | --- | --- | --- |
+| `PreStep` | 对话本身,以及发出去要花多少 | 一份替换(nil 表示保持原样) |
 | `PreInfer` | 即将发出的那次调用 | 原地修改 |
 | `PostInfer` | 成功调用返回的 response | 原地修改 |
 | `PreTool` | 这次调用、它的工具、对话 | 一个 `Decision` |
@@ -244,6 +245,24 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 它每次尝试都会重建,所以重试可以发到上一次尝试没去过的地方:**备用端点是一个 hook,不是第二个循环**。传一个你已经持有的 client——`ai.New` 会建一个 driver,而 driver 会带上一整个连接池。
 
 想改 agent 本身而不是某一次调用,用 `SetMessages` / `SetTools` / `SetSystem` / `SetClient`。`SetClient` 就是一个人在会话中途换模型:agent 的其余部分原封不动,变的只是下一次调用去哪里。
+
+### 压缩
+
+一段对话会在**回合中途**撑破窗口——三十次工具调用就够了——所以缩短它的缝是 `PreStep`,在循环可以自由改动对话的那个 step 边界上:
+
+```go
+PreStep: func(ctx context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+    if c.Tokens < c.Client.Model().ContextWindow*8/10 {
+        return nil, nil // nil:什么都不动
+    }
+    return summarise(ctx, c.Messages)
+},
+```
+
+`Tokens` 是整个 prompt 的估算——对话、system prompt,以及十几个就能盖过对话的工具 schema——**每个边界现算,不记住上一次响应报的数**。落后一次调用的数字,对着刚刚替换出来的新对话仍会读作"满",于是要求把它也替换掉。
+
+替换在**当场**以 `MessagesReplaced` 播报,所以会话把这次压缩记在做出它的那一步上,折叠时不会路过一份 agent 早已丢弃的对话。`PreInfer` 是这一对里的另一半:它只改这一次调用,不动对话。
+
 
 ## 工具
 

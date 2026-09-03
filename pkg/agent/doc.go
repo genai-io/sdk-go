@@ -95,8 +95,8 @@
 //
 //	event.go   what an exchange reports
 //	tool.go    a tool: defined from a Go type, offered, run
-//	hook.go    the four places a caller gets between the loop and the model,
-//	           and the things each one is handed
+//	hook.go    the five places a caller gets between the loop and what it is
+//	           doing, and the things each one is handed
 //
 // # What is deliberately not here
 //
@@ -107,6 +107,11 @@
 // and each would have forced this package to invent an answer that fits one
 // application. Keeping them out is what stops it from growing a second, worse
 // copy of its caller.
+//
+// Compaction is the same division, and the reason Hook.PreStep exists: the loop
+// knows when a conversation is about to outgrow its window and where it may
+// safely be replaced, and what a shorter one should say — what to keep, and
+// what to pay to find out — is not something this package could be right about.
 //
 // Persisting what happened, and restoring it, is agent/session.
 package agent

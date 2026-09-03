@@ -7,6 +7,7 @@ import (
 	"iter"
 	"math"
 	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -104,6 +105,72 @@ func (a *Agent) settle(emit func(Event)) {
 	}
 	for _, m := range a.taken() {
 		a.add(emit, m)
+	}
+}
+
+// reshape is the other half of the boundary settle opens: what came from
+// outside has landed, and this is where a hook may replace what the step is
+// about to send.
+//
+// A replacement is applied and announced here, where it was made. Nothing has
+// been appended against it in between, so a fold has nothing to get wrong.
+func (a *Agent) reshape(ctx context.Context, emit func(Event)) error {
+	hooks := a.hookSet()
+	if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.PreStep != nil }) {
+		// Measuring is cheap but not free, and an agent with no PreStep hook
+		// should not pay for a figure nobody reads.
+		return nil
+	}
+
+	c := a.stepContext()
+	changed := false
+	for _, h := range hooks {
+		if h.PreStep == nil {
+			continue
+		}
+		msgs, err := h.PreStep(ctx, c)
+		if err != nil {
+			return err
+		}
+		if msgs == nil {
+			continue
+		}
+		// The next hook is asked about what this one left, priced again: the
+		// figure from before a shortening would have it shorten twice.
+		a.mu.Lock()
+		c = a.priced(slices.Clone(msgs))
+		a.mu.Unlock()
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+
+	a.SetMessages(c.Messages)
+	if replaced, msgs := a.takeReplaced(); replaced {
+		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
+	}
+	return nil
+}
+
+// stepContext is what a boundary hands the hooks that may change it.
+func (a *Agent) stepContext() PreStepContext {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.priced(slices.Clone(a.messages))
+}
+
+// priced is one view of the conversation: what it holds, what sending it would
+// cost — the system prompt and the tool schemas included, since a dozen
+// schemas can outweigh the messages — and where it would go. The caller holds
+// a.mu.
+func (a *Agent) priced(msgs []ai.Message) PreStepContext {
+	return PreStepContext{
+		Messages: msgs,
+		Tokens: ai.EstimateTokens(&ai.Request{
+			System: a.system, Messages: msgs, Tools: a.definitions(),
+		}),
+		Client: a.client,
 	}
 }
 
@@ -545,6 +612,11 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		// What changed while the last tools ran lands here, not mid-stream:
 		// messages added from outside, and a conversation replaced from there.
 		a.settle(emit)
+		// And then the hooks that may replace it, once everything that was
+		// entering has.
+		if err := a.reshape(turnCtx, emit); err != nil {
+			return out.failed(err)
+		}
 
 		resp, spent, err := a.reason(turnCtx, emit)
 		out.Usage.Add(spent)

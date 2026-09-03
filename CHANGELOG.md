@@ -9,6 +9,12 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-03
+
+One fix, and it is the one that makes the release before this one true: 0.3.0
+shipped the seams for sending a conversation to more than one model, and a
+reasoning conversation could not be sent to a second one at all.
+
 ### Fixed
 
 - **A conversation could not be sent to a second model.** `Agent.SetClient` and
@@ -522,6 +528,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.4.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.0
 [0.3.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.3.0
 [0.2.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.2.0
 [0.1.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.2

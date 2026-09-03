@@ -91,7 +91,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			return
 		}
 
-		res, err := d.post(ctx, d.methodURL("streamGenerateContent", "alt=sse"), body)
+		res, err := d.post(ctx, d.methodURL("streamGenerateContent", "alt=sse"), body, req.Headers)
 		if err != nil {
 			yield(ai.Delta{}, fail.WrapStream(err))
 			return
@@ -217,7 +217,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	}
 	inner.Tools = declarations(req.Tools)
 
-	res, err := d.post(ctx, d.methodURL("countTokens", ""), &countTokensRequest{GenerateContentRequest: inner})
+	res, err := d.post(ctx, d.methodURL("countTokens", ""), &countTokensRequest{GenerateContentRequest: inner}, req.Headers)
 	if err != nil {
 		return 0, fail.Wrap(err)
 	}

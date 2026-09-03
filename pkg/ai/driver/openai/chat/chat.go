@@ -68,7 +68,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		level, _ := d.model.ResolveLevel(req.Effort)
 		params := d.buildParams(req, level)
 
-		stream := d.client.Chat.Completions.NewStreaming(ctx, params)
+		stream := d.client.Chat.Completions.NewStreaming(ctx, params, oai.RequestOptions(req)...)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Tool calls arrive as indexed argument fragments spread across

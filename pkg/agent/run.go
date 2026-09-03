@@ -85,6 +85,10 @@ func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, erro
 // the time a reader sees MessageAdded, Messages already holds it. The other
 // order hands a handler news of a message and a conversation without it.
 func (a *Agent) add(emit func(Event), msg ai.Message) {
+	if msg.ID == "" && a.mintID != nil {
+		msg.ID = a.mintID()
+	}
+
 	a.mu.Lock()
 	a.messages = append(a.messages, msg)
 	a.mu.Unlock()

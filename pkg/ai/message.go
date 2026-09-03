@@ -302,6 +302,16 @@ type ReasoningItem struct {
 
 // Message is one turn of the conversation: who spoke, and what they produced.
 type Message struct {
+	// ID names this turn, for an application that has to point at one later:
+	// the row a person is editing, the entry a store already holds, the turn a
+	// fork branches at. It is never sent — no protocol has a field for it — so
+	// nothing about it reaches the model and nothing about it costs a token.
+	//
+	// Empty is the default, because this package makes one call and has no
+	// conversation to name anything within. agent.WithMessageIDs is what fills
+	// it in, and a session stores and restores whatever it finds here.
+	ID string `json:"id,omitempty"`
+
 	Role    Role    `json:"role"`
 	Content Content `json:"content,omitempty"`
 }

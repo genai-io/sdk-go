@@ -39,6 +39,13 @@
 // state, which is where they belong: the conversation is not a transcript of
 // the interface.
 //
+// What an application does need on the conversation itself is a way to point
+// at one turn — the row a person is editing, the entry its store already
+// holds. WithMessageIDs names every message that enters, the loop's own
+// answers and tool results included, and one that arrived already named keeps
+// the name it came with. Nothing is sent: no protocol has a field for it, so
+// naming a conversation cannot change what the model reads.
+//
 // # Events
 //
 // Twelve types, each one there because a consumer would break without it.

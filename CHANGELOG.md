@@ -208,6 +208,20 @@ Catalog, provider and auth:
   `if ai.IsAuth(inf.LastErr) { inf.Client = fallback }`. One hook decides where
   a call goes and the other whether there is a call left to route, so neither
   has to know what the other did.
+- **`ai.Message.ID` and `agent.WithMessageIDs`**, a name for a turn an
+  application has to point at later. `pkg/agent` hands the conversation back as
+  a plain `[]ai.Message` — which is what keeps it free of this package's
+  opinions, and left an application with a store, an editable transcript or a
+  fork nowhere to hang identity: it could name the messages it wrote itself and
+  not the answer, the tool results or the continuation prompt the loop made.
+  The field is defined in `pkg/ai`, which never fills it in, because one call
+  has no conversation to name anything within; `WithMessageIDs` is what does,
+  calling your generator once per message that arrives without a name — so a
+  restored conversation keeps the names it was stored with, and one you set
+  yourself keeps yours. The format and the uniqueness are yours. Off by
+  default, and then every ID is empty. Nothing is ever sent: no protocol has a
+  field for it, `Repair` carries it through untouched, and it costs no tokens,
+  so what the model reads is the same either way.
 - **`session.WithToolDetails` and `ToolRun.Details`**, so an interface that comes
   back can redraw what a tool produced. `Result.Details` — the diff behind an
   edit, the rows behind a count — was dropped as belonging to an interface that

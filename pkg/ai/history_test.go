@@ -177,3 +177,40 @@ func TestRepairMakesEveryTextFieldValid(t *testing.T) {
 		t.Error("Repair rewrote the caller's message in place")
 	}
 }
+
+// Repair rewrites the history on the way to every call, so it is the one place
+// a name could quietly go missing. An application that keyed its store on
+// these would find the conversation it got back pointing at nothing.
+func TestRepairKeepsTheNamesItWasGiven(t *testing.T) {
+	in := []Message{
+		{ID: "a", Role: RoleUser, Content: Content{TextBlock("hi\x00there")}}, // needs sanitising
+		{ID: "b", Role: RoleAssistant, Content: Content{ToolCallBlock(ToolCall{ID: "t1", Name: "search"})}},
+		{ID: "c", Role: RoleUser, Content: Content{ToolResultBlock(ToolResult{
+			ToolCallID: "t1", Content: TextContent("done")})}},
+	}
+
+	out := Repair(in)
+	if len(out) != len(in) {
+		t.Fatalf("Repair returned %d messages, want %d", len(out), len(in))
+	}
+	for i, want := range []string{"a", "b", "c"} {
+		if out[i].ID != want {
+			t.Errorf("message %d came back named %q, want %q", i, out[i].ID, want)
+		}
+	}
+}
+
+// A name is never sent, so it cannot be part of what a prompt costs. Counting
+// it would make a conversation look larger than the one the provider is
+// pricing, and compact a caller early for the whole of a long session.
+func TestANameCostsNoTokens(t *testing.T) {
+	plain := &Request{Messages: []Message{userText("how large is this?")}}
+	named := &Request{Messages: []Message{{
+		ID:   "a-name-long-enough-to-show-up-in-any-estimate-at-all",
+		Role: RoleUser, Content: Content{TextBlock("how large is this?")},
+	}}}
+
+	if a, b := EstimateTokens(plain), EstimateTokens(named); a != b {
+		t.Errorf("the named prompt is estimated at %d and the same prompt at %d", b, a)
+	}
+}

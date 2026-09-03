@@ -446,9 +446,10 @@ func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
 }
 
 // Replacing the conversation while an exchange runs lands on it at once — that
-// is what the lock is for — but the announcement waits for the next exchange:
-// mid-turn it would say the history the turn is working from was thrown away.
-func TestAReplacementDuringAnExchangeIsAnnouncedByTheNextOne(t *testing.T) {
+// is what the lock is for — and is announced at that exchange's next step
+// boundary. Waiting for the next exchange left it unannounced when there was
+// no next one, which is a compaction the session never heard about.
+func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
 	var a *agent.Agent
 	swap := agent.ToolFunc("compact", "Replace the conversation.",
 		func(context.Context, struct{}) (agent.Result, error) {
@@ -465,29 +466,42 @@ func TestAReplacementDuringAnExchangeIsAnnouncedByTheNextOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("turn failed: %v", err)
 	}
-	for _, e := range during {
-		if _, ok := e.(agent.MessagesReplaced); ok {
-			t.Error("the replacement was announced inside the exchange that made it")
-		}
+
+	at := slices.IndexFunc(during, func(e agent.Event) bool {
+		_, ok := e.(agent.MessagesReplaced)
+		return ok
+	})
+	if at < 0 {
+		t.Fatal("the exchange that replaced the conversation never announced it")
+	}
+	replaced := during[at].(agent.MessagesReplaced)
+	if replaced.Turn != 1 {
+		t.Errorf("the announcement belongs to turn %d, want the exchange that made it", replaced.Turn)
+	}
+	// It carries the conversation as it stands: the replacement, and the tool
+	// results that answering the batch appended to it.
+	if len(replaced.Messages) != 2 || replaced.Messages[0].Text() != "(the summary)" {
+		t.Fatalf("the announcement carries %d messages starting %q, want the two the agent holds",
+			len(replaced.Messages), replaced.Messages[0].Text())
+	}
+	// Nothing is sent against a conversation whose replacement has not been
+	// announced, which is the whole of the rule.
+	if !slices.ContainsFunc(during[at:], func(e agent.Event) bool {
+		_, ok := e.(agent.MessageStart)
+		return ok
+	}) {
+		t.Error("the announcement came after the last call of the exchange")
 	}
 
-	// The announcement carries the conversation as it stands, which is the
-	// replacement plus whatever the rest of that exchange appended to it.
-	before := a.Messages()
+	// And the next exchange does not announce it a second time.
 	next, err := collect(t, a, ai.UserMessage("again"))
 	if err != nil {
 		t.Fatalf("the next turn failed: %v", err)
 	}
-	replaced, ok := next[1].(agent.MessagesReplaced)
-	if !ok {
-		t.Fatalf("the next exchange reported %T after TurnStart, want MessagesReplaced", next[1])
-	}
-	if len(replaced.Messages) != len(before) || replaced.Messages[0].Text() != "(the summary)" {
-		t.Errorf("the announcement carries %d messages starting %q, want the %d the agent held",
-			len(replaced.Messages), replaced.Messages[0].Text(), len(before))
-	}
-	if replaced.Turn != 2 {
-		t.Errorf("the announcement belongs to turn %d, want 2", replaced.Turn)
+	for _, e := range next {
+		if _, ok := e.(agent.MessagesReplaced); ok {
+			t.Error("the replacement was announced again by the exchange after it")
+		}
 	}
 }
 

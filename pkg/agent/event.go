@@ -26,9 +26,11 @@ type MessageAdded struct {
 func (MessageAdded) event() {}
 
 // MessagesReplaced says SetMessages threw the conversation away, reported at
-// the start of the next exchange because that is when the agent next has
-// anywhere to say it. Everything announced before one is gone: a consumer that
-// ignores it hands back the history compaction just discarded.
+// the next step boundary — where queued messages enter too, both being changes
+// to what the model is about to see.
+//
+// Everything announced before one is gone: a consumer that ignores it hands
+// back the history compaction just discarded.
 type MessagesReplaced struct {
 	Turn     int
 	Messages []ai.Message

@@ -91,6 +91,22 @@ func (a *Agent) add(emit func(Event), msg ai.Message) {
 	emit(MessageAdded{Turn: a.turnNow(), Message: msg})
 }
 
+// settle brings the conversation up to date before the loop reads it: a
+// replacement first, because anything queued behind it belongs to the
+// conversation that replaced and not to the one thrown away.
+//
+// It runs at every step boundary, which is where an exchange opens too — the
+// one place it is safe to change what the model is about to see, and the last
+// moment a replacement can be announced before messages are appended to it.
+func (a *Agent) settle(emit func(Event)) {
+	if replaced, msgs := a.takeReplaced(); replaced {
+		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
+	}
+	for _, m := range a.taken() {
+		a.add(emit, m)
+	}
+}
+
 // never is longer than any process runs, so a timer set to it is one that does
 // not fire — which is what a caller who turned a timeout off asked for.
 const never = time.Duration(math.MaxInt64)
@@ -496,14 +512,6 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 	a.turnCount.Add(1)
 	emit(TurnStart{Turn: a.turnNow()})
 
-	// A history replaced between exchanges is announced here, the first place
-	// there is anywhere to announce it. Doing it at SetMessages would need a
-	// callback; not doing it is what made a compacted session hand back what
-	// the agent threw away.
-	if replaced, msgs := a.takeReplaced(); replaced {
-		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
-	}
-
 	// Read again rather than pinned: only this function advances it, so both
 	// ends of the turn carry the same number.
 	//
@@ -517,11 +525,9 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		emit(out)
 	}()
 
-	// Anything queued after the last exchange's final step boundary enters
-	// ahead of this one's input: that is the order it was said in.
-	for _, m := range a.taken() {
-		a.add(emit, m)
-	}
+	// Whatever changed while the agent was idle lands before this exchange's
+	// own input: that is the order it was said in.
+	a.settle(emit)
 	for _, m := range in {
 		a.add(emit, m)
 	}
@@ -536,10 +542,9 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			return out.canceled(turnCtx)
 		}
 
-		// Anything added while the last tools ran enters here, not mid-stream.
-		for _, m := range a.taken() {
-			a.add(emit, m)
-		}
+		// What changed while the last tools ran lands here, not mid-stream:
+		// messages added from outside, and a conversation replaced from there.
+		a.settle(emit)
 
 		resp, spent, err := a.reason(turnCtx, emit)
 		out.Usage.Add(spent)

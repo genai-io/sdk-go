@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
@@ -39,6 +40,54 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 	}
 	if got := restored[0].Text(); got != "(summary of the above)" {
 		t.Errorf("the restore starts at %q, want the summary", got)
+	}
+}
+
+// A compaction made during the last exchange of a session is recorded like any
+// other. The announcement used to wait for the next exchange, and when there
+// was none — the person quit, the run ended — the snapshot was never written:
+// the session kept the messages appended after the compaction and none of the
+// news that everything before them had been thrown away.
+func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
+	st := store(t)
+	ctx := context.Background()
+
+	var a *agent.Agent
+	compact := agent.ToolFunc("compact", "Replace the conversation.",
+		func(context.Context, struct{}) (agent.Result, error) {
+			a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
+			return agent.TextResult("compacted"), nil
+		})
+	client := ai.NewClientWithDriver(&scripted{scripts: [][]ai.Delta{
+		{
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "compact", Input: "{}"})},
+			{StopReason: ai.StopToolUse},
+		},
+		text("done"),
+	}}, ai.Model{ID: "stub", API: "stub"})
+
+	a, err := agent.New(client, agent.WithTools(compact))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	converse(t, a, rec, ai.UserMessage("go"))
+
+	restored, err := session.Messages(ctx, st, rec.ID())
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(restored) == 0 {
+		t.Fatal("nothing was restored: the compaction went unrecorded")
+	}
+	if got := restored[0].Text(); got != "(the summary)" {
+		t.Fatalf("the restore starts at %q, want the compacted conversation", got)
+	}
+	if len(restored) != len(a.Messages()) {
+		t.Errorf("restored %d messages, the agent holds %d", len(restored), len(a.Messages()))
 	}
 }
 

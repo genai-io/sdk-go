@@ -299,6 +299,15 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 
 **`Result` 把两个受众分开。** `Content` 是告诉模型的;`Details` 是给界面看、模型永远看不到的——一段 diff、一个文件列表、一个退出码。**一个为人排版的工具,最后会把那些排版发给模型,而且此后每一轮都为它付费。**
 
+**一个会回来的界面**——resume 之后重画的那份转录——要自己说留什么:这个值只有它的主人读得懂,一段 diff 或一个列表值得存多少,也只有它的主人知道。
+
+```go
+rec, history, err := session.Open(ctx, store, resume, session.WithToolDetails(
+    func(e agent.ToolEnd) any { return e.Result.Details }))
+```
+
+它原样回到 `ToolRun.Details`,以那次调用的 ID 为键,和恢复出来的对话对得上。**不传这个 option,会话一个字节都不存。**
+
 **并行。** 一批工具默认并发执行。`agent.Sequential(t)` 标记一个不能与别人同时跑的工具,而**一批里只要有一个这样的,整批就串行**——一批工具只有在每个成员都安全时才能并行。
 
 **并行批次里有两种顺序,谁也不能让步。** `ToolEnd` 按**完成顺序**发出,所以界面能在某个工具一停就收掉它的 spinner;而交回给模型的结果按**模型提问的顺序**排列,所以重放一个会话每次得到的是同一份记录。

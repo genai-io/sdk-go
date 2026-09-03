@@ -181,6 +181,16 @@ Catalog, provider and auth:
   context, and the loop closes it on what opened it however the hook returns,
   including when it failed or thought better of it. A hook that announces
   nothing produces no span.
+- **`session.WithToolDetails` and `ToolRun.Details`**, so an interface that comes
+  back can redraw what a tool produced. `Result.Details` — the diff behind an
+  edit, the rows behind a count — was dropped as belonging to an interface that
+  was no longer running, and a transcript redrawn on resume is that interface,
+  running again. What to keep of it stays the caller's, since this package
+  cannot read an application's own value and a diff has no size it could
+  assume: the option is handed each `ToolEnd` and stores whatever it returns as
+  JSON, keyed by the ID of the call the restored conversation answers. Return
+  a smaller value to store a smaller record, and nil to store none — which is
+  also what a session without the option keeps.
 - **A unit-test layer in every package that lacked one**: the stream lifecycle
   and the consumer that breaks mid-stream, `Repair`, `Classify`, `Retry`, schema
   derivation and checking, the Gemini SSE parser, tool-call accumulation, error

@@ -11,9 +11,12 @@ type Result struct {
 	// Content is the only field the model is told.
 	Content ai.Content
 
-	// Details is for your interface and goes nowhere else — not to the model,
-	// not into a session. The structured form of the answer: the rows behind a
-	// count, the paths behind a total.
+	// Details is for your interface and never reaches the model. The
+	// structured form of the answer: the rows behind a count, the paths behind
+	// a total, the diff behind an edit.
+	//
+	// It reaches a session only if one was opened with session.WithToolDetails,
+	// which is where an interface that comes back says what to keep of it.
 	//
 	// Not a type parameter, because that would land on Tool and an agent's
 	// tools are a heterogeneous list. Producer and consumer agree out of band.

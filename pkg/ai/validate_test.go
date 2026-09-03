@@ -292,8 +292,9 @@ func TestCallerContentIsStillRefused(t *testing.T) {
 }
 
 // Every protocol's answer, because this decides silently: a block kept where
-// it does not belong is a rejected request, and one dropped where it does is a
-// model that starts its reasoning over on every turn.
+// it does not belong is a rejected request, one dropped where it does is a
+// model that starts its reasoning over on every turn, and a signature left on
+// is a request no endpoint but Anthropic will take.
 func TestWhichProtocolReplaysWhichReasoningState(t *testing.T) {
 	signed := ThinkingBlock("hmm", "sig")
 	plain := ThinkingBlock("hmm", "")
@@ -303,29 +304,68 @@ func TestWhichProtocolReplaysWhichReasoningState(t *testing.T) {
 		Compat: OpenAIChatCompat{ReasoningContent: true}}
 
 	for _, tc := range []struct {
-		name  string
-		model Model
-		block Block
-		want  bool
+		name    string
+		model   Model
+		block   Block
+		want    bool
+		wantSig string
 	}{
-		{"Anthropic replays what it signed", Model{API: APIAnthropicMessages}, signed, true},
-		{"Anthropic cannot prove unsigned thinking", Model{API: APIAnthropicMessages}, plain, false},
-		{"Vertex answers as Messages does", Model{API: APIAnthropicVertex}, signed, true},
-		{"Chat takes it only where the endpoint says so", chatWithReasoning, plain, true},
-		{"Chat without reasoning_content takes none", Model{API: APIOpenAIChat}, plain, false},
-		{"no Chat endpoint takes a signature", chatWithReasoning, signed, false},
-		{"Gemini takes the text as a thought", Model{API: APIGoogleGenAI}, plain, true},
-		{"Gemini takes no signature either", Model{API: APIGoogleGenAI}, signed, false},
-		{"Responses replays items, not readable thinking", Model{API: APIOpenAIResponses}, plain, false},
-		{"opaque items belong to Responses", Model{API: APIOpenAIResponses}, opaque, true},
-		{"and nowhere else", Model{API: APIAnthropicMessages}, opaque, false},
-		{"a protocol this package does not know is left alone", Model{API: "custom"}, signed, false},
-		{"a model that states no protocol keeps everything", Model{}, opaque, true},
+		{"Anthropic replays what it signed", Model{API: APIAnthropicMessages}, signed, true, "sig"},
+		{"Anthropic cannot prove unsigned thinking", Model{API: APIAnthropicMessages}, plain, false, ""},
+		{"Vertex answers as Messages does", Model{API: APIAnthropicVertex}, signed, true, "sig"},
+		{"Chat takes it only where the endpoint says so", chatWithReasoning, plain, true, ""},
+		{"Chat without reasoning_content takes none", Model{API: APIOpenAIChat}, plain, false, ""},
+		// The signature is Anthropic's proof, not the reasoning. It comes off
+		// and the thinking still travels, because that is the part worth
+		// replaying and this endpoint can read it.
+		{"Chat keeps foreign thinking without its signature", chatWithReasoning, signed, true, ""},
+		{"Gemini takes the text as a thought", Model{API: APIGoogleGenAI}, plain, true, ""},
+		{"Gemini too drops only the signature", Model{API: APIGoogleGenAI}, signed, true, ""},
+		{"Responses replays items, not readable thinking", Model{API: APIOpenAIResponses}, plain, false, ""},
+		{"opaque items belong to Responses", Model{API: APIOpenAIResponses}, opaque, true, ""},
+		{"and nowhere else", Model{API: APIAnthropicMessages}, opaque, false, ""},
+		{"a protocol this package does not know is left alone", Model{API: "custom"}, signed, false, ""},
+		{"a model that states no protocol keeps everything", Model{}, opaque, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.model.replays(tc.block); got != tc.want {
-				t.Errorf("replays = %v, want %v", got, tc.want)
+			got, ok := tc.model.replayable(tc.block)
+			if ok != tc.want {
+				t.Fatalf("replayable = %v, want %v", ok, tc.want)
+			}
+			if ok && got.Signature != tc.wantSig {
+				t.Errorf("signature = %q, want %q", got.Signature, tc.wantSig)
+			}
+			if ok && got.Text != tc.block.Text {
+				t.Errorf("text = %q, want it unchanged (%q)", got.Text, tc.block.Text)
 			}
 		})
+	}
+}
+
+// A conversation that came from Anthropic and is now being sent to a Chat
+// endpoint keeps the reasoning and loses only the proof, which is the case
+// that made this rewrite rather than a filter.
+func TestAForeignSignatureComesOffAndTheThinkingStays(t *testing.T) {
+	history := []Message{
+		UserMessage("think"),
+		{Role: RoleAssistant, Content: Content{
+			ThinkingBlock("step one", "sig-from-anthropic"),
+			TextBlock("the answer"),
+		}},
+	}
+	model := Model{ID: "m", API: APIOpenAIChat, Compat: OpenAIChatCompat{ReasoningContent: true}}
+
+	out := model.strip(history)
+	blocks := out[1].Content
+	if len(blocks) != 2 || blocks[0].Type != BlockThinking {
+		t.Fatalf("content came out as %d blocks, want the thinking kept", len(blocks))
+	}
+	if blocks[0].Text != "step one" || blocks[0].Signature != "" {
+		t.Errorf("thinking = %q with signature %q, want the text kept and the proof gone",
+			blocks[0].Text, blocks[0].Signature)
+	}
+	// And the caller's history is not edited under it.
+	if history[1].Content[0].Signature != "sig-from-anthropic" {
+		t.Error("strip wrote through to the caller's messages")
 	}
 }

@@ -443,7 +443,7 @@ for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 遵循[语义化版本](https://semver.org/lang/zh-CN/)。主版本号还是 `0`，所以 API 在次版本之间仍可能变动；[更新日志](CHANGELOG.md)会写清楚动了什么、该改成什么。
 
 ```sh
-go get github.com/genai-io/sdk-go@v0.4.0
+go get github.com/genai-io/sdk-go@v0.4.1
 ```
 
 ## 许可

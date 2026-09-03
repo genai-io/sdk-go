@@ -91,6 +91,72 @@ func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
 	}
 }
 
+// Compaction through a PreStep hook is recorded at the step that made it: the
+// snapshot goes in before the messages of the step that ran against it, so a
+// fold never passes through a conversation the agent had already discarded.
+func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
+	st := store(t)
+	ctx := context.Background()
+
+	done := false
+	client := ai.NewClientWithDriver(&scripted{scripts: [][]ai.Delta{
+		{
+			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})},
+			{StopReason: ai.StopToolUse},
+		},
+		text("done"),
+	}}, ai.Model{ID: "stub", API: "stub"})
+
+	a, err := agent.New(client, agent.WithHooks(agent.Hook{
+		PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+			if done {
+				return nil, nil
+			}
+			done = true
+			return []ai.Message{ai.UserMessage("(the summary)")}, nil
+		},
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	converse(t, a, rec, ai.UserMessage("go"))
+
+	var snapshot, after int
+	snapshot = -1
+	for e, err := range st.Entries(ctx, rec.ID()) {
+		if err != nil {
+			t.Fatalf("Entries: %v", err)
+		}
+		switch {
+		case e.Type == session.EntrySnapshot:
+			snapshot = int(e.Seq)
+		case e.Type == session.EntryMessage && snapshot >= 0:
+			after++
+		}
+	}
+	if snapshot < 0 {
+		t.Fatal("the compaction was never recorded")
+	}
+	if after == 0 {
+		t.Error("the snapshot is the last thing in the session; the step that ran against it recorded nothing")
+	}
+
+	restored, err := session.Messages(ctx, st, rec.ID())
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(restored) == 0 || restored[0].Text() != "(the summary)" {
+		t.Fatalf("the restore holds %d messages, want the compacted conversation", len(restored))
+	}
+	if len(restored) != len(a.Messages()) {
+		t.Errorf("restored %d messages, the agent holds %d", len(restored), len(a.Messages()))
+	}
+}
+
 // The shape both examples in this repository have: open a session, hand the
 // agent whatever came back, answer. What comes back from a new session is
 // nothing, and a second run still has to reopen what the first wrote.

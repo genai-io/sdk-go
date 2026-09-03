@@ -7,6 +7,7 @@ import (
 	"iter"
 	"math"
 	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -104,6 +105,93 @@ func (a *Agent) settle(emit func(Event)) {
 	}
 	for _, m := range a.taken() {
 		a.add(emit, m)
+	}
+}
+
+// preStep runs the hooks that may replace the conversation, which is the other
+// half of the boundary settle opens: what came from outside has landed, and
+// this is where the caller says what the step should send instead.
+//
+// A replacement is applied and announced here, where it was made. Nothing has
+// been appended against it in between, so a fold has nothing to get wrong.
+func (a *Agent) preStep(ctx context.Context, emit func(Event)) error {
+	hooks := a.hookSet()
+	if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.PreStep != nil }) {
+		// Measuring is cheap but not free, and an agent with no PreStep hook
+		// should not pay for a figure nobody reads.
+		return nil
+	}
+
+	c := a.stepContext(nil)
+
+	// A span is opened at most once a boundary, however many hooks call
+	// Compacting: what a consumer draws is one wait, not one per hook. It
+	// closes on what opened it, like every other span here.
+	var span *CompactionStart
+	hctx := context.WithValue(ctx, compacting{}, func() {
+		if span != nil {
+			return
+		}
+		span = &CompactionStart{Turn: a.turnNow(), Messages: c.Messages, Tokens: c.Tokens}
+		emit(*span)
+	})
+	// Closed however the hooks return, since a consumer that opened a spinner
+	// has to be told to stop whichever way it went.
+	closeSpan := func(err error) error {
+		if span != nil {
+			emit(CompactionEnd{
+				Turn: span.Turn, Messages: span.Messages, Tokens: span.Tokens, Err: err,
+			})
+		}
+		return err
+	}
+
+	changed := false
+	for _, h := range hooks {
+		if h.PreStep == nil {
+			continue
+		}
+		msgs, err := h.PreStep(hctx, c)
+		if err != nil {
+			return closeSpan(err)
+		}
+		if msgs == nil {
+			continue
+		}
+		// The next hook is asked about what this one left, priced again: the
+		// figure from before a shortening would have it shorten twice.
+		c = a.stepContext(msgs)
+		changed = true
+	}
+	if !changed {
+		return closeSpan(nil)
+	}
+
+	a.SetMessages(c.Messages)
+	if replaced, msgs := a.takeReplaced(); replaced {
+		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
+	}
+	return closeSpan(nil)
+}
+
+// stepContext is what a boundary hands the hooks that may change it: the
+// conversation, and what sending it would cost — the system prompt and the
+// tool schemas included, since a dozen schemas can outweigh the messages.
+// Nil prices the conversation the agent holds.
+func (a *Agent) stepContext(msgs []ai.Message) PreStepContext {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if msgs == nil {
+		msgs = a.messages
+	}
+	msgs = slices.Clone(msgs)
+	return PreStepContext{
+		Messages: msgs,
+		Tokens: ai.EstimateTokens(&ai.Request{
+			System: a.system, Messages: msgs, Tools: a.definitions(),
+		}),
+		Client: a.client,
 	}
 }
 
@@ -545,6 +633,11 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		// What changed while the last tools ran lands here, not mid-stream:
 		// messages added from outside, and a conversation replaced from there.
 		a.settle(emit)
+		// And then the hooks that may replace it, once everything that was
+		// entering has.
+		if err := a.preStep(turnCtx, emit); err != nil {
+			return out.failed(err)
+		}
 
 		resp, spent, err := a.reason(turnCtx, emit)
 		out.Usage.Add(spent)

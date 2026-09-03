@@ -41,13 +41,24 @@
 //
 // # Events
 //
-// Ten types, each one there because a consumer would break without it. Event
-// lists them; what follows is what a list cannot say.
+// Twelve types, each one there because a consumer would break without it.
+// Event lists them; what follows is what a list cannot say.
 //
 // A span always comes in pairs, and only what takes time has one. What entered
 // the conversation is its own event because a user's message and a batch of
 // tool results enter without any span at all — they were whole before the
 // agent saw them.
+//
+// Compaction is the one span the loop cannot open by itself: shortening a
+// conversation is a model call, but whether this boundary is about to make one
+// is known only inside the hook deciding it. So the hook opens it, by calling
+// Compacting, and the loop closes it however the hook returns. A hook that
+// announces nothing produces no span, which is why the stream is not two
+// events longer at every step.
+//
+// Compacting and Report are the same shape for the same reason: caller code
+// that will be slow, telling the stream so through the context it was handed,
+// and declaring nothing when it has nothing to say.
 //
 // The conversation is the fold of two events and no others: MessageAdded
 // appends, and MessagesReplaced starts over, because everything announced
@@ -95,8 +106,8 @@
 //
 //	event.go   what an exchange reports
 //	tool.go    a tool: defined from a Go type, offered, run
-//	hook.go    the four places a caller gets between the loop and the model,
-//	           and the things each one is handed
+//	hook.go    the five places a caller gets between the loop and what it is
+//	           doing, and the things each one is handed
 //
 // # What is deliberately not here
 //
@@ -107,6 +118,11 @@
 // and each would have forced this package to invent an answer that fits one
 // application. Keeping them out is what stops it from growing a second, worse
 // copy of its caller.
+//
+// Compaction is the same division, and the reason Hook.PreStep exists: the loop
+// knows when a conversation is about to outgrow its window and where it may
+// safely be replaced, and what a shorter one should say — what to keep, and
+// what to pay to find out — is not something this package could be right about.
 //
 // Persisting what happened, and restoring it, is agent/session.
 package agent

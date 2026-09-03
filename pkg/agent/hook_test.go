@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -838,5 +839,277 @@ func TestAFailedHookClosesTheCallsThatWillNeverRun(t *testing.T) {
 	}
 	if last := events[len(events)-1].(agent.TurnEnd); last.StopReason != agent.StopError {
 		t.Errorf("stop reason = %q, want error", last.StopReason)
+	}
+}
+
+// PreStep replaces the conversation at the boundary, and the replacement is
+// announced there: before the call that carries it, with nothing appended in
+// between for a fold to pass through.
+func TestPreStepReplacesTheConversationAtTheBoundary(t *testing.T) {
+	driver := &scripted{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
+	a := newAgent(t, driver, agent.WithHooks(agent.Hook{
+		PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+			if c.Tokens == 0 {
+				t.Error("the boundary priced the conversation at nothing")
+			}
+			return []ai.Message{ai.UserMessage("(the summary)")}, nil
+		},
+	}))
+
+	events, err := collect(t, a, ai.UserMessage("and now this"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+
+	at := slices.IndexFunc(events, func(e agent.Event) bool {
+		_, ok := e.(agent.MessagesReplaced)
+		return ok
+	})
+	call := slices.IndexFunc(events, func(e agent.Event) bool {
+		_, ok := e.(agent.MessageStart)
+		return ok
+	})
+	switch {
+	case at < 0:
+		t.Fatal("the hook replaced the conversation and nothing was announced")
+	case at > call:
+		t.Error("the replacement was announced after the call that carried it")
+	}
+	if msgs := events[at].(agent.MessagesReplaced).Messages; len(msgs) != 1 ||
+		msgs[0].Text() != "(the summary)" {
+		t.Errorf("the announcement carries %d messages, want the hook's one", len(msgs))
+	}
+
+	// And it is what went out, not what the hook was handed.
+	if sent := driver.Sent()[0].Messages; len(sent) != 1 || sent[0].Text() != "(the summary)" {
+		t.Errorf("the call sent %d messages, want the replacement", len(sent))
+	}
+}
+
+// Nil is how a hook says it wants nothing changed, which is what it says on
+// most steps: announcing a replacement that replaced nothing would record a
+// snapshot per step forever.
+func TestPreStepReturningNilChangesNothing(t *testing.T) {
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+		agent.WithHooks(agent.Hook{
+			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
+				return nil, nil
+			},
+		}))
+
+	events, err := collect(t, a, ai.UserMessage("hi"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	for _, e := range events {
+		if _, ok := e.(agent.MessagesReplaced); ok {
+			t.Error("a hook that changed nothing was reported as replacing the conversation")
+		}
+	}
+	if got := len(a.Messages()); got != 2 {
+		t.Errorf("the conversation holds %d messages, want the exchange's own two", got)
+	}
+}
+
+// The figure is measured at the boundary, not remembered from the last call:
+// a conversation still priced as the one it replaced asks to be replaced
+// again, every step, forever.
+func TestPreStepIsPricedAgainstTheConversationItHasNow(t *testing.T) {
+	var seen []int
+	done := false
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
+		toolCall("c1", "noop", `{}`),
+		text("done"),
+	}},
+		agent.WithMessages([]ai.Message{
+			ai.UserMessage(strings.Repeat("a long history. ", 200)),
+			ai.AssistantMessage(strings.Repeat("and a long answer. ", 200)),
+		}),
+		agent.WithHooks(agent.Hook{
+			PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+				seen = append(seen, c.Tokens)
+				if done {
+					return nil, nil
+				}
+				done = true
+				return []ai.Message{ai.UserMessage("(short)")}, nil
+			},
+		}))
+
+	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("the hook was asked %d times, want once per step", len(seen))
+	}
+	if seen[1] >= seen[0] {
+		t.Errorf("the second step was priced at %d against the first's %d, want the conversation it has now",
+			seen[1], seen[0])
+	}
+}
+
+// The hooks chain, so the second is asked about what the first left — and the
+// pair is one replacement, because the conversation in between never reached
+// a model.
+func TestPreStepHooksChainIntoOneReplacement(t *testing.T) {
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+		agent.WithHooks(
+			agent.Hook{PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
+				return []ai.Message{ai.UserMessage("first")}, nil
+			}},
+			agent.Hook{PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+				if len(c.Messages) != 1 || c.Messages[0].Text() != "first" {
+					t.Errorf("the second hook was handed %d messages, want what the first left", len(c.Messages))
+				}
+				return append(slices.Clone(c.Messages), ai.UserMessage("second")), nil
+			}},
+		))
+
+	events, err := collect(t, a, ai.UserMessage("go"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	var announced []agent.MessagesReplaced
+	for _, e := range events {
+		if v, ok := e.(agent.MessagesReplaced); ok {
+			announced = append(announced, v)
+		}
+	}
+	if len(announced) != 1 {
+		t.Fatalf("%d replacements were announced, want the one the pair made", len(announced))
+	}
+	if msgs := announced[0].Messages; len(msgs) != 2 || msgs[1].Text() != "second" {
+		t.Errorf("the announcement carries %d messages, want both hooks' work", len(msgs))
+	}
+}
+
+// A hook that could not do its job ends the exchange, the same as every other.
+func TestPreStepFailingEndsTheExchange(t *testing.T) {
+	boom := errors.New("the summariser is down")
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("never asked")}},
+		agent.WithHooks(agent.Hook{
+			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
+				return nil, boom
+			},
+		}))
+
+	out, err := outcome(t, a, ai.UserMessage("go"))
+	if err == nil || !errors.Is(err, boom) {
+		t.Fatalf("the turn ended with %v, want the hook's own error", err)
+	}
+	if out.StopReason != agent.StopError {
+		t.Errorf("stop reason = %q, want error", out.StopReason)
+	}
+}
+
+// kinds renders the event types in order, which is what a claim about where a
+// span opens and closes is really about.
+func kinds(events []agent.Event) []string {
+	out := make([]string, 0, len(events))
+	for _, e := range events {
+		out = append(out, strings.TrimPrefix(fmt.Sprintf("%T", e), "agent."))
+	}
+	return out
+}
+
+// Shortening the conversation is a model call of its own, and a stream that
+// says nothing for that long looks stopped. The hook says when the wait
+// begins, because only the code deciding to shorten knows it is about to; the
+// loop closes it, after the replacement it caused.
+func TestCompactingOpensASpanAroundTheWait(t *testing.T) {
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+		agent.WithHooks(agent.Hook{
+			PreStep: func(ctx context.Context, _ agent.PreStepContext) ([]ai.Message, error) {
+				agent.Compacting(ctx)
+				return []ai.Message{ai.UserMessage("(the summary)")}, nil
+			},
+		}))
+
+	events, err := collect(t, a, ai.UserMessage("go"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+
+	got := kinds(events)
+	start := slices.Index(got, "CompactionStart")
+	replaced := slices.Index(got, "MessagesReplaced")
+	end := slices.Index(got, "CompactionEnd")
+	switch {
+	case start < 0 || end < 0:
+		t.Fatalf("the span is %v, want it opened and closed", got)
+	case start >= replaced || replaced >= end:
+		t.Errorf("events are %v, want the replacement inside the span", got)
+	}
+	opened := events[start].(agent.CompactionStart)
+	if len(opened.Messages) != 1 || opened.Tokens == 0 {
+		t.Errorf("the span opened on %d messages priced at %d, want what the hook was handed",
+			len(opened.Messages), opened.Tokens)
+	}
+	// And it closes on what opened it, like every other span here.
+	closed := events[end].(agent.CompactionEnd)
+	if closed.Err != nil || closed.Tokens != opened.Tokens ||
+		len(closed.Messages) != len(opened.Messages) {
+		t.Errorf("the span closed on %d messages priced at %d (%v), want what opened it",
+			len(closed.Messages), closed.Tokens, closed.Err)
+	}
+}
+
+// A hook that says nothing costs nothing: the span is not opened around every
+// step boundary on the chance that this one was slow.
+func TestAQuietPreStepOpensNoSpan(t *testing.T) {
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+		agent.WithHooks(agent.Hook{
+			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
+				return []ai.Message{ai.UserMessage("trimmed")}, nil
+			},
+		}))
+
+	events, err := collect(t, a, ai.UserMessage("go"))
+	if err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	for _, k := range kinds(events) {
+		if strings.HasPrefix(k, "Compaction") {
+			t.Errorf("events are %v, want no span around a hook that announced none", kinds(events))
+			break
+		}
+	}
+}
+
+// The span closes whichever way the hook went: a consumer that opened a
+// spinner has to be told to stop, and the two ways that used to leave it
+// running are a hook that failed and one that thought better of it.
+func TestAnAnnouncedCompactionAlwaysCloses(t *testing.T) {
+	boom := errors.New("the summariser is down")
+	for _, tc := range []struct {
+		name string
+		hook func(context.Context, agent.PreStepContext) ([]ai.Message, error)
+		want error
+	}{
+		{"failed", func(ctx context.Context, _ agent.PreStepContext) ([]ai.Message, error) {
+			agent.Compacting(ctx)
+			return nil, boom
+		}, boom},
+		{"thought better of it", func(ctx context.Context, _ agent.PreStepContext) ([]ai.Message, error) {
+			agent.Compacting(ctx)
+			return nil, nil
+		}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+				agent.WithHooks(agent.Hook{PreStep: tc.hook}))
+
+			events, _ := collect(t, a, ai.UserMessage("go"))
+			at := slices.IndexFunc(events, func(e agent.Event) bool {
+				_, ok := e.(agent.CompactionEnd)
+				return ok
+			})
+			if at < 0 {
+				t.Fatalf("events are %v, want the span closed", kinds(events))
+			}
+			if got := events[at].(agent.CompactionEnd).Err; !errors.Is(got, tc.want) {
+				t.Errorf("the span closed with %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

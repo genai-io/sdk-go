@@ -7,10 +7,11 @@ import "github.com/genai-io/sdk-go/pkg/ai"
 // The set is closed — event() is unexported — so a consumer switching over it
 // knows this list is all there is:
 //
-//	MessageAdded  MessagesReplaced            the conversation changing
-//	MessageStart  MessageUpdate  MessageEnd   the model producing a message
-//	ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-//	TurnStart                    TurnEnd      the exchange around them
+//	MessageAdded     MessagesReplaced              the conversation changing
+//	MessageStart     MessageUpdate   MessageEnd    the model producing a message
+//	ToolStart        ToolUpdate      ToolEnd       a tool call, asked to answered
+//	CompactionStart                  CompactionEnd the conversation being shortened
+//	TurnStart                        TurnEnd       the exchange around them
 //
 // Every event carries its turn, and every closing event carries what opened
 // it, so reading one is reading rather than remembering.
@@ -24,6 +25,41 @@ type MessageAdded struct {
 }
 
 func (MessageAdded) event() {}
+
+// CompactionStart says a PreStep hook has begun shortening the conversation,
+// which is a model call of its own and takes as long as one. A stream that
+// says nothing for that long looks stopped, and this is what a consumer draws
+// instead.
+//
+// The hook opens it, by calling Compacting, because only the code deciding
+// whether to shorten knows that it is about to. The loop closes it.
+type CompactionStart struct {
+	Turn int
+	// Messages is the conversation being shortened and Tokens what it was
+	// priced at, so a consumer can say what is going on and, once
+	// MessagesReplaced arrives, by how much it helped.
+	Messages []ai.Message
+	Tokens   int
+}
+
+func (CompactionStart) event() {}
+
+// CompactionEnd closes the span, whatever happened: a hook that shortened the
+// conversation, one that thought better of it, and one that failed all close
+// it, because a consumer that opened a spinner has to be told to stop
+// whichever way it went. Err says which of the three this was, with a
+// conversation left alone reported as no error and no MessagesReplaced.
+//
+// It carries what opened it, like every closing event here, so reading one is
+// reading rather than remembering.
+type CompactionEnd struct {
+	Turn     int
+	Messages []ai.Message
+	Tokens   int
+	Err      error
+}
+
+func (CompactionEnd) event() {}
 
 // MessagesReplaced says SetMessages threw the conversation away, reported at
 // the next step boundary — where queued messages enter too, both being changes

@@ -157,6 +157,62 @@ reported as cancelled.
 Between exchanges there is nothing to interrupt: the channel is already closed.
 Cancelling `Run`'s own context is the other thing, and ends everything.
 
+### When a retry is not the answer
+
+Some failures a replay cannot fix. The prompt is larger than the window; the
+key has run out of quota. Send the same call again and the same thing happens,
+which is why `ai.IsContextExceeded` is not `ai.IsRetryable`. `OnInferError` is
+asked about exactly those: once the error was not retryable, or `WithRetry`'s
+budget is spent, the loop is out of answers and turns to the caller for one.
+
+```go
+OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+    if !ai.IsContextExceeded(c.Err) || c.Attempt > 2 {
+        return nil, nil // nil agrees to give up, and the turn ends on the failure
+    }
+    agent.Compacting(ctx)
+    short, err := summarise(ctx, c.Messages)
+    if err != nil {
+        return nil, nil
+    }
+    return &agent.Retry{Messages: short}, nil
+},
+```
+
+A `Retry` asks for another attempt at the same step, and its `Messages` — when
+non-nil — replaces the conversation first, announced there and then as
+`MessagesReplaced`. On the stream it is the shape a retry already had: the
+failed attempt's `MessageEnd`, nothing appended, another `MessageStart`. A
+consumer that handles one handles this.
+
+**The two budgets do not multiply.** `WithRetry` replays a call the loop knows
+how to replay; a recovery hands over a call that has been *changed*, so it
+spends none of that budget and starts it over. What bounds the recoveries is
+the caller — `c.Attempt` is the number to count against, and nothing here
+stops a hook that always asks for another. Only the caller knows what its
+recovery costs and whether it can still make progress: a summariser with one
+message left to summarise cannot, and says so by returning nil.
+
+**Where the next attempt goes is `PreInfer`'s.** It already runs before every
+attempt, and is handed `Inference.LastErr`, so falling back to a second
+endpoint is written where every other routing decision is:
+
+```go
+PreInfer: func(_ context.Context, inf *agent.Inference) error {
+    if ai.IsAuth(inf.LastErr) {
+        inf.Client = fallback
+    }
+    return nil
+},
+```
+
+One hook decides where a call goes, the other whether there is a call left to
+route. Neither has to know what the other did.
+
+It is not asked about a turn that was cancelled — a caller who stopped asking
+did not fail to answer — nor about an error `PostInfer` returned: an objection
+to an answer that arrived does not earn another go at getting one.
+
 ## Events
 
 Everything the agent does arrives as one of ten types. Two things have a life
@@ -246,7 +302,9 @@ told; hooks are *asked* — that is why they share no word with the event stream
 flowchart LR
     Z{{PreStep}} --> A[assemble the call] --> B{{PreInfer}}
     B --> C[model call]
-    C --> D{{PostInfer}}
+    C -->|answered| D{{PostInfer}}
+    C -->|failed| X{{OnInferError}}
+    X -->|Retry| A
     D --> E[message]
     E --> F{{PreTool}}
     F --> G[tool runs]
@@ -258,6 +316,7 @@ flowchart LR
 | `PreStep` | the conversation, and what sending it would cost | a replacement (nil keeps it) |
 | `PreInfer` | the call, about to go | edits it in place |
 | `PostInfer` | the response, on a call that worked | edits it in place |
+| `OnInferError` | the call that failed, and why | a `*Retry` (nil gives up) |
 | `PreTool` | the call, its tool, the conversation | a `Decision` |
 | `PostTool` | the call, its tool, what it produced | a `*Result` (nil keeps it) |
 
@@ -274,9 +333,12 @@ agent.WithHooks(agent.Hook{
 
 **Composition rules**, because two gates that disagree need one:
 
-- All but `PreTool` chain: each sees what the one before it left.
-- `PreTool` is asked in order and **the first refusal is final**. A gate that
-  gets weaker as you add to it is not a gate.
+- `PreInfer`, `PostInfer`, `PostTool` and `PreStep` chain: each sees what the
+  one before it left.
+- The two that answer a question rather than edit a value are asked in order
+  and **the first answer is taken**: `PreTool`'s first refusal is final,
+  because a gate that gets weaker as you add to it is not a gate, and so is
+  `OnInferError`'s first `Retry`.
 - Every hook runs on the loop's goroutine, one at a time, so none needs locking
   of its own.
 - **An error ends the exchange with `StopError`; a `Decision` that blocks does
@@ -376,6 +438,13 @@ The replacement is announced there and then as `MessagesReplaced`, so a session
 records the compaction at the step that made it, and a fold never passes
 through a conversation the agent had already discarded. `PreInfer` is the other
 half of the pair: it edits one call and leaves the conversation alone.
+
+`Tokens` is an estimate, though, and the endpoint is the one that actually
+knows — a prompt priced under the threshold can still come back too long, and
+prompt caching makes the numbers a response reports easy to misread. That case
+is [`OnInferError`](#when-a-retry-is-not-the-answer): the same shortening, on
+the other side of the call, once the provider has said so. `agent.Compacting`
+opens the same span from there, which is why it is named for neither hook.
 
 
 ## Tools

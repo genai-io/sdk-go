@@ -380,17 +380,22 @@ TurnStart                    TurnEnd      包住它们的那一轮
 
 ### Hook
 
-四个可以插进循环和模型之间的位置。**hook 是征询，事件是通知。**
+六个可以插进循环和模型之间的位置。**hook 是征询，事件是通知。**
 
 ```mermaid
 flowchart LR
-    A["组装<br/>这次调用"] --> B{{PreInfer}} --> C["模型调用"] --> D{{PostInfer}}
+    Z{{PreStep}} --> A["组装<br/>这次调用"] --> B{{PreInfer}} --> C["模型调用"]
+    C -->|答上来了| D{{PostInfer}}
     D --> E["那条消息"] --> F{{PreTool}} --> G["工具执行"] --> H{{PostTool}}
+    C -->|失败了| X{{OnInferError}}
+    X -->|Retry| A
 ```
 
 一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。一批工具调用默认并发执行，除非某个工具声明自己不能；工具 panic 也按普通失败处理——告诉模型，这一轮继续。
 
-重试归 client：`ai.Retry` 包在 driver 外面，所以 agent 默认一次都不重试——两份预算是相乘不是相加。
+压缩是一个 `PreStep`：循环把对话和"发出去要花多少"交给你，而更短的那份该说什么，是你的事。
+
+重试归 client：`ai.Retry` 包在 driver 外面，所以 agent 默认一次都不重试——两份预算是相乘不是相加。重放救不回来的那些——prompt 超过窗口、密钥配额用完——是 `OnInferError`：它用一份更短的对话回答一次失败的调用，并要求这一步再来一次。
 
 ### 会话
 

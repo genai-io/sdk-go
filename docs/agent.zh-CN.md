@@ -107,6 +107,43 @@ a.SetMessages(fresh)
 
 交换之间没有东西可中断:channel 已经是关闭的。取消 `Run` 自己的 context 是另一回事,那会结束一切。
 
+### 重试答不了的失败
+
+有些失败重放解决不了。prompt 比窗口大、密钥的配额用完了——同样的调用再发一次,结果一模一样,这也正是 `ai.IsContextExceeded` 不属于 `ai.IsRetryable` 的原因。`OnInferError` 征询的就是这些:当错误不可重试、或者 `WithRetry` 的预算已经花完,**循环没答案了,于是问调用方要一个**。
+
+```go
+OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+    if !ai.IsContextExceeded(c.Err) || c.Attempt > 2 {
+        return nil, nil // nil 就是同意放弃,这一轮以那个失败收尾
+    }
+    agent.Compacting(ctx)
+    short, err := summarise(ctx, c.Messages)
+    if err != nil {
+        return nil, nil
+    }
+    return &agent.Retry{Messages: short}, nil
+},
+```
+
+一个 `Retry` 要的是**同一步再来一次**;它的 `Messages` 非 nil 时先替换掉对话,并**当场**以 `MessagesReplaced` 播报。在事件流上,它就是重试本来的那个形状:失败那次的 `MessageEnd`、中间什么都没追加、又一个 `MessageStart`。已经会处理重试的消费者,不需要为它加一个分支。
+
+**两份预算不相乘。** `WithRetry` 重放的是循环知道怎么重放的那次调用;而一次恢复交回来的是一个**已经变了**的调用,所以它不花那份预算,并且让那份预算**重新开始**。真正给恢复次数封顶的是调用方:`c.Attempt` 就是拿来数的那个数,而这里没有任何东西拦着一个每次都要求再来一次的 hook。只有调用方知道自己那次恢复要花多少、还能不能往前走——一个只剩一条消息可摘要的 summariser 就走不动了,它返回 nil 说出这件事。
+
+**下一次尝试发去哪里,是 `PreInfer` 的事。** 它本来就每次尝试之前都跑一遍,而且拿得到 `Inference.LastErr`,所以"切到备用端点"写在所有其他路由决定待的同一个地方:
+
+```go
+PreInfer: func(_ context.Context, inf *agent.Inference) error {
+    if ai.IsAuth(inf.LastErr) {
+        inf.Client = fallback
+    }
+    return nil
+},
+```
+
+一个 hook 决定调用发去哪,另一个决定还有没有调用可发。谁也不用知道对方干了什么。
+
+它**不会**被问到已取消的 turn——调用方自己不问了,不是模型没答上来——也不会被问到 `PostInfer` 返回的错误:对一个已经到手的答案有意见,不该换来重新要一次答案的机会。
+
 ## 事件
 
 agent 干的每件事都以 10 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
@@ -177,7 +214,9 @@ Hook 是应用插进"循环与模型之间"的地方。**事件是通知,hook �
 flowchart LR
     Z{{PreStep}} --> A[组装这次调用] --> B{{PreInfer}}
     B --> C[模型调用]
-    C --> D{{PostInfer}}
+    C -->|答上来了| D{{PostInfer}}
+    C -->|失败了| X{{OnInferError}}
+    X -->|Retry| A
     D --> E[消息]
     E --> F{{PreTool}}
     F --> G[工具执行]
@@ -189,6 +228,7 @@ flowchart LR
 | `PreStep` | 对话本身,以及发出去要花多少 | 一份替换(nil 表示保持原样) |
 | `PreInfer` | 即将发出的那次调用 | 原地修改 |
 | `PostInfer` | 成功调用返回的 response | 原地修改 |
+| `OnInferError` | 失败的那次调用,以及为什么 | 一个 `*Retry`(nil 表示放弃) |
 | `PreTool` | 这次调用、它的工具、对话 | 一个 `Decision` |
 | `PostTool` | 这次调用、它的工具、产出 | 一个 `*Result`(nil 表示保持原样) |
 
@@ -205,8 +245,8 @@ agent.WithHooks(agent.Hook{
 
 **组合规则**,因为两个互相不同意的门必须有个说法:
 
-- 除 `PreTool` 外都是链式的:每个看到的是前一个改完的结果。
-- `PreTool` 按顺序征询,**第一次拒绝即终局**。一个越加越弱的门不是门。
+- `PreInfer`、`PostInfer`、`PostTool`、`PreStep` 是链式的:每个看到的是前一个改完的结果。
+- 另外两个不是"改一个值"而是"答一个问题",它们按顺序征询,**第一个答案即终局**:`PreTool` 的第一次拒绝是终局——一个越加越弱的门不是门——`OnInferError` 的第一个 `Retry` 也是。
 - 每个 hook 都在循环那条 goroutine 上、一次一个,所以**都不需要自己加锁**。
 - **返回错误会以 `StopError` 结束这次交换,返回一个"拦下"的 `Decision` 不会。** 错误说的是这个 hook 没能完成自己的活,那是应用的失败,不是模型能绕过去的事;而拦下是一次拒绝,模型会以工具错误的形式被告知,还可以换个别的试。`PreTool` 那两个返回值的全部区别就在这里。
 - **hook 里的 panic 不会被兜住**,工具里的会。工具跑在这个包自己创建的 goroutine 上,别人接不住;hook 跑在 range `Run` 的那条 goroutine 上,写它的人自己就能接。交换会带着 panic 解栈,不报告任何结局,agent 回到空闲。
@@ -265,6 +305,8 @@ PreStep: func(ctx context.Context, c agent.PreStepContext) ([]ai.Message, error)
 `Tokens` 是整个 prompt 的估算——对话、system prompt,以及十几个就能盖过对话的工具 schema——**每个边界现算,不记住上一次响应报的数**。落后一次调用的数字,对着刚刚替换出来的新对话仍会读作"满",于是要求把它也替换掉。
 
 替换在**当场**以 `MessagesReplaced` 播报,所以会话把这次压缩记在做出它的那一步上,折叠时不会路过一份 agent 早已丢弃的对话。`PreInfer` 是这一对里的另一半:它只改这一次调用,不动对话。
+
+不过 `Tokens` 终究是估算,**真正知道的是端点**——算下来在阈值以内的 prompt,照样可能被判太长,而开了 prompt 缓存之后,响应里报的那些数字也很容易读错。那种情况归 [`OnInferError`](#重试答不了的失败):等提供方开口之后,在调用的另一侧做同一件缩短。`agent.Compacting` 从那里也开得出同一个 span,这正是它不按任何一个 hook 命名的原因。
 
 
 ## 工具

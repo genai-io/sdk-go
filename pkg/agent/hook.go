@@ -8,8 +8,10 @@ import (
 
 // Hook is where a caller gets between the loop and the model.
 //
-// All but PreTool chain: each sees what the one before it left. PreTool is
-// asked in order and the first refusal is final. All run on the loop's
+// PreInfer, PostInfer, PostTool and PreStep chain: each sees what the one
+// before it left. The two that answer a question rather than edit a value are
+// asked in order and the first answer is taken — PreTool's first refusal is
+// final, and so is OnInferError's first Retry. All run on the loop's
 // goroutine, one at a time, so none needs locking of its own.
 //
 // An error from any of them ends the exchange with StopError: the hook could
@@ -52,6 +54,82 @@ type Hook struct {
 	// PreInfer is the other half of the pair and edits one call, leaving the
 	// conversation alone. Reach for this one when the change is meant to last.
 	PreStep func(ctx context.Context, c PreStepContext) ([]ai.Message, error)
+
+	// OnInferError is asked what to do about a call that failed, once the loop
+	// is out of its own answers: the error was not retryable, or WithRetry's
+	// budget is spent. Returning nil agrees to give up, and the exchange ends
+	// with StopError carrying the failure.
+	//
+	// This is where a conversation the provider called too long is shortened
+	// and sent again — a failure the caller can fix and the loop cannot, since
+	// replaying the same oversized prompt only fails the same way:
+	//
+	//	OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+	//	    if !ai.IsContextExceeded(c.Err) || c.Attempt > 2 {
+	//	        return nil, nil
+	//	    }
+	//	    agent.Compacting(ctx)
+	//	    short, err := summarise(ctx, c.Messages)
+	//	    if err != nil {
+	//	        return nil, nil // nothing left to shorten; give up as the loop would
+	//	    }
+	//	    return &agent.Retry{Messages: short}, nil
+	//	},
+	//
+	// Where the next attempt goes is not settled here but in PreInfer, which
+	// is handed Inference.LastErr: one place decides routing and this one
+	// decides whether there is a call left to route.
+	//
+	// It is not asked about a turn that was cancelled, which is a caller
+	// stopping rather than a failure to answer, nor about an error PostInfer
+	// returned — an objection to an answer that arrived does not earn another
+	// go at getting one.
+	OnInferError func(ctx context.Context, c InferErrorContext) (*Retry, error)
+}
+
+// InferErrorContext is what OnInferError is told about the call that failed.
+type InferErrorContext struct {
+	// Inference is that call as it went out, PreInfer's edits included. Its
+	// Messages are what it carried, which is not necessarily the conversation:
+	// a PreInfer that prunes sends less than the agent holds.
+	Inference *Inference
+
+	// Client is where the call actually went — the agent's own, resolved in
+	// when the Inference named none. Model().ContextWindow is what a prompt
+	// that was too long was too long for.
+	Client *ai.Client
+
+	// Err is why it failed. ai.IsContextExceeded, ai.IsAuth and ai.IsRetryable
+	// are how one kind is told from another.
+	Err error
+
+	// Attempt is which call of this step this was, from one. It rises across
+	// recoveries as well as retries, so it is the number a caller counts
+	// against its own budget — see Retry.
+	Attempt int
+
+	// Messages is the conversation the agent holds, which is what a Retry
+	// replaces.
+	Messages []ai.Message
+}
+
+// Retry is OnInferError asking for another attempt at the same step.
+//
+// It does not spend WithRetry's budget, and a recovered attempt starts that
+// budget over: WithRetry is the loop replaying a call it knows how to replay,
+// while this is a call that has been changed — a shorter conversation, another
+// endpoint — and so is not a replay of the one that failed.
+//
+// Nothing here bounds how many times a hook may ask for one. The budget is the
+// caller's, as the policy is: only the caller knows what its recovery costs and
+// whether it can still make progress. A summariser with one message left to
+// summarise cannot, and says so by returning nil.
+type Retry struct {
+	// Messages, when non-nil, replaces the conversation before the next
+	// attempt and is announced as MessagesReplaced there and then. Nil sends
+	// what the agent already holds, which is what a caller that only wanted
+	// the call routed elsewhere means.
+	Messages []ai.Message
 }
 
 // PreStepContext is the conversation as it stands at a step boundary, and what
@@ -105,14 +183,16 @@ type Decision struct {
 	Terminate bool
 }
 
-// preStepKey marks the context a PreStep hook runs under, and carries the span
-// its Compacting opens. A context without it is not a hook's.
-type preStepKey struct{}
+// compactionKey marks a context under which Compacting announces — the run of
+// a hook the loop will take a replaced conversation from — and carries the span
+// that opens. It is named for that scope rather than for either hook, because
+// there are two of them; a context without it is neither.
+type compactionKey struct{}
 
-// Compacting says the work a PreStep hook is about to do will take a while: it
-// puts CompactionStart on the stream, and has the loop close it with
-// CompactionEnd however the hook returns. Call it once the decision to shorten
-// is made, before the model call that does it:
+// Compacting says the work a PreStep or OnInferError hook is about to do will
+// take a while: it puts CompactionStart on the stream, and has the loop close
+// it with CompactionEnd however the hook returns. Call it once the decision to
+// shorten is made, before the model call that does it:
 //
 //	if c.Tokens < budget {
 //	    return nil, nil
@@ -122,13 +202,13 @@ type preStepKey struct{}
 //
 // It goes through the context, as Report does, so that a hook with nothing to
 // announce declares nothing and the summariser it calls can announce for it.
-// Outside a PreStep hook it does nothing.
+// Outside one of those two hooks it does nothing.
 //
 // A hook that shortens the conversation without a model call should not call
 // it: the span exists for the wait, and one that opens and closes in the same
 // instant is noise on every step.
 func Compacting(ctx context.Context) {
-	if open, ok := ctx.Value(preStepKey{}).(func()); ok {
+	if open, ok := ctx.Value(compactionKey{}).(func()); ok {
 		open()
 	}
 }
@@ -186,7 +266,20 @@ type Inference struct {
 	// after the first ran out of quota. Nil is the agent's own. It is rebuilt
 	// for every attempt, so a retry can be sent where the attempt before it
 	// was not; SetClient moves every later call instead of this one.
-	Client   *ai.Client
+	Client *ai.Client
+
+	// LastErr is what ended the attempt before this one, nil on the first —
+	// what a hook routing away from an endpoint that just failed needs to
+	// know. It is told, not asked: writing it changes nothing.
+	//
+	//	PreInfer: func(_ context.Context, inf *agent.Inference) error {
+	//	    if ai.IsAuth(inf.LastErr) {
+	//	        inf.Client = fallback
+	//	    }
+	//	    return nil
+	//	},
+	LastErr error
+
 	System   string
 	Messages []ai.Message
 	// Tools is what the model is offered. Empty means none and says so,

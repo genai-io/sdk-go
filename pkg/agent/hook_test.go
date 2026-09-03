@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -1111,5 +1113,312 @@ func TestAnAnnouncedCompactionAlwaysCloses(t *testing.T) {
 				t.Errorf("the span closed with %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The failure a caller can fix and the loop cannot: a prompt the provider
+// called too long is shortened and the same step is taken again. Replaying it
+// unchanged, which is all WithRetry could do, fails the same way every time.
+func TestOnInferErrorRecoversAnOversizedPrompt(t *testing.T) {
+	driver := &scripted{
+		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}},
+		Scripts: [][]ai.Delta{nil, text("that fits")},
+		Keep:    true,
+	}
+	asked := 0
+	a := newAgent(t, driver, agent.WithHooks(agent.Hook{
+		OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+			asked++
+			if !ai.IsContextExceeded(c.Err) {
+				return nil, nil
+			}
+			agent.Compacting(ctx)
+			return &agent.Retry{Messages: []ai.Message{ai.UserMessage("(the summary)")}}, nil
+		},
+	}))
+
+	events, err := collect(t, a, ai.UserMessage("a very long conversation"))
+	if err != nil {
+		t.Fatalf("the turn was not recovered: %v", err)
+	}
+	if asked != 1 {
+		t.Errorf("the hook was asked %d times, want once", asked)
+	}
+
+	// A recovery is the shape a retry already had — no event of its own — with
+	// the replacement announced between the two attempts.
+	assertSequence(t, events, []string{
+		"TurnStart",
+		"MessageAdded(user)",
+		"MessageStart(attempt=1)",
+		"MessageEnd(err)",
+		"CompactionStart",
+		"MessagesReplaced",
+		"CompactionEnd",
+		"MessageStart(attempt=2)",
+		"MessageUpdate",
+		"MessageUpdate",
+		"MessageUpdate",
+		"MessageEnd",
+		"MessageAdded(assistant)",
+		"TurnEnd",
+	})
+
+	// And the second attempt carried the replacement, not what was refused.
+	if sent := driver.Sent()[1].Messages; len(sent) != 1 || sent[0].Text() != "(the summary)" {
+		t.Errorf("the retried call sent %d messages, want the shortened one", len(sent))
+	}
+}
+
+// Without the hook the loop's own answer stands: an oversized prompt is not
+// retryable, so nothing recovers it and the exchange ends on it.
+func TestAnOversizedPromptEndsTheExchangeWithNoHook(t *testing.T) {
+	a := newAgent(t, &scripted{
+		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}},
+		Scripts: [][]ai.Delta{nil},
+	})
+
+	out, err := outcome(t, a, ai.UserMessage("hi"))
+	if err == nil {
+		t.Fatal("the failure never reached the caller")
+	}
+	if out.StopReason != agent.StopError {
+		t.Errorf("stop reason = %q, want error", out.StopReason)
+	}
+}
+
+// The two budgets are separate and do not multiply. WithRetry replays a call
+// the loop knows how to replay; a recovery hands over a call that has been
+// changed, so it spends nothing and the replay budget starts over with it.
+func TestARecoveryDoesNotSpendTheRetryBudgetAndRestartsIt(t *testing.T) {
+	overloaded := &ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}
+	driver := &scripted{
+		Errs:    []error{overloaded, overloaded, overloaded, overloaded},
+		Scripts: [][]ai.Delta{nil, nil, nil, nil},
+	}
+
+	var attempts []int
+	a := newAgent(t, driver, agent.WithRetry(2, 0), agent.WithHooks(agent.Hook{
+		OnInferError: func(_ context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+			attempts = append(attempts, c.Attempt)
+			if len(attempts) > 1 {
+				return nil, nil // out of ideas the second time
+			}
+			return &agent.Retry{}, nil
+		},
+	}))
+
+	if _, err := outcome(t, a, ai.UserMessage("hi")); err == nil {
+		t.Fatal("every attempt failed and the turn reported success")
+	}
+
+	// Two attempts on the budget, a recovery, then two more on a budget that
+	// started over — and the hook asked only where the loop ran out of answers.
+	if driver.Calls() != 4 {
+		t.Errorf("the model was called %d times, want 4", driver.Calls())
+	}
+	if want := []int{2, 4}; !slices.Equal(attempts, want) {
+		t.Errorf("the hook was asked at attempts %v, want %v", attempts, want)
+	}
+}
+
+// Nil is agreement to give up, and what the turn fails with is then the
+// model's own failure: the hook declined to answer it, it did not replace it.
+func TestDecliningToRecoverKeepsTheOriginalFailure(t *testing.T) {
+	tooLong := &ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}
+	a := newAgent(t, &scripted{Errs: []error{tooLong}, Scripts: [][]ai.Delta{nil}},
+		agent.WithHooks(agent.Hook{
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+				return nil, nil
+			},
+		}))
+
+	out, _ := outcome(t, a, ai.UserMessage("hi"))
+	if !errors.Is(out.Err, tooLong) {
+		t.Errorf("the turn failed with %v, want the model's own failure", out.Err)
+	}
+}
+
+// A hook that could not do its job is the application failing, not the model,
+// so the exchange ends with what the hook said rather than what it was asked
+// about — the rule every other hook here already keeps.
+func TestAFailingRecoveryHookEndsTheExchange(t *testing.T) {
+	boom := errors.New("the summariser is down")
+	a := newAgent(t, &scripted{
+		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"}},
+		Scripts: [][]ai.Delta{nil},
+	}, agent.WithHooks(agent.Hook{
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			return nil, boom
+		},
+	}))
+
+	out, _ := outcome(t, a, ai.UserMessage("hi"))
+	if out.StopReason != agent.StopError || !errors.Is(out.Err, boom) {
+		t.Errorf("the turn ended %q with %v, want error carrying the hook's own",
+			out.StopReason, out.Err)
+	}
+}
+
+// An objection to an answer that arrived does not earn another go at getting
+// one. PostInfer's error is not a call that failed, and offering it here would
+// let a hook loop on an answer the model already gave.
+func TestAPostInferRefusalIsNotOfferedToTheRecoveryHook(t *testing.T) {
+	refused := errors.New("that answer will not do")
+	asked := false
+	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("here you go")}},
+		agent.WithHooks(agent.Hook{
+			PostInfer: func(context.Context, *ai.Response) error { return refused },
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+				asked = true
+				return &agent.Retry{}, nil
+			},
+		}))
+
+	out, _ := outcome(t, a, ai.UserMessage("hi"))
+	if asked {
+		t.Error("the hook was asked about an answer that arrived")
+	}
+	if !errors.Is(out.Err, refused) {
+		t.Errorf("the turn failed with %v, want the refusal", out.Err)
+	}
+}
+
+// The other half of the seam. This hook says whether there is another attempt;
+// PreInfer says where it goes, which it can only decide knowing what ended the
+// one before — so routing stays in one place and does not move here.
+func TestPreInferIsToldWhatEndedTheAttemptBefore(t *testing.T) {
+	tooLong := &ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}
+	var seen []error
+	a := newAgent(t, &scripted{
+		Errs:    []error{tooLong},
+		Scripts: [][]ai.Delta{nil, text("that fits")},
+	}, agent.WithHooks(agent.Hook{
+		PreInfer: func(_ context.Context, inf *agent.Inference) error {
+			seen = append(seen, inf.LastErr)
+			return nil
+		},
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			return &agent.Retry{Messages: []ai.Message{ai.UserMessage("shorter")}}, nil
+		},
+	}))
+
+	if _, err := outcome(t, a, ai.UserMessage("hi")); err != nil {
+		t.Fatalf("the turn was not recovered: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("PreInfer ran %d times, want once per attempt", len(seen))
+	}
+	if seen[0] != nil {
+		t.Errorf("the first attempt was told it followed %v, want nothing", seen[0])
+	}
+	if !errors.Is(seen[1], tooLong) {
+		t.Errorf("the second attempt was told it followed %v, want the failure", seen[1])
+	}
+}
+
+// A caller that only wanted the call sent elsewhere leaves Messages nil, and
+// nothing is announced: a consumer told the conversation was replaced would
+// throw away a history nobody replaced.
+func TestARouteOnlyRecoveryReplacesNothing(t *testing.T) {
+	a := newAgent(t, &scripted{
+		Errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}},
+		Scripts: [][]ai.Delta{nil, text("the other endpoint")},
+	}, agent.WithHooks(agent.Hook{
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			return &agent.Retry{}, nil
+		},
+	}))
+
+	events, err := collect(t, a, ai.UserMessage("hi"))
+	if err != nil {
+		t.Fatalf("the turn was not recovered: %v", err)
+	}
+	if slices.Contains(kinds(events), "MessagesReplaced") {
+		t.Errorf("events are %v, want nothing announced for a conversation left alone",
+			kinds(events))
+	}
+}
+
+// Two hooks that both want the next attempt: the first answer is taken, as the
+// first refusal is at the gate. Letting the last one win would make the answer
+// depend on registration order in a way nobody reading either could see.
+func TestTheFirstRecoveryAnswerIsTaken(t *testing.T) {
+	second := false
+	a := newAgent(t, &scripted{
+		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"}},
+		Scripts: [][]ai.Delta{nil, text("ok")},
+	},
+		agent.WithHooks(agent.Hook{
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+				return &agent.Retry{Messages: []ai.Message{ai.UserMessage("first")}}, nil
+			},
+		}, agent.Hook{
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+				second = true
+				return &agent.Retry{Messages: []ai.Message{ai.UserMessage("second")}}, nil
+			},
+		}))
+
+	if _, err := outcome(t, a, ai.UserMessage("hi")); err != nil {
+		t.Fatalf("the turn was not recovered: %v", err)
+	}
+	if second {
+		t.Error("the second hook was asked after the first had answered")
+	}
+	if msgs := a.Messages(); len(msgs) == 0 || msgs[0].Text() != "first" {
+		t.Errorf("the conversation is %v, want it starting with the first hook's replacement",
+			msgs)
+	}
+}
+
+// waiting is an endpoint that never answers, so the only thing that can end a
+// call to it is the caller.
+type waiting struct{}
+
+func (waiting) Name() string { return "waiting" }
+
+func (waiting) Stream(ctx context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
+	return func(yield func(ai.Delta, error) bool) {
+		<-ctx.Done()
+		yield(ai.Delta{}, ctx.Err())
+	}
+}
+
+// A turn that was stopped is not a turn that failed to answer. Asking the hook
+// to recover it would restart the very exchange the caller just ended.
+func TestACancelledTurnIsNotOfferedToTheRecoveryHook(t *testing.T) {
+	var asked atomic.Bool
+	a := newAgent(t, waiting{}, agent.WithHooks(agent.Hook{
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			asked.Store(true)
+			return &agent.Retry{}, nil
+		},
+	}))
+
+	started := make(chan struct{})
+	go func() {
+		<-started
+		a.Interrupt()
+	}()
+
+	var out agent.TurnEnd
+	for e, err := range a.Run(context.Background(), ai.UserMessage("hi")) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if _, ok := e.(agent.MessageStart); ok {
+			close(started)
+		}
+		if v, ok := e.(agent.TurnEnd); ok {
+			out = v
+		}
+	}
+
+	if asked.Load() {
+		t.Error("the hook was asked to recover a turn the caller had ended")
+	}
+	if out.StopReason != agent.StopCanceled {
+		t.Errorf("stop reason = %q, want canceled", out.StopReason)
 	}
 }

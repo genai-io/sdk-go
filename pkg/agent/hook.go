@@ -105,8 +105,9 @@ type Decision struct {
 	Terminate bool
 }
 
-// compacting is the context key the boundary puts Compacting's span opener under.
-type compacting struct{}
+// preStepKey marks the context a PreStep hook runs under, and carries the span
+// its Compacting opens. A context without it is not a hook's.
+type preStepKey struct{}
 
 // Compacting says the work a PreStep hook is about to do will take a while: it
 // puts CompactionStart on the stream, and has the loop close it with
@@ -127,7 +128,7 @@ type compacting struct{}
 // it: the span exists for the wait, and one that opens and closes in the same
 // instant is noise on every step.
 func Compacting(ctx context.Context) {
-	if open, ok := ctx.Value(compacting{}).(func()); ok {
+	if open, ok := ctx.Value(preStepKey{}).(func()); ok {
 		open()
 	}
 }

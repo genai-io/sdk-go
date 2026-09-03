@@ -9,7 +9,16 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
-An audit release: thirteen defects, each reproduced before it was fixed, and the
+## [0.3.0] - 2026-09-03
+
+Two releases in one. It is an audit — thirteen defects, each reproduced before
+it was fixed, and the tests that would have caught them — and it is the release
+where an application stops working around this package: where a call goes, when
+a conversation is shortened, what becomes of one that failed, what a session
+keeps of what a tool produced, and what a turn is called. Nine things break, and
+each says what to write instead.
+
+The audit: thirteen defects, each reproduced before it was fixed, and the
 tests that would have caught them. They survived because `pkg/ai`,
 `pkg/ai/jsonschema`, `pkg/ai/catalog`, `pkg/ai/provider`, `pkg/ai/auth`,
 `pkg/ai/auth/oauth` and all five drivers had no test of their own — everything
@@ -495,6 +504,8 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.3.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.3.0
+[0.2.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.2.0
 [0.1.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.2
 [0.1.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.1
 [0.1.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.1.0

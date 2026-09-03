@@ -191,64 +191,63 @@ func (m Model) validateProtocolBlock(block Block) error {
 	return nil
 }
 
-// replays reports whether this model can be sent a block of another model's
-// reasoning state. Each protocol wants its own and tolerates no other's:
-// Anthropic replays a thinking block only with the signature proving the text
-// was not edited; a Chat Completions endpoint carries it as reasoning_content,
-// which only some accept and none accept a signature with; the Responses
-// protocol replays opaque items instead, so its readable thinking is
-// display-only; Gemini takes the text as a thought part.
+// replayable returns a block of another model's reasoning state as this model
+// can take it back, and whether it can at all.
+//
+// Each protocol wants its own and tolerates no other's. Anthropic replays a
+// thinking block only with the signature proving the text was not edited. A
+// Chat Completions endpoint carries the text as reasoning_content, which only
+// some accept and none accept a signature with — so the signature comes off
+// and the reasoning still travels, because it is the thinking that is worth
+// replaying and the signature is only Anthropic's proof of it. Gemini takes
+// the text as a thought part on the same terms. The Responses protocol replays
+// opaque items instead, so readable thinking there is display-only.
 //
 // A protocol this package does not know is left alone: nothing here knows
 // better than the driver that declared it.
-func (m Model) replays(block Block) bool {
+func (m Model) replayable(block Block) (Block, bool) {
 	switch block.Type {
 	case BlockReasoning:
-		return m.API == "" || m.API == APIOpenAIResponses
+		return block, m.API == "" || m.API == APIOpenAIResponses
 	case BlockThinking:
 		switch {
 		case m.API == "":
-			return true
+			return block, true
 		case m.API.anthropicFamily():
-			return block.Signature != ""
+			return block, block.Signature != ""
 		case m.API == APIOpenAIChat:
-			return block.Signature == "" && CompatOf[OpenAIChatCompat](m).ReasoningContent
+			block.Signature = ""
+			return block, CompatOf[OpenAIChatCompat](m).ReasoningContent
 		case m.API == APIGoogleGenAI:
-			return block.Signature == ""
+			block.Signature = ""
+			return block, true
 		default:
 			// APIOpenAIResponses, and any protocol that carries reasoning as
 			// items rather than as text.
-			return false
+			return block, false
 		}
 	}
-	return true
+	return block, true
 }
 
 // strip drops the reasoning state this model cannot replay, which is what
 // makes a conversation portable between models. It is the counterpart of
-// validate: state the model produced is dropped, content the caller wrote is
-// refused.
+// validate: state the model produced is dropped or trimmed to what this one
+// takes, and content the caller wrote is refused.
 //
 // A message is rebuilt only when it loses something, so a conversation that
 // stays with one model is not copied on every call.
 func (m Model) strip(msgs []Message) []Message {
 	for i, msg := range msgs {
-		keep := true
-		for _, block := range msg.Content {
-			if !m.replays(block) {
-				keep = false
-				break
-			}
-		}
-		if keep {
+		if !m.rewrites(msg.Content) {
 			continue
 		}
 		out := slices.Clone(msgs)
 		for j := i; j < len(out); j++ {
 			content := make(Content, 0, len(out[j].Content))
 			for _, block := range out[j].Content {
-				if m.replays(block) {
-					content = append(content, block)
+				if kept, ok := m.replayable(block); ok {
+					content = append(content, kept)
 				}
 			}
 			out[j].Content = content
@@ -256,6 +255,18 @@ func (m Model) strip(msgs []Message) []Message {
 		return out
 	}
 	return msgs
+}
+
+// rewrites reports whether this content would come back different, so a
+// conversation staying with the model that made it is not copied per call.
+func (m Model) rewrites(content Content) bool {
+	for _, block := range content {
+		kept, ok := m.replayable(block)
+		if !ok || kept != block {
+			return true
+		}
+	}
+	return false
 }
 
 func validateBlock(role Role, block Block) error {

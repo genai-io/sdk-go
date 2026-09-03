@@ -546,7 +546,7 @@ version is `0` the API may still change between minor releases; the
 [changelog](CHANGELOG.md) says what moved and what to write instead.
 
 ```sh
-go get github.com/genai-io/sdk-go@v0.4.0
+go get github.com/genai-io/sdk-go@v0.4.1
 ```
 
 ## License

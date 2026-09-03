@@ -9,6 +9,18 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-03
+
+### Fixed
+
+- **A foreign signature took the reasoning down with it.** 0.4.0 dropped a
+  thinking block whose signature belonged to another protocol, which threw away
+  reasoning the endpoint could have read: the signature is Anthropic's proof
+  that the text was not edited, and the text is the part worth replaying. A
+  Chat Completions endpoint that takes `reasoning_content`, and Gemini, now
+  receive the thinking with the signature removed rather than nothing at all —
+  so a conversation that began on Anthropic keeps its reasoning when it moves.
+
 ## [0.4.0] - 2026-09-03
 
 One fix, and it is the one that makes the release before this one true: 0.3.0
@@ -528,6 +540,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.4.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.1
 [0.4.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.0
 [0.3.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.3.0
 [0.2.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.2.0

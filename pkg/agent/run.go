@@ -461,7 +461,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		results[i] = ai.ToolResult{
 			ToolCallID: c.ID,
 			ToolName:   c.Name,
-			Content:    ResultText(c.result, c.err),
+			Content:    ResultContent(c.result, c.err),
 			IsError:    c.err != nil,
 		}
 		terminate = terminate && c.stop

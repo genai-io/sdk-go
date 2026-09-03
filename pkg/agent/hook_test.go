@@ -78,8 +78,8 @@ func TestABlockedCallBecomesAToolErrorTheModelCanRead(t *testing.T) {
 	if len(results) != 1 || !results[0].IsError {
 		t.Fatalf("blocked call did not become a tool error: %+v", results)
 	}
-	if !strings.Contains(results[0].Content, "disabled") {
-		t.Errorf("the model was told %q, which does not say why", results[0].Content)
+	if !strings.Contains(results[0].Text(), "disabled") {
+		t.Errorf("the model was told %q, which does not say why", results[0].Text())
 	}
 }
 

@@ -282,12 +282,46 @@ func messageBlocks(msg ai.Message, thinkingOn bool, ids *toolIDs) []sdk.ContentB
 			}
 		case ai.BlockToolResult:
 			if block.ToolResult != nil {
-				r := block.ToolResult
-				blocks = append(blocks, sdk.NewToolResultBlock(ids.result(r.ToolCallID), r.Content, r.IsError))
+				blocks = append(blocks, toolResult(ids, block.ToolResult))
 			}
 		}
 	}
 	return blocks
+}
+
+// toolResult carries what a tool produced, which this protocol takes as
+// content of its own kind: text, and the images a tool that looks at something
+// returns. A result with neither still sends an empty text block, because the
+// field is required.
+func toolResult(ids *toolIDs, r *ai.ToolResult) sdk.ContentBlockParamUnion {
+	content := make([]sdk.ToolResultBlockParamContentUnion, 0, len(r.Content))
+	for _, block := range r.Content {
+		switch block.Type {
+		case ai.BlockText:
+			if block.Text != "" {
+				content = append(content, sdk.ToolResultBlockParamContentUnion{
+					OfText: &sdk.TextBlockParam{Text: block.Text},
+				})
+			}
+		case ai.BlockImage:
+			if block.Image != nil {
+				image := sdk.NewImageBlockBase64(block.Image.MediaType, block.Image.Data)
+				content = append(content, sdk.ToolResultBlockParamContentUnion{
+					OfImage: image.OfImage,
+				})
+			}
+		}
+	}
+	if len(content) == 0 {
+		content = append(content, sdk.ToolResultBlockParamContentUnion{
+			OfText: &sdk.TextBlockParam{Text: r.Text()},
+		})
+	}
+	return sdk.ContentBlockParamUnion{OfToolResult: &sdk.ToolResultBlockParam{
+		ToolUseID: ids.result(r.ToolCallID),
+		Content:   content,
+		IsError:   sdk.Bool(r.IsError),
+	}}
 }
 
 // mergeConsecutive combines adjacent same-role messages. The API requires all

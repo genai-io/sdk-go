@@ -82,6 +82,35 @@ const (
 	messageOverhead = 4
 )
 
+// estimateContent sizes one sequence of blocks. A tool result holds a sequence
+// of its own, so this recurses into it: an image a tool returned costs what an
+// image costs anywhere else, and counting it as nothing is how a prompt that
+// was measured as small arrives over the window.
+func estimateContent(c Content) int {
+	total := 0
+	for _, block := range c {
+		switch block.Type {
+		case BlockText, BlockThinking:
+			total += estimateText(block.Text)
+		case BlockImage:
+			total += estimateImage(block.Image)
+		case BlockToolCall:
+			if block.ToolCall != nil {
+				total += messageOverhead + estimateText(block.ToolCall.Name) + estimateText(block.ToolCall.Input)
+			}
+		case BlockToolResult:
+			if block.ToolResult != nil {
+				total += messageOverhead + estimateContent(block.ToolResult.Content)
+			}
+		case BlockReasoning:
+			if block.Reasoning != nil {
+				total += estimateText(block.Reasoning.Summary)
+			}
+		}
+	}
+	return total
+}
+
 // EstimateTokens approximates a prompt's size without asking the provider.
 func EstimateTokens(req *Request) int {
 	if req == nil {
@@ -89,27 +118,7 @@ func EstimateTokens(req *Request) int {
 	}
 	total := estimateText(req.System)
 	for _, m := range req.Messages {
-		total += messageOverhead
-		for _, block := range m.Content {
-			switch block.Type {
-			case BlockText, BlockThinking:
-				total += estimateText(block.Text)
-			case BlockImage:
-				total += estimateImage(block.Image)
-			case BlockToolCall:
-				if block.ToolCall != nil {
-					total += messageOverhead + estimateText(block.ToolCall.Name) + estimateText(block.ToolCall.Input)
-				}
-			case BlockToolResult:
-				if block.ToolResult != nil {
-					total += messageOverhead + estimateText(block.ToolResult.Content)
-				}
-			case BlockReasoning:
-				if block.Reasoning != nil {
-					total += estimateText(block.Reasoning.Summary)
-				}
-			}
-		}
+		total += messageOverhead + estimateContent(m.Content)
 	}
 	// Tool definitions are part of the prompt and are easy to forget: a dozen
 	// schemas can outweigh the conversation.

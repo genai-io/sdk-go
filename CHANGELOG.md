@@ -18,8 +18,16 @@ when it works. Statement coverage across `pkg/` goes from 58% to 80%.
 
 ### Changed
 
-Eight things break.
+Nine things break.
 
+- **`ai.ToolResult.Content` is `ai.Content`, not a string**, so a tool that
+  looked at something can answer with it. Write `Content: ai.TextContent(out)`
+  where you wrote `Content: out`, and read it back with `result.Text()`. An
+  image reaches the model on the Anthropic and OpenAI Responses protocols; on
+  Chat Completions and Gemini, which carry only text there, `Model.Validate`
+  refuses the request rather than dropping the picture on the way.
+  `agent.ResultContent` is what the loop sends, and `agent.ResultText` stays for
+  a log or a session record.
 - **`ai.NewClient` is `ai.New`.** Every constructor here is named for what it
   returns, and this was the exception. The old name stays one release as a
   deprecated alias.

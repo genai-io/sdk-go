@@ -144,7 +144,7 @@ func (d *Driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessagePar
 			// Chat Completions carries one tool result per message, so a turn
 			// answering several calls expands into several messages.
 			for _, r := range msg.ToolResults() {
-				out = append(out, sdk.ToolMessage(r.Content, r.ToolCallID))
+				out = append(out, sdk.ToolMessage(r.Text(), r.ToolCallID))
 			}
 			continue
 		}

@@ -213,6 +213,7 @@ func cloneBlock(block Block) Block {
 	}
 	if block.ToolResult != nil {
 		v := *block.ToolResult
+		v.Content = v.Content.Clone()
 		block.ToolResult = &v
 	}
 	if block.Reasoning != nil {
@@ -274,12 +275,19 @@ type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
 	// ToolName is optional context for protocols that carry it.
 	ToolName string `json:"tool_name,omitempty"`
-	// Content is what the tool returned, as text.
-	Content string `json:"content"`
+	// Content is what the tool returned: text, and images where the protocol
+	// carries them — a screenshot, a rendered chart. TextContent says the
+	// text-only answer most tools give; Model.Validate refuses an image on the
+	// two protocols that would drop it.
+	Content Content `json:"content"`
 	// IsError marks a tool that failed. Say so rather than failing the turn: a
 	// model shown an error can correct its arguments and try again.
 	IsError bool `json:"is_error,omitempty"`
 }
+
+// Text is the readable part of what the tool returned, which is what a log, a
+// transcript and a session record want.
+func (r ToolResult) Text() string { return r.Content.Text() }
 
 // ReasoningItem is reasoning state you cannot read and must carry forward.
 type ReasoningItem struct {

@@ -181,9 +181,7 @@ func (d *Driver) convertInput(req *ai.Request) wire.ResponseInputParam {
 					items = append(items, wire.ResponseInputItemUnionParam{
 						OfFunctionCallOutput: &wire.ResponseInputItemFunctionCallOutputParam{
 							CallID: r.ToolCallID,
-							Output: wire.ResponseInputItemFunctionCallOutputOutputUnionParam{
-								OfString: sdk.Opt(r.Content),
-							},
+							Output: toolOutput(r),
 						},
 					})
 				}
@@ -192,6 +190,37 @@ func (d *Driver) convertInput(req *ai.Request) wire.ResponseInputParam {
 		flushMessage()
 	}
 	return items
+}
+
+// toolOutput is what a tool produced, in the form this protocol takes it: a
+// string, unless the tool returned something to look at, which only the item
+// list can carry.
+func toolOutput(r *ai.ToolResult) wire.ResponseInputItemFunctionCallOutputOutputUnionParam {
+	if !r.Content.HasImages() {
+		return wire.ResponseInputItemFunctionCallOutputOutputUnionParam{OfString: sdk.Opt(r.Text())}
+	}
+	items := make(wire.ResponseFunctionCallOutputItemListParam, 0, len(r.Content))
+	for _, block := range r.Content {
+		switch block.Type {
+		case ai.BlockText:
+			if block.Text != "" {
+				items = append(items, wire.ResponseFunctionCallOutputItemUnionParam{
+					OfInputText: &wire.ResponseInputTextContentParam{Text: block.Text},
+				})
+			}
+		case ai.BlockImage:
+			if block.Image != nil {
+				items = append(items, wire.ResponseFunctionCallOutputItemUnionParam{
+					OfInputImage: &wire.ResponseInputImageContentParam{
+						ImageURL: sdk.Opt(oai.DataURI(block.Image.MediaType, block.Image.Data)),
+					},
+				})
+			}
+		}
+	}
+	return wire.ResponseInputItemFunctionCallOutputOutputUnionParam{
+		OfResponseFunctionCallOutputItemArray: items,
+	}
 }
 
 func (d *Driver) messageParam(role wire.EasyInputMessageRole, content ai.Content) *wire.EasyInputMessageParam {

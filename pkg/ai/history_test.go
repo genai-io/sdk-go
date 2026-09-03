@@ -21,7 +21,7 @@ func assistantCalls(ids ...string) Message {
 func results(ids ...string) Message {
 	out := make([]ToolResult, len(ids))
 	for i, id := range ids {
-		out[i] = ToolResult{ToolCallID: id, Content: "done"}
+		out[i] = ToolResult{ToolCallID: id, Content: TextContent("done")}
 	}
 	return ToolResultsMessage(out...)
 }
@@ -75,14 +75,14 @@ func TestRepairKeepsEverythingItDoesNotHaveToDrop(t *testing.T) {
 		},
 		"an orphaned result beside text keeps the text": {
 			in: []Message{{Role: RoleUser, Content: Content{
-				ToolResultBlock(ToolResult{ToolCallID: "ghost", Content: "done"}),
+				ToolResultBlock(ToolResult{ToolCallID: "ghost", Content: TextContent("done")}),
 				TextBlock("and while you are at it"),
 			}}},
 			want: "user text(and while you are at it)",
 		},
 		"a result for the wrong call keeps the turn's text": {
 			in: []Message{assistantCalls("c1"), {Role: RoleUser, Content: Content{
-				ToolResultBlock(ToolResult{ToolCallID: "ghost", Content: "done"}),
+				ToolResultBlock(ToolResult{ToolCallID: "ghost", Content: TextContent("done")}),
 				TextBlock("never mind"),
 			}}},
 			want: "user text(never mind)",
@@ -148,7 +148,7 @@ func TestRepairMakesEveryTextFieldValid(t *testing.T) {
 			ReasoningBlock(ReasoningItem{ID: "r1", EncryptedContent: "opaque", Summary: bad}),
 		}},
 		{Role: RoleUser, Content: Content{
-			ToolResultBlock(ToolResult{ToolCallID: "c1", ToolName: bad, Content: bad}),
+			ToolResultBlock(ToolResult{ToolCallID: "c1", ToolName: bad, Content: TextContent(bad)}),
 		}},
 	}
 
@@ -160,7 +160,7 @@ func TestRepairMakesEveryTextFieldValid(t *testing.T) {
 		"tool call input":   assistant[2].ToolCall.Input,
 		"reasoning summary": assistant[3].Reasoning.Summary,
 		"tool result name":  user[0].ToolResult.ToolName,
-		"tool result body":  user[0].ToolResult.Content,
+		"tool result body":  user[0].ToolResult.Text(),
 	} {
 		if !utf8.ValidString(got) || !strings.ContainsRune(got, utf8.RuneError) {
 			t.Errorf("%s = %q, want the invalid byte replaced", field, got)

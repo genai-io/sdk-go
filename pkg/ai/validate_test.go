@@ -194,3 +194,39 @@ func TestAMalformedBlockIsReportedRatherThanRepairedAway(t *testing.T) {
 		t.Errorf("err = %q, want it to say which block", err)
 	}
 }
+
+// What a tool returned is content of its own, and two kinds of it mean
+// something: what the model reads, and what it looks at. Anything else in
+// there is a mistake worth naming rather than a block a driver silently drops.
+func TestAToolResultHoldsTextAndImagesAndNothingElse(t *testing.T) {
+	answer := func(inner Block) []Message {
+		return []Message{{Role: RoleUser, Content: Content{
+			ToolResultBlock(ToolResult{ToolCallID: "c1", Content: Content{inner}}),
+		}}}
+	}
+
+	c := drive(script{deltas: []Delta{{Block: TextBlock("never")}}})
+	for _, ok := range []Block{
+		TextBlock("what it says"),
+		ImageBlock(Image{MediaType: "image/png", Data: "AAAA"}),
+	} {
+		if _, err := c.Complete(t.Context(), answer(ok)); err != nil {
+			t.Errorf("a tool result holding a %s block was refused: %v", ok.Type, err)
+		}
+	}
+
+	for _, bad := range []Block{
+		ToolCallBlock(ToolCall{ID: "c2", Name: "again"}),
+		ThinkingBlock("out loud", "sig"),
+		ToolResultBlock(ToolResult{ToolCallID: "c1", Content: TextContent("nested")}),
+	} {
+		_, err := c.Complete(t.Context(), answer(bad))
+		if err == nil {
+			t.Errorf("a tool result holding a %s block was accepted", bad.Type)
+			continue
+		}
+		if !strings.Contains(err.Error(), "tool result") {
+			t.Errorf("err = %q, want it to say where the block was", err)
+		}
+	}
+}

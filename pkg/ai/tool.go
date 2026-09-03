@@ -95,7 +95,7 @@ func RunTools(ctx context.Context, tools []Tool, calls []ToolCall) []ToolResult 
 func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 	result := ToolResult{ToolCallID: call.ID, ToolName: call.Name}
 	failed := func(format string, args ...any) ToolResult {
-		result.Content, result.IsError = fmt.Sprintf(format, args...), true
+		result.Content, result.IsError = TextContent(fmt.Sprintf(format, args...)), true
 		return result
 	}
 
@@ -116,7 +116,7 @@ func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 	if err != nil {
 		return failed("%v", err)
 	}
-	result.Content = output
+	result.Content = TextContent(output)
 	return result
 }
 

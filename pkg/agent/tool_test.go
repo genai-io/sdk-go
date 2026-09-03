@@ -52,7 +52,7 @@ func TestToolEndCarriesTheToolsOwnResult(t *testing.T) {
 	}
 
 	results := a.Messages()[2].ToolResults()
-	if len(results) != 1 || results[0].Content != "replaced" {
+	if len(results) != 1 || results[0].Text() != "replaced" {
 		t.Errorf("the model was told %+v, want the hook's replacement", results)
 	}
 }
@@ -500,5 +500,68 @@ func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("reporting into a finished exchange blocked the tool")
+	}
+}
+
+// A tool that looked at something answers with a picture, and the picture is
+// what the model is told — the loop no longer flattens a result to its text on
+// the way. What a log or a session keeps is that text, and a result that is
+// only an image says so rather than reading as nothing.
+func TestAToolsImageReachesTheModel(t *testing.T) {
+	shot := agent.ToolFunc("screenshot", "Look at the page.",
+		func(context.Context, struct{}) (agent.Result, error) {
+			return agent.Result{Content: ai.Content{
+				ai.TextBlock("the page, rendered"),
+				ai.ImageBlock(ai.Image{MediaType: "image/png", Data: "AAAA"}),
+			}}, nil
+		})
+	driver := &scripted{Scripts: [][]ai.Delta{
+		toolCall("c1", "screenshot", `{}`),
+		text("a login form"),
+	}, Keep: true}
+	a := newAgent(t, driver, agent.WithTools(shot))
+
+	if _, err := collect(t, a, ai.UserMessage("what does it look like?")); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+
+	sent := driver.Sent()[1].Messages
+	results := sent[len(sent)-1].ToolResults()
+	if len(results) != 1 {
+		t.Fatalf("the second call carried %d tool results, want the one that ran", len(results))
+	}
+	if !results[0].Content.HasImages() {
+		t.Error("the model was told the text and not the picture")
+	}
+	if got := results[0].Text(); got != "the page, rendered" {
+		t.Errorf("the text beside it = %q", got)
+	}
+}
+
+// The three answers a call comes to, in both forms: what the model is told,
+// and what a record keeps.
+func TestAResultSaysSomethingEvenWhenItSaysNothing(t *testing.T) {
+	image := agent.Result{Content: ai.Content{
+		ai.ImageBlock(ai.Image{MediaType: "image/png", Data: "AAAA"}),
+	}}
+	for _, tc := range []struct {
+		name   string
+		result agent.Result
+		err    error
+		want   string
+	}{
+		{"text", agent.TextResult("what it found"), nil, "what it found"},
+		{"failure", agent.Result{}, errors.New("the file is gone"), "the file is gone"},
+		{"neither", agent.Result{}, nil, "(no output)"},
+		{"a picture", image, nil, "(image)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agent.ResultText(tc.result, tc.err); got != tc.want {
+				t.Errorf("ResultText = %q, want %q", got, tc.want)
+			}
+			if got := agent.ResultContent(tc.result, tc.err); len(got) == 0 {
+				t.Error("ResultContent came back empty; several endpoints reject that")
+			}
+		})
 	}
 }

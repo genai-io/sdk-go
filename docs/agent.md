@@ -371,6 +371,13 @@ readFile := agent.ToolFunc("read_file", "Read a file from the working tree.",
 Returning an error is how a tool fails: the loop turns it into a tool error the
 model can see and correct, rather than failing the turn.
 
+**A tool that looked at something answers with it.** `Result.Content` is
+`ai.Content`, so a screenshot or a rendered chart travels beside the text and
+reaches the model whole — on the Anthropic and OpenAI Responses protocols,
+which carry an image in a tool result; the other two refuse the request rather
+than dropping the picture on the way. `ResultText` is the same answer as text,
+for a log or a session record.
+
 **A tool that takes a while shows its work.** `agent.Report(ctx, partial)`
 reaches the consumer as `ToolUpdate` — the output of a command as it arrives,
 a file list as it is walked. It comes through the context rather than a

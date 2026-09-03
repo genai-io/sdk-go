@@ -135,6 +135,8 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 
 这也是 `Response.Message()` 存在的理由，以及为什么改用 `ai.AssistantMessage(resp.Text())` 是个 bug：前者把 thinking 和不可读的 reasoning 状态一并带上，丢掉它们会让一个推理模型每一轮都从头想起。
 
+**那份状态属于产生它的那个模型，而下一个模型往往不是它**——会话中途换模型是这个包支持、而人也真的会做的事。所以一次请求会**丢掉**被问的这个模型回放不了的推理状态：Anthropic 上没有签名的 thinking 块、任何其它协议上的签名、Responses 端点上那份可读 thinking（它回放的是不可读的 items）。**调用方写下的东西会被拒绝，模型自己留下的东西会被丢掉。**对后者也拒绝，等于让一份对话没法交给第二个模型用，而理由是一样调用方既没放进去、也拿不出来的东西。
+
 **实测结果**：交错内容在 `anthropic`、`openai/responses`、`google` 上保序。`openai/chat` 会**压平**它——文字被拼成一个字符串，调用被移进并行的 `tool_calls` 数组——因为那个协议表达不了交错。那是线格式的性质，不是 driver 的 bug。
 
 ## 一份对话，加若干选项

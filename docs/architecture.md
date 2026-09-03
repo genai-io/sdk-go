@@ -172,6 +172,16 @@ This is also why `Response.Message()` exists and why appending
 thinking and the opaque reasoning state forward, and dropping those makes a
 reasoning model start over every turn.
 
+That state belongs to the model that produced it, and the next model is often
+not that one — switching model mid-conversation is a thing this package
+supports and a person does. So a request drops the reasoning state the model
+being asked cannot replay: an unsigned thinking block on Anthropic, any
+signature anywhere else, readable thinking on a Responses endpoint that
+replays opaque items instead. **What the caller wrote is refused; what the
+model left behind is dropped.** Refusing over the second would make one
+conversation unusable by a second model, over something no caller put there
+and none can take out.
+
 Measured: interleaved content survives `anthropic`, `openai/responses` and
 `google` in order. `openai/chat` flattens it — text is joined into one string
 and calls move to a parallel `tool_calls` array — because that protocol cannot

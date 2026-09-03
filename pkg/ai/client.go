@@ -188,6 +188,9 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 	// once here makes exact counting, estimated counting, middleware and
 	// generation observe the same conversation.
 	req.Messages = Repair(req.Messages)
+	// And then the reasoning state this model cannot replay, which is what
+	// lets one conversation be sent to more than one model.
+	req.Messages = c.model.strip(req.Messages)
 
 	if err := c.model.validate(req); err != nil {
 		return nil, err

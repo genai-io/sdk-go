@@ -90,6 +90,10 @@
 // MessageAdded comes between them, and that absence is what tells a consumer
 // the partial output it drew is void.
 //
+// A call an OnInferError hook recovered is the same shape, with the
+// conversation it shortened announced between the two — so a consumer that
+// already handles a retry handles this without a case of its own.
+//
 // # Two orders in a parallel batch
 //
 // ToolEnd is emitted as each tool finishes, so an interface can retire that
@@ -106,7 +110,7 @@
 //
 //	event.go   what an exchange reports
 //	tool.go    a tool: defined from a Go type, offered, run
-//	hook.go    the five places a caller gets between the loop and what it is
+//	hook.go    the six places a caller gets between the loop and what it is
 //	           doing, and the things each one is handed
 //
 // # What is deliberately not here
@@ -123,6 +127,12 @@
 // knows when a conversation is about to outgrow its window and where it may
 // safely be replaced, and what a shorter one should say — what to keep, and
 // what to pay to find out — is not something this package could be right about.
+//
+// Hook.OnInferError is the other end of that: a window measured before a call
+// is measured with an estimate, and the endpoint is the one that knows. When
+// it answers that the prompt was too long, the loop has no answer of its own —
+// replaying the same prompt fails the same way — so it asks, and shortening it
+// there is the same six lines shortening it at a boundary was.
 //
 // Persisting what happened, and restoring it, is agent/session.
 package agent

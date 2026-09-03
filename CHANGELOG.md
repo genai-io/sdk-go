@@ -185,6 +185,29 @@ Catalog, provider and auth:
   context, and the loop closes it on what opened it however the hook returns,
   including when it failed or thought better of it. A hook that announces
   nothing produces no span.
+- **`Hook.OnInferError` and `agent.Retry`**, the answer to a failed call where
+  the loop has none. Some failures a replay cannot fix — a prompt larger than
+  the window, a key out of quota — which is why `ai.IsContextExceeded` is not
+  `ai.IsRetryable`; but the signal was documented with nowhere to act on it, so
+  a conversation that outgrew its window mid-turn ended the exchange with
+  `StopError` and the caller's only recourse was to measure harder next time.
+  `PreStep` measures with an estimate and the endpoint is the one that knows.
+  This hook is asked once the loop is out of answers — the error was not
+  retryable, or `WithRetry`'s budget is spent — and a returned `Retry` takes
+  the step again, its `Messages` replacing the conversation first and announced
+  there and then. It spends none of `WithRetry`'s budget and starts that budget
+  over, because a call that has been changed is not a replay of the one that
+  failed. Nothing bounds how many times a hook may ask: `Attempt` is the number
+  a caller counts, as only a caller knows what its recovery costs. On the
+  stream a recovery is the shape a retry already had, so it needed no event of
+  its own, and `agent.Compacting` opens the same span from here — which is why
+  the context key behind it is now named for neither hook.
+- **`Inference.LastErr`**, what ended the attempt before this one and nil on
+  the first. Where a failed call goes next stays `PreInfer`'s, which already
+  runs before every attempt and only ever lacked the reason —
+  `if ai.IsAuth(inf.LastErr) { inf.Client = fallback }`. One hook decides where
+  a call goes and the other whether there is a call left to route, so neither
+  has to know what the other did.
 - **`session.WithToolDetails` and `ToolRun.Details`**, so an interface that comes
   back can redraw what a tool produced. `Result.Details` — the diff behind an
   edit, the rows behind a count — was dropped as belonging to an interface that

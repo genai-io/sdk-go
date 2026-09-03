@@ -124,54 +124,134 @@ func (a *Agent) preStep(ctx context.Context, emit func(Event)) error {
 
 	c := a.stepContext(nil)
 
-	// A span is opened at most once a boundary, however many hooks call
-	// Compacting: what a consumer draws is one wait, not one per hook. It
-	// closes on what opened it, like every other span here.
+	return a.compacting(ctx, emit,
+		func() ([]ai.Message, int) { return c.Messages, c.Tokens },
+		func(hctx context.Context) error {
+			changed := false
+			for _, h := range hooks {
+				if h.PreStep == nil {
+					continue
+				}
+				msgs, err := h.PreStep(hctx, c)
+				if err != nil {
+					return err
+				}
+				if msgs == nil {
+					continue
+				}
+				// The next hook is asked about what this one left, priced
+				// again: the figure from before a shortening would have it
+				// shorten twice.
+				c = a.stepContext(msgs)
+				changed = true
+			}
+			if changed {
+				a.replace(emit, c.Messages)
+			}
+			return nil
+		})
+}
+
+// compacting runs the hooks in run under a context whose Compacting opens a
+// compaction span, and closes that span however they return — a consumer that
+// drew a spinner has to be told to stop whichever way it went. A span opens at
+// most once, however many hooks announce: what is drawn is one wait, not one
+// per hook.
+//
+// subject is what the span carries and is asked for only if one opens, so a
+// boundary nobody announces at is never priced.
+func (a *Agent) compacting(ctx context.Context, emit func(Event),
+	subject func() ([]ai.Message, int), run func(context.Context) error) error {
+
 	var span *CompactionStart
-	hctx := context.WithValue(ctx, preStepKey{}, func() {
+	hctx := context.WithValue(ctx, compactionKey{}, func() {
 		if span != nil {
 			return
 		}
-		span = &CompactionStart{Turn: a.turnNow(), Messages: c.Messages, Tokens: c.Tokens}
+		msgs, tokens := subject()
+		span = &CompactionStart{Turn: a.turnNow(), Messages: msgs, Tokens: tokens}
 		emit(*span)
 	})
-	// Closed however the hooks return, since a consumer that opened a spinner
-	// has to be told to stop whichever way it went.
-	closeSpan := func(err error) error {
-		if span != nil {
-			emit(CompactionEnd{
-				Turn: span.Turn, Messages: span.Messages, Tokens: span.Tokens, Err: err,
-			})
-		}
-		return err
+
+	err := run(hctx)
+	if span != nil {
+		emit(CompactionEnd{
+			Turn: span.Turn, Messages: span.Messages, Tokens: span.Tokens, Err: err,
+		})
+	}
+	return err
+}
+
+// replace applies a conversation a hook handed back and announces it where the
+// change was made. Nothing has been appended against the new one in between,
+// so a fold has nothing to get wrong.
+func (a *Agent) replace(emit func(Event), msgs []ai.Message) {
+	a.SetMessages(msgs)
+	if replaced, m := a.takeReplaced(); replaced {
+		emit(MessagesReplaced{Turn: a.turnNow(), Messages: m})
+	}
+}
+
+// onInferError asks the caller what to do about a call that failed, and applies
+// the answer. Nil is agreement to give up, which is also what an agent with no
+// such hook says.
+func (a *Agent) onInferError(ctx context.Context, emit func(Event),
+	inf *Inference, err error, attempt int) (*Retry, error) {
+
+	hooks := a.hookSet()
+	if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.OnInferError != nil }) {
+		return nil, nil
 	}
 
-	changed := false
-	for _, h := range hooks {
-		if h.PreStep == nil {
-			continue
-		}
-		msgs, err := h.PreStep(hctx, c)
-		if err != nil {
-			return closeSpan(err)
-		}
-		if msgs == nil {
-			continue
-		}
-		// The next hook is asked about what this one left, priced again: the
-		// figure from before a shortening would have it shorten twice.
-		c = a.stepContext(msgs)
-		changed = true
+	// Where the call actually went, so a hook reading a context window reads
+	// the window of the model that refused it.
+	client := inf.Client
+	if client == nil {
+		client = a.Client()
 	}
-	if !changed {
-		return closeSpan(nil)
+	c := InferErrorContext{
+		Inference: inf,
+		Client:    client,
+		Err:       err,
+		Attempt:   attempt,
+		Messages:  a.Messages(),
 	}
 
-	a.SetMessages(c.Messages)
-	if replaced, msgs := a.takeReplaced(); replaced {
-		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
+	var again *Retry
+	hookErr := a.compacting(ctx, emit,
+		// Priced through the same path a step boundary uses, and only if a
+		// hook announces: most failures are not about size, and measuring one
+		// that is not is a figure nobody reads.
+		func() ([]ai.Message, int) {
+			priced := a.stepContext(nil)
+			return priced.Messages, priced.Tokens
+		},
+		func(hctx context.Context) error {
+			for _, h := range hooks {
+				if h.OnInferError == nil {
+					continue
+				}
+				r, err := h.OnInferError(hctx, c)
+				if err != nil {
+					return err
+				}
+				// The first answer is taken, as the first refusal is at the
+				// gate: two hooks that both want the next attempt would
+				// otherwise have the last one silently win.
+				if r != nil {
+					again = r
+					break
+				}
+			}
+			if again != nil && again.Messages != nil {
+				a.replace(emit, again.Messages)
+			}
+			return nil
+		})
+	if hookErr != nil {
+		return nil, hookErr
 	}
-	return closeSpan(nil)
+	return again, nil
 }
 
 // stepContext is what a boundary hands the hooks that may change it: the
@@ -208,12 +288,18 @@ const never = time.Duration(math.MaxInt64)
 // caller needs both halves — what the model said, and why it stopped.
 func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.Usage, error) {
 	var spent ai.Usage
+	// lastErr rides to the next attempt on Inference.LastErr, which is how a
+	// hook routes away from an endpoint that just failed.
 	var lastErr error
 
-	wait := a.retryBackoff
-	for attempt := 1; attempt <= a.retryAttempts; attempt++ {
+	// replays is what WithRetry's budget has spent on the call as it stands.
+	// A recovery changes the call, so it starts over — see Retry.
+	replays, wait := 1, a.retryBackoff
+
+	for attempt := 1; ; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit.
 		inf := a.inference()
+		inf.LastErr = lastErr
 		if err := a.preInfer(ctx, inf); err != nil {
 			return nil, spent, err
 		}
@@ -236,7 +322,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 
 		// Read before PostInfer can overwrite err: a failed call earns another
 		// go, an objection to the answer does not.
-		retry := err != nil && ai.IsRetryable(err)
+		callErr := err
 		if err == nil {
 			err = a.postInfer(ctx, resp)
 		}
@@ -244,23 +330,38 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 			Response: resp, Err: err})
 
-		switch {
-		case retry:
-			lastErr = err
-			if attempt == a.retryAttempts {
-				break // nothing to wait for
-			}
-			if err := pause(ctx, wait, err); err != nil {
-				return nil, spent, err
-			}
-			wait *= 2
-		case err != nil:
-			return nil, spent, err
-		default:
+		if err == nil {
 			return resp, spent, nil
 		}
+		if callErr == nil {
+			// PostInfer objected to an answer that arrived. Neither budget
+			// below is for that, and neither is the hook.
+			return nil, spent, err
+		}
+		lastErr = err
+
+		// The loop's own budget answers first, for the failures it knows how
+		// to replay unchanged.
+		if ai.IsRetryable(err) && replays < a.retryAttempts {
+			replays++
+			if perr := pause(ctx, wait, err); perr != nil {
+				return nil, spent, perr
+			}
+			wait *= 2
+			continue
+		}
+
+		// Out of the loop's own answers: ask the caller for one, and end with
+		// the failure when there is none.
+		again, hookErr := a.onInferError(ctx, emit, inf, err, attempt)
+		if hookErr != nil {
+			return nil, spent, hookErr
+		}
+		if again == nil {
+			return nil, spent, err
+		}
+		replays, wait = 1, a.retryBackoff
 	}
-	return nil, spent, lastErr
 }
 
 // PanicError is a tool that panicked. Error is deliberately one line, because

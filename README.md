@@ -457,21 +457,29 @@ what opened it — so reading one is reading, not remembering.
 
 ### Hooks
 
-Four places to get between the loop and the model. **Hooks are asked; events
+Six places to get between the loop and the model. **Hooks are asked; events
 are told.**
 
 ```mermaid
 flowchart LR
-    A["assemble<br/>the call"] --> B{{PreInfer}} --> C["model call"] --> D{{PostInfer}}
+    Z{{PreStep}} --> A["assemble<br/>the call"] --> B{{PreInfer}} --> C["model call"]
+    C -->|answered| D{{PostInfer}}
     D --> E["the message"] --> F{{PreTool}} --> G["tool runs"] --> H{{PostTool}}
+    C -->|failed| X{{OnInferError}}
+    X -->|Retry| A
 ```
 
 A permission system is a `PreTool` returning `Decision{Block: true}`. A batch of
 tool calls runs concurrently unless a tool declares it cannot, and a tool that
 panics fails the way any tool fails — the model is told and the turn carries on.
 
+Compaction is a `PreStep`: the loop hands over the conversation and what sending
+it would cost, and what a shorter one should say is yours.
+
 Retry belongs to the client: `ai.Retry` wraps the driver, so the agent adds none
-by default, because two budgets multiply rather than add.
+by default, because two budgets multiply rather than add. What a replay cannot
+fix — a prompt over the window, a key out of quota — is `OnInferError`, which
+answers a failed call with a shorter conversation and another go at the step.
 
 ### Sessions
 

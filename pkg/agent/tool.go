@@ -68,8 +68,9 @@ type Tool interface {
 	Run(ctx context.Context, call ai.ToolCall) (Result, error)
 }
 
-// reporter is the context key the exchange puts a tool's Report channel under.
-type reporter struct{}
+// toolRunKey marks the context a tool is running under, and carries the
+// channel its Report goes down. A context without it is not a tool's.
+type toolRunKey struct{}
 
 // Report sends a partial result from inside a tool, arriving as ToolUpdate:
 // how a tool that takes a while shows its work. It goes through the context so
@@ -83,7 +84,7 @@ type reporter struct{}
 //
 //	agent.Report(ctx, agent.TextResult(line))
 func Report(ctx context.Context, partial Result) {
-	if to, ok := ctx.Value(reporter{}).(func(Result)); ok {
+	if to, ok := ctx.Value(toolRunKey{}).(func(Result)); ok {
 		to(partial)
 	}
 }

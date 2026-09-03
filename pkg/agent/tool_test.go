@@ -188,8 +188,8 @@ func TestAToolReportsWhileItWorks(t *testing.T) {
 	}
 }
 
-// A tool that reports where nobody installed a reporter — outside an exchange,
-// or in a test — is not a tool that panics.
+// A tool that reports where nobody is listening — outside an exchange, or in a
+// test — is not a tool that panics.
 func TestReportOutsideAToolDoesNothing(t *testing.T) {
 	agent.Report(context.Background(), agent.TextResult("into the void"))
 }

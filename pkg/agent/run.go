@@ -128,7 +128,7 @@ func (a *Agent) preStep(ctx context.Context, emit func(Event)) error {
 	// Compacting: what a consumer draws is one wait, not one per hook. It
 	// closes on what opened it, like every other span here.
 	var span *CompactionStart
-	hctx := context.WithValue(ctx, compacting{}, func() {
+	hctx := context.WithValue(ctx, preStepKey{}, func() {
 		if span != nil {
 			return
 		}
@@ -510,7 +510,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 					ch <- update{index: i}
 				}
 			}()
-			rctx := context.WithValue(ctx, reporter{}, func(partial Result) {
+			rctx := context.WithValue(ctx, toolRunKey{}, func(partial Result) {
 				select {
 				case ch <- update{index: i, partial: &partial}:
 				default:

@@ -244,7 +244,7 @@ told; hooks are *asked* — that is why they share no word with the event stream
 
 ```mermaid
 flowchart LR
-    A[assemble the call] --> B{{PreInfer}}
+    Z{{PreStep}} --> A[assemble the call] --> B{{PreInfer}}
     B --> C[model call]
     C --> D{{PostInfer}}
     D --> E[message]
@@ -255,6 +255,7 @@ flowchart LR
 
 | | in | out |
 | --- | --- | --- |
+| `PreStep` | the conversation, and what sending it would cost | a replacement (nil keeps it) |
 | `PreInfer` | the call, about to go | edits it in place |
 | `PostInfer` | the response, on a call that worked | edits it in place |
 | `PreTool` | the call, its tool, the conversation | a `Decision` |
@@ -339,6 +340,33 @@ To change the agent itself rather than one call, use `SetMessages`, `SetTools`,
 `SetSystem`, `SetClient`. `SetClient` is a person switching model mid-session:
 everything else about the agent is what it was, and only where the next call
 goes is different.
+
+### Compaction
+
+A conversation outgrows its window mid-turn — thirty tool calls will do it — so
+the seam for shortening it is `PreStep`, at the step boundary where the loop is
+free to change what it holds:
+
+```go
+PreStep: func(ctx context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+    if c.Tokens < c.Client.Model().ContextWindow*8/10 {
+        return nil, nil // nil: leave it alone
+    }
+    return summarise(ctx, c.Messages)
+},
+```
+
+`Tokens` is an estimate of the whole prompt — the conversation, the system
+prompt, and the tool schemas, a dozen of which will outweigh it — measured
+fresh at every boundary rather than remembered from the last response. A figure
+that lagged one call behind would still read as full against the conversation
+that had just replaced it, and ask for that one to be replaced too.
+
+The replacement is announced there and then as `MessagesReplaced`, so a session
+records the compaction at the step that made it, and a fold never passes
+through a conversation the agent had already discarded. `PreInfer` is the other
+half of the pair: it edits one call and leaves the conversation alone.
+
 
 ## Tools
 

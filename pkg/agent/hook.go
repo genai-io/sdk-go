@@ -34,6 +34,42 @@ type Hook struct {
 	// PostTool runs after the tool returns; a non-nil result replaces its own.
 	// The batch still finishes, and then the exchange ends.
 	PostTool func(ctx context.Context, c PostToolContext) (*Result, error)
+
+	// PreStep changes the conversation itself, at the step boundary where the
+	// loop is free to. A returned slice replaces it and is announced there and
+	// then, as MessagesReplaced; nil leaves it alone.
+	//
+	// This is where compaction lives: the loop measures and applies the
+	// answer, and what a shorter conversation should be is yours.
+	//
+	//	PreStep: func(ctx context.Context, c agent.PreStepContext) ([]ai.Message, error) {
+	//	    if c.Tokens < c.Client.Model().ContextWindow*8/10 {
+	//	        return nil, nil
+	//	    }
+	//	    return summarise(ctx, c.Messages)
+	//	},
+	//
+	// PreInfer is the other half of the pair and edits one call, leaving the
+	// conversation alone. Reach for this one when the change is meant to last.
+	PreStep func(ctx context.Context, c PreStepContext) ([]ai.Message, error)
+}
+
+// PreStepContext is the conversation as it stands at a step boundary, and what
+// sending it would cost.
+type PreStepContext struct {
+	// Messages is what the next call will carry.
+	Messages []ai.Message
+
+	// Tokens estimates the whole prompt — the conversation, the system prompt
+	// and the tool schemas, which are easy to forget and can outweigh it.
+	// Measured at every boundary rather than remembered, so a conversation
+	// that was just replaced does not still read as full. Client.CountTokens
+	// is the provider's own count, for a caller who will pay a round trip.
+	Tokens int
+
+	// Client is the handle this step will call. Model().ContextWindow is what
+	// Tokens is measured against, and is zero for a model that states none.
+	Client *ai.Client
 }
 
 // PreToolContext is what the gate is told about a call it may refuse. "Context"

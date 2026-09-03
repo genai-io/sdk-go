@@ -9,6 +9,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -18,6 +19,24 @@ import (
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
+
+// Option settles what a session keeps beyond the events themselves.
+type Option func(*Recorder)
+
+// WithToolDetails keeps agent.Result.Details — the diff behind an edit, the
+// rows behind a count — as whatever this returns, stored as JSON and read back
+// from ToolRun.Details:
+//
+//	session.Open(ctx, store, id, session.WithToolDetails(
+//	    func(e agent.ToolEnd) any { return e.Result.Details }))
+//
+// How much of it to keep is the caller's, since a diff or a listing has no
+// bound: return a smaller value for a smaller record, and nil for none. A
+// session without this keeps nothing, and so does a value that will not
+// marshal.
+func WithToolDetails(keep func(agent.ToolEnd) any) Option {
+	return func(r *Recorder) { r.details = keep }
+}
 
 // ErrNotFound is returned for a session that does not exist.
 var ErrNotFound = errors.New("session: not found")
@@ -111,14 +130,16 @@ type Inference struct {
 }
 
 // ToolRun is one tool execution as it is kept — not Tool, which is the thing
-// that runs and which both ai and agent already have. Result.Details is
-// dropped, being for an interface that is no longer running.
+// that runs and which both ai and agent already have.
 type ToolRun struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Args    string `json:"args,omitempty"`
 	Content string `json:"content,omitempty"`
 	IsError bool   `json:"is_error,omitempty"`
+
+	// Details is what WithToolDetails kept, as it returned it.
+	Details json.RawMessage `json:"details,omitempty"`
 }
 
 // Outcome is how a turn ended.
@@ -227,13 +248,13 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 //	    rec.Handle(ctx, e)
 //	    render(e)
 //	}
-func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message, error) {
+func Open(ctx context.Context, store Store, id string, opts ...Option) (*Recorder, []ai.Message, error) {
 	if id == "" {
 		meta, err := store.Create(ctx, Meta{})
 		if err != nil {
 			return nil, nil, err
 		}
-		return newRecorder(store, meta.ID), nil, nil
+		return newRecorder(store, meta.ID, opts), nil, nil
 	}
 
 	if _, err := store.Meta(ctx, id); err != nil {
@@ -244,7 +265,7 @@ func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message,
 		return nil, nil, err
 	}
 
-	rec := newRecorder(store, id)
+	rec := newRecorder(store, id, opts)
 	// The agent numbers turns from one every time it runs, because what came
 	// back from storage was someone else's counting. The session is the one
 	// place that knows both numbers, so it is where they are reconciled —

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"sync"
 	"time"
@@ -29,6 +30,9 @@ type Recorder struct {
 	// announces it, so that resuming does not record a copy of what it read.
 	restored []ai.Message
 
+	// details is what WithToolDetails left, or nil.
+	details func(agent.ToolEnd) any
+
 	mu  sync.Mutex
 	err error
 }
@@ -36,8 +40,14 @@ type Recorder struct {
 // newRecorder returns a recorder writing into one session. Unexported because
 // Open is the way in: without what Open read back it would number turns from
 // one again and re-record the history it was resumed from.
-func newRecorder(store Store, id string) *Recorder {
-	return &Recorder{store: store, id: id}
+func newRecorder(store Store, id string, opts []Option) *Recorder {
+	r := &Recorder{store: store, id: id}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(r)
+		}
+	}
+	return r
 }
 
 // Handle records one event. Call it from your event loop, in order, before
@@ -94,10 +104,19 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 		// The readable part of what the model was told, from the same pair of
 		// functions, so the record cannot come to disagree with the
 		// conversation about what a call said.
-		r.write(ctx, v.Turn, Entry{Type: EntryToolRun, ToolRun: &ToolRun{
+		run := ToolRun{
 			ID: v.ID, Name: v.Name, Args: v.Args,
 			Content: agent.ResultText(v.Result, v.Err), IsError: v.Err != nil,
-		}})
+		}
+		if r.details != nil {
+			// Dropped rather than failed: this is what an interface draws,
+			// and what a restore needs is the conversation. "null" is what a
+			// caller keeping nothing marshals to.
+			if raw, err := json.Marshal(r.details(v)); err == nil && string(raw) != "null" {
+				run.Details = raw
+			}
+		}
+		r.write(ctx, v.Turn, Entry{Type: EntryToolRun, ToolRun: &run})
 
 	case agent.TurnEnd:
 		rec := Outcome{StopReason: v.StopReason, Usage: v.Usage}

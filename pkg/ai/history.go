@@ -175,13 +175,15 @@ func sanitizeBlock(block Block) (Block, bool) {
 		if block.ToolResult == nil {
 			return block, false
 		}
-		content := sanitizeText(block.ToolResult.Content)
+		content, edited := sanitizeContent(block.ToolResult.Content)
 		name := sanitizeText(block.ToolResult.ToolName)
-		if content == block.ToolResult.Content && name == block.ToolResult.ToolName {
+		if !edited && name == block.ToolResult.ToolName {
 			return block, false
 		}
 		clean := cloneBlock(block)
-		clean.ToolResult.Content = content
+		if edited {
+			clean.ToolResult.Content = content
+		}
 		clean.ToolResult.ToolName = name
 		return clean, true
 	case BlockReasoning:

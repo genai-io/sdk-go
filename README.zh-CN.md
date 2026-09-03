@@ -266,6 +266,8 @@ text := response.Text()
 history = append(history, response.Message()) // 保留每一个块，保序
 ```
 
+**工具结果也是内容**：文本，以及协议能带的图片——一张截图、一张渲染出来的图。`Model.Validate` 会在那两个带不了的协议上**拒绝请求**，而不是把图悄悄丢掉、让模型去回答一张它从没看见过的图。
+
 **用 `response.Message()`，不要用 `ai.AssistantMessage(response.Text())`** —— 前者把 thinking 和 reasoning 状态带到下一轮，那正是让推理模型能接着想、而不是每轮从头想的东西。
 
 ### 错误与执行策略

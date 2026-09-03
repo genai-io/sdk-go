@@ -86,7 +86,7 @@ func TestTurnWithAToolRunsASecondInference(t *testing.T) {
 
 	msgs := a.Messages()
 	results := msgs[2].ToolResults()
-	if len(results) != 1 || results[0].Content != "echoed: hi" {
+	if len(results) != 1 || results[0].Text() != "echoed: hi" {
 		t.Errorf("tool result = %+v", results)
 	}
 }

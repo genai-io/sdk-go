@@ -289,8 +289,8 @@ func TestUnnamedToolCallsGetDistinctIDsThatTheirResultsStillMatch(t *testing.T) 
 				ai.ToolCallBlock(ai.ToolCall{Name: "b", Input: "{}"}),
 			}},
 			ai.ToolResultsMessage(
-				ai.ToolResult{ToolName: "a", Content: "one"},
-				ai.ToolResult{ToolName: "b", Content: "two"},
+				ai.ToolResult{ToolName: "a", Content: ai.TextContent("one")},
+				ai.ToolResult{ToolName: "b", Content: ai.TextContent("two")},
 			),
 		},
 	}

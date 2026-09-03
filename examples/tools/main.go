@@ -95,7 +95,7 @@ func run(ref, question string) error {
 	for _, message := range history {
 		for _, result := range message.ToolResults() {
 			if result.IsError {
-				fmt.Printf("  \033[31m✗\033[0m %s → %s\n", result.ToolName, result.Content)
+				fmt.Printf("  \033[31m✗\033[0m %s → %s\n", result.ToolName, result.Text())
 			}
 		}
 	}

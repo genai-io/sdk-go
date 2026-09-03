@@ -91,8 +91,9 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 		r.write(ctx, v.Turn, Entry{Type: EntryInference, Inference: &rec})
 
 	case agent.ToolEnd:
-		// The same text the model was told, from the same function, so the
-		// record cannot come to disagree with the conversation.
+		// The readable part of what the model was told, from the same pair of
+		// functions, so the record cannot come to disagree with the
+		// conversation about what a call said.
 		r.write(ctx, v.Turn, Entry{Type: EntryToolRun, ToolRun: &ToolRun{
 			ID: v.ID, Name: v.Name, Args: v.Args,
 			Content: agent.ResultText(v.Result, v.Err), IsError: v.Err != nil,

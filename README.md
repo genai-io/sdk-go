@@ -311,6 +311,11 @@ text := response.Text()
 history = append(history, response.Message()) // keeps every block, in order
 ```
 
+A tool result is content too: text, and images where the protocol carries them
+— a screenshot, a rendered chart. `Model.Validate` refuses one on the two
+protocols that would drop it rather than letting the model answer about a
+picture it was never shown.
+
 Append `response.Message()`, not `ai.AssistantMessage(response.Text())` — the
 first carries thinking and reasoning state forward, which is what lets a
 reasoning model resume instead of starting over.

@@ -164,6 +164,18 @@ func validateSettings(req *Request) error {
 }
 
 func (m Model) validateProtocolBlock(block Block) error {
+	if block.Type == BlockToolResult && block.ToolResult != nil &&
+		block.ToolResult.Content.HasImages() {
+		// Two of the four protocols take an image in a tool result. Sending
+		// one to the others drops it silently, and a model asked about a
+		// picture it was never shown answers anyway.
+		switch m.API {
+		case APIOpenAIChat:
+			return fmt.Errorf("the Chat Completions protocol carries only text in a tool result")
+		case APIGoogleGenAI:
+			return fmt.Errorf("the Gemini protocol carries only text in a tool result")
+		}
+	}
 	if block.Type == BlockReasoning && m.API != "" && m.API != APIOpenAIResponses {
 		return fmt.Errorf("opaque reasoning blocks belong to the OpenAI Responses protocol")
 	}
@@ -224,6 +236,20 @@ func validateBlock(role Role, block Block) error {
 		if block.ToolResult == nil || block.Text != "" || block.Signature != "" ||
 			block.Image != nil || block.ToolCall != nil || block.Reasoning != nil {
 			return fmt.Errorf("tool-result block must contain only a tool-result payload")
+		}
+		// What a tool returned is content of its own, and only two kinds of it
+		// mean anything: what the model reads, and what it looks at. A tool
+		// call or a thinking block in there is something nobody meant.
+		for _, inner := range block.ToolResult.Content {
+			switch inner.Type {
+			case BlockText, BlockImage:
+				if err := validateBlock(RoleUser, inner); err != nil {
+					return fmt.Errorf("tool result: %w", err)
+				}
+			default:
+				return fmt.Errorf("tool result carries a %s block; it may hold text and images",
+					inner.Type)
+			}
 		}
 	case BlockReasoning:
 		if role != RoleAssistant {

@@ -183,8 +183,8 @@ func contentParts(c ai.Content) ([]*part, error) {
 			// Gemini requires a JSON object. Wrap plain text so it still
 			// round-trips instead of disappearing.
 			var response map[string]any
-			if err := json.Unmarshal([]byte(r.Content), &response); err != nil {
-				response = map[string]any{"result": r.Content}
+			if err := json.Unmarshal([]byte(r.Text()), &response); err != nil {
+				response = map[string]any{"result": r.Text()}
 			}
 			parts = append(parts, &part{FunctionResponse: &functionResponse{
 				ID: r.ToolCallID, Name: r.ToolName, Response: response,

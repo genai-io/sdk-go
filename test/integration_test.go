@@ -308,7 +308,7 @@ func TestToolsRoundTrip(t *testing.T) {
 	history := []ai.Message{
 		ai.UserMessage("find go"),
 		resp.Message(),
-		ai.ToolResultsMessage(ai.ToolResult{ToolCallID: calls[0].ID, ToolName: "search", Content: "found"}),
+		ai.ToolResultsMessage(ai.ToolResult{ToolCallID: calls[0].ID, ToolName: "search", Content: ai.TextContent("found")}),
 	}
 	if _, err := client.Complete(context.Background(), history, ai.WithTools(tool)); err != nil {
 		t.Fatalf("replaying the call: %v", err)
@@ -522,7 +522,7 @@ func TestRepairReplacesBrokenTextWithoutRewritingTheCallers(t *testing.T) {
 		{Role: ai.RoleAssistant, Content: ai.Content{
 			ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "t", Input: `{"q":"` + broken + `"}`}),
 		}},
-		ai.ToolResultsMessage(ai.ToolResult{ToolCallID: "1", ToolName: "t", Content: broken}),
+		ai.ToolResultsMessage(ai.ToolResult{ToolCallID: "1", ToolName: "t", Content: ai.TextContent(broken)}),
 	}
 
 	repaired := ai.Repair(history)
@@ -552,7 +552,7 @@ func TestRepairReplacesBrokenTextWithoutRewritingTheCallers(t *testing.T) {
 	if got := history[1].Content[0].ToolCall.Input; !strings.Contains(got, broken) {
 		t.Error("the caller's tool-call arguments were rewritten in place")
 	}
-	if got := history[2].Content[0].ToolResult.Content; got != broken {
+	if got := history[2].Content[0].ToolResult.Text(); got != broken {
 		t.Error("the caller's tool result was rewritten in place")
 	}
 }
@@ -568,7 +568,7 @@ func toolResultContent(b ai.Block) string {
 	if b.ToolResult == nil {
 		return ""
 	}
-	return b.ToolResult.Content
+	return b.ToolResult.Text()
 }
 
 // Structured output is one call and one mention of the type. The schema that
@@ -990,10 +990,10 @@ func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 		{"without anything to run it", true},         // a definition offered without a handler
 	} {
 		if results[i].IsError != want.isError {
-			t.Errorf("result %d IsError = %v, want %v (%q)", i, results[i].IsError, want.isError, results[i].Content)
+			t.Errorf("result %d IsError = %v, want %v (%q)", i, results[i].IsError, want.isError, results[i].Text())
 		}
-		if !strings.Contains(results[i].Content, want.content) {
-			t.Errorf("result %d = %q\nwant it to contain %q", i, results[i].Content, want.content)
+		if !strings.Contains(results[i].Text(), want.content) {
+			t.Errorf("result %d = %q\nwant it to contain %q", i, results[i].Text(), want.content)
 		}
 		// Every result must be paired, or the next request is rejected.
 		if results[i].ToolCallID == "" {
@@ -1003,8 +1003,8 @@ func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
 
 	// The unknown-tool message names the tools that do exist, so a model that
 	// invented one can pick a real one instead of guessing again.
-	if !strings.Contains(results[3].Content, "area, census and unhandled") {
-		t.Errorf("result 3 = %q, want it to list the available tools", results[3].Content)
+	if !strings.Contains(results[3].Text(), "area, census and unhandled") {
+		t.Errorf("result 3 = %q, want it to list the available tools", results[3].Text())
 	}
 }
 
@@ -1057,8 +1057,8 @@ func TestRunHoldsTheWholeConversation(t *testing.T) {
 	if results[0].IsError || !results[1].IsError {
 		t.Errorf("results = %+v, want the second marked as the failure", results)
 	}
-	if !strings.Contains(results[1].Content, "city must be one of") {
-		t.Errorf("the refused call came back as %q", results[1].Content)
+	if !strings.Contains(results[1].Text(), "city must be one of") {
+		t.Errorf("the refused call came back as %q", results[1].Text())
 	}
 
 	// The history is a continuation: asking again starts from it.
@@ -1124,12 +1124,12 @@ func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
 
 	// The closed-over dependency reached both calls...
 	for i, want := range []string{"dep:first", "dep:second"} {
-		if results[i].Content != want {
-			t.Errorf("result %d = %q, want %q", i, results[i].Content, want)
+		if results[i].Text() != want {
+			t.Errorf("result %d = %q, want %q", i, results[i].Text(), want)
 		}
 	}
 	// ...and neither call saw the other's arguments.
-	if results[0].Content == results[1].Content {
+	if results[0].Text() == results[1].Text() {
 		t.Error("the two calls shared a value")
 	}
 	// The dependency is not on the type, so it cannot leak into the schema.
@@ -1166,11 +1166,11 @@ func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
 		{ID: "1", Name: "echo", Input: `{"text":"hi"}`},
 		{ID: "2", Name: "echo", Input: `{"text":"hi","nope":1}`},
 	})
-	if results[0].IsError || results[0].Content != `echoed {"text":"hi"}` {
+	if results[0].IsError || results[0].Text() != `echoed {"text":"hi"}` {
 		t.Errorf("result 0 = %+v", results[0])
 	}
 	// The hand-written schema is enforced the same way a derived one is.
-	if !results[1].IsError || !strings.Contains(results[1].Content, "unknown property: nope") {
+	if !results[1].IsError || !strings.Contains(results[1].Text(), "unknown property: nope") {
 		t.Errorf("result 1 = %+v, want the schema to have refused it", results[1])
 	}
 
@@ -1427,11 +1427,92 @@ func TestAToolIsCalledWhateverYouCallIt(t *testing.T) {
 
 	results := ai.RunTools(context.Background(), []ai.Tool{tool},
 		[]ai.ToolCall{{ID: "1", Name: "fetch_document", Input: `{"id":"x"}`}})
-	if results[0].IsError || results[0].Content != "doc x" {
+	if results[0].IsError || results[0].Text() != "doc x" {
 		t.Errorf("result = %+v", results[0])
 	}
 }
 
 type FetchDocumentArgs struct {
 	ID string `json:"id" description:"the document to fetch"`
+}
+
+// A tool that looked at something answers with a picture. Two protocols carry
+// one; the other two are refused before the network, because a model asked
+// about an image it was never shown answers anyway.
+func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
+	history := []ai.Message{
+		ai.UserMessage("what does it look like?"),
+		{Role: ai.RoleAssistant, Content: ai.Content{
+			ai.ToolCallBlock(ai.ToolCall{ID: "call_1", Name: "screenshot", Input: "{}"}),
+		}},
+		ai.ToolResultsMessage(ai.ToolResult{
+			ToolCallID: "call_1", ToolName: "screenshot",
+			Content: ai.Content{
+				ai.TextBlock("the page, rendered"),
+				ai.ImageBlock(ai.Image{MediaType: "image/png", Data: "AAAA"}),
+			},
+		}),
+	}
+
+	carried := map[string]struct {
+		model ai.Model
+		serve func(*testing.T) *stub
+	}{
+		"anthropic": {
+			model: ai.Model{ID: "claude-test", API: ai.APIAnthropicMessages, MaxOutput: 1024},
+			serve: func(t *testing.T) *stub {
+				return sse(t, true,
+					[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{}}}`},
+					[2]string{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{}}`},
+				)
+			},
+		},
+		"openai responses": {
+			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIResponses},
+			serve: func(t *testing.T) *stub {
+				return sse(t, false,
+					[2]string{"", `{"type":"response.completed","response":{"id":"r1","model":"gpt-test",` +
+						`"status":"completed","output":[]}}`},
+				)
+			},
+		},
+	}
+	for name, tc := range carried {
+		t.Run(name, func(t *testing.T) {
+			e := tc.serve(t)
+			if _, err := open(t, e.server.URL, tc.model).Complete(context.Background(), history); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			sent, _ := json.Marshal(e.body)
+			if !strings.Contains(string(sent), "AAAA") {
+				t.Errorf("the image did not reach the wire: %s", sent)
+			}
+			if !strings.Contains(string(sent), "the page, rendered") {
+				t.Errorf("the text beside it did not reach the wire: %s", sent)
+			}
+		})
+	}
+
+	refused := map[string]ai.Model{
+		"openai chat completions": {ID: "gpt-test", API: ai.APIOpenAIChat},
+		"google gemini":           {ID: "gemini-test", API: ai.APIGoogleGenAI},
+	}
+	for name, model := range refused {
+		t.Run(name, func(t *testing.T) {
+			reached := false
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+			defer server.Close()
+
+			_, err := open(t, server.URL, model).Complete(context.Background(), history)
+			if err == nil {
+				t.Fatal("a protocol that cannot carry the image accepted it")
+			}
+			if !strings.Contains(err.Error(), "tool result") {
+				t.Errorf("err = %v, want it to name what cannot be sent", err)
+			}
+			if reached {
+				t.Error("the request went out with the image dropped from it")
+			}
+		})
+	}
 }

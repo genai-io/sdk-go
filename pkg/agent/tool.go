@@ -32,16 +32,29 @@ func TextResult(text string) Result { return Result{Content: ai.TextContent(text
 // Text is the part of the result the model is told, as a string.
 func (r Result) Text() string { return r.Content.Text() }
 
-// ResultText is what a tool call comes to say: its text, the error when it
-// failed, or a placeholder when it produced neither, since several endpoints
-// reject an empty tool result. One function, so the model and the session are
-// told the same thing.
+// ResultContent is what a tool call comes to say: what it produced, the error
+// when it failed, or a placeholder when it produced neither, since several
+// endpoints reject an empty tool result. This is what the model is told.
+func ResultContent(r Result, err error) ai.Content {
+	switch {
+	case r.Content.Text() != "" || r.Content.HasImages():
+		return r.Content
+	case err != nil:
+		return ai.TextContent(err.Error())
+	}
+	return ai.TextContent("(no output)")
+}
+
+// ResultText is the same answer as text, for a log or a session record. A
+// picture is not text and says so rather than reading as nothing, which is
+// what a record of a tool that returned only an image would otherwise be.
 func ResultText(r Result, err error) string {
-	if text := r.Text(); text != "" {
+	content := ResultContent(r, err)
+	if text := content.Text(); text != "" {
 		return text
 	}
-	if err != nil {
-		return err.Error()
+	if content.HasImages() {
+		return "(image)"
 	}
 	return "(no output)"
 }

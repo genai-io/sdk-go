@@ -133,6 +133,12 @@ Catalog, provider and auth:
 
 ### Added
 
+- **`ai.WithHeaders`**, the headers one call carries over the ones its Config
+  and model already send. A header that depends on the turn rather than the
+  endpoint — a tenant or trace tag, an opt-in a provider meters differently —
+  could only be changed by building a second client, and a second client is a
+  second connection pool. All four protocols apply them, `CountTokens`
+  included.
 - **A unit-test layer in every package that lacked one**: the stream lifecycle
   and the consumer that breaks mid-stream, `Repair`, `Classify`, `Retry`, schema
   derivation and checking, the Gemini SSE parser, tool-call accumulation, error

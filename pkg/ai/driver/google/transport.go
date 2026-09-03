@@ -24,7 +24,9 @@ func (d *Driver) methodURL(method, query string) string {
 	return u
 }
 
-func (d *Driver) post(ctx context.Context, url string, body any) (*http.Response, error) {
+// post sends one call. headers are that call's own, carried past the ones the
+// driver was built with; a listing, which answers to no request, passes none.
+func (d *Driver) post(ctx context.Context, url string, body any, headers map[string]string) (*http.Response, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -34,7 +36,7 @@ func (d *Driver) post(ctx context.Context, url string, body any) (*http.Response
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return d.do(req)
+	return d.do(req, headers)
 }
 
 func (d *Driver) get(ctx context.Context, url string) (*http.Response, error) {
@@ -42,10 +44,10 @@ func (d *Driver) get(ctx context.Context, url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.do(req)
+	return d.do(req, nil)
 }
 
-func (d *Driver) do(req *http.Request) (*http.Response, error) {
+func (d *Driver) do(req *http.Request, headers map[string]string) (*http.Response, error) {
 	// The key travels in a header rather than the query string the REST
 	// examples use: a URL ends up in proxy logs and error reports, and a
 	// credential should not go with it.
@@ -53,6 +55,10 @@ func (d *Driver) do(req *http.Request) (*http.Response, error) {
 		req.Header.Set("x-goog-api-key", d.apiKey)
 	}
 	for k, v := range d.headers {
+		req.Header.Set(k, v)
+	}
+	// Last, so a name this call gave wins over the endpoint's own.
+	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	res, err := d.client.Do(req)

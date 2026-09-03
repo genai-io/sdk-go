@@ -356,6 +356,10 @@ client, err := ai.New(ai.Config{
 })
 ```
 
+A header that varies per call rather than per endpoint — a trace tag, an opt-in
+one turn needs — is `ai.WithHeaders` on the call, layered over these; building a
+second client to change one would build a second connection pool with it.
+
 `pkg/ai/auth` is the opt-in that does read it. `pkg/ai/provider` sits between a
 catalog row and a client: one configured host and the models on it, where
 reading the list and fetching it are separate verbs.

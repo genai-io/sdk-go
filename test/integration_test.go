@@ -38,6 +38,7 @@ type stub struct {
 	server *httptest.Server
 	body   map[string]any
 	path   string
+	header http.Header
 }
 
 // sse replays server-sent events. Anthropic names its events; the others do
@@ -48,6 +49,7 @@ func sse(t *testing.T, named bool, events ...[2]string) *stub {
 	e.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		e.path = r.URL.Path
+		e.header = r.Header.Clone()
 		_ = json.Unmarshal(raw, &e.body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, ev := range events {
@@ -68,6 +70,7 @@ func jsonEndpoint(t *testing.T, status int, body string) *stub {
 	e.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		e.path = r.URL.Path
+		e.header = r.Header.Clone()
 		_ = json.Unmarshal(raw, &e.body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -174,6 +177,83 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 			}
 			if !tc.system(e.body) {
 				t.Errorf("the system prompt did not reach the wire: %+v", e.body)
+			}
+		})
+	}
+}
+
+// A header the call names reaches the endpoint on every protocol, and beats
+// the one the client was built with. What varies per turn rather than per
+// endpoint — a tenant tag, an opt-in a provider meters differently — is then an
+// option on the call rather than a second client and a second connection pool.
+func TestEveryProtocolCarriesAPerCallHeader(t *testing.T) {
+	tests := map[string]struct {
+		model ai.Model
+		serve func(*testing.T) *stub
+	}{
+		"anthropic": {
+			model: ai.Model{ID: "claude-test", API: ai.APIAnthropicMessages, MaxOutput: 1024},
+			serve: func(t *testing.T) *stub {
+				return sse(t, true,
+					[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{}}}`},
+					[2]string{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{}}`},
+				)
+			},
+		},
+		"openai chat completions": {
+			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIChat},
+			serve: func(t *testing.T) *stub {
+				return sse(t, false,
+					[2]string{"", `{"id":"1","model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
+					[2]string{"", "[DONE]"},
+				)
+			},
+		},
+		"openai responses": {
+			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIResponses},
+			serve: func(t *testing.T) *stub {
+				return sse(t, false,
+					[2]string{"", `{"type":"response.completed","response":{"id":"r1","model":"gpt-test",` +
+						`"status":"completed","output":[]}}`},
+				)
+			},
+		},
+		"google gemini": {
+			model: ai.Model{ID: "gemini-test", API: ai.APIGoogleGenAI},
+			serve: func(t *testing.T) *stub {
+				return sse(t, false,
+					[2]string{"", `{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}`},
+				)
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			e := tc.serve(t)
+			client, err := ai.New(ai.Config{
+				Model: tc.model, APIKey: "k", BaseURL: e.server.URL,
+				Headers: map[string]string{"X-Tenant": "endpoint", "X-Fixed": "kept"},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			_, err = client.Complete(context.Background(), []ai.Message{ai.UserMessage("hello")},
+				ai.WithHeaders(map[string]string{"X-Tenant": "call", "X-Turn": "1"}))
+			if err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+
+			want := map[string]string{
+				"X-Turn":   "1",    // what the call added
+				"X-Tenant": "call", // over what the endpoint carried
+				"X-Fixed":  "kept", // and what the call did not name is left alone
+			}
+			for header, value := range want {
+				if got := e.header.Get(header); got != value {
+					t.Errorf("%s = %q, want %q", header, got, value)
+				}
 			}
 		})
 	}

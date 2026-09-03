@@ -129,6 +129,20 @@ func NewWithClient(client sdk.Client, cfg ai.Config, api ai.API) (ai.Driver, err
 // speaks it to.
 func (d *Driver) Name() string { return string(d.api) }
 
+// requestOptions are the headers one call carries beyond the client's own: the
+// betas this protocol takes per request, then the caller's, which go last
+// because a caller who names a header meant that name.
+func requestOptions(req *ai.Request, native Options) []option.RequestOption {
+	var opts []option.RequestOption
+	if betas := native.Betas; len(betas) > 0 {
+		opts = append(opts, option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
+	}
+	for k, v := range req.Headers {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	return opts
+}
+
 // Stream runs one Messages call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
@@ -143,14 +157,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			return
 		}
 
-		// Betas are the only per-request header this protocol takes; there is
-		// nothing set at construction to layer them over.
-		var reqOpts []option.RequestOption
-		if betas := native.Betas; len(betas) > 0 {
-			reqOpts = append(reqOpts, option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
-		}
-
-		stream := d.client.Messages.NewStreaming(ctx, *params, reqOpts...)
+		stream := d.client.Messages.NewStreaming(ctx, *params, requestOptions(req, native)...)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		var toolID, toolName string
@@ -296,7 +303,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	if !param.IsOmitted(params.Thinking) {
 		count.Thinking = params.Thinking
 	}
-	res, err := d.client.Messages.CountTokens(ctx, count)
+	res, err := d.client.Messages.CountTokens(ctx, count, requestOptions(req, native)...)
 	if err != nil {
 		return 0, d.fail.Wrap(err)
 	}

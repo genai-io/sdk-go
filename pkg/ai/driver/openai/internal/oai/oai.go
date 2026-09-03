@@ -60,6 +60,20 @@ func clientOptions(cfg ai.Config) []option.RequestOption {
 	return opts
 }
 
+// RequestOptions are the headers one call carries beyond the ones the client
+// was built with. They are applied after those, so a name the caller gave wins
+// for this request.
+func RequestOptions(req *ai.Request) []option.RequestOption {
+	if len(req.Headers) == 0 {
+		return nil
+	}
+	opts := make([]option.RequestOption, 0, len(req.Headers))
+	for k, v := range req.Headers {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	return opts
+}
+
 // Details reports what the SDK knows about a failed call. Everything is zero
 // when err did not come from the SDK, which leaves classification to fall back
 // to the transport.

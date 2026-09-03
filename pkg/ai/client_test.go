@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"maps"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -299,5 +300,30 @@ func TestPrepareCleansTheSystemPrompt(t *testing.T) {
 	got := d.reqs[0].System
 	if !utf8.ValidString(got) || !strings.HasPrefix(got, "be brief") {
 		t.Errorf("system = %q, want the invalid byte replaced and the text kept", got)
+	}
+}
+
+// Headers layer the way every other setting does: the client's, then the
+// call's over them, name by name. Restating a whole set to change one of them
+// is what a caller would otherwise build a second client to avoid.
+func TestACallsHeadersLayerOverTheClients(t *testing.T) {
+	base := map[string]string{"X-Tenant": "client", "X-Fixed": "kept"}
+	d := &scripted{scripts: []script{{}}}
+	c := NewClientWithDriver(d, stubModel(), WithHeaders(base))
+
+	if _, err := c.Complete(context.Background(), []Message{UserMessage("hi")},
+		WithHeaders(map[string]string{"X-Tenant": "call"}),
+		WithHeaders(map[string]string{"X-Turn": "1"})); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	want := map[string]string{"X-Tenant": "call", "X-Fixed": "kept", "X-Turn": "1"}
+	if got := d.reqs[0].Headers; !maps.Equal(got, want) {
+		t.Errorf("Headers = %v, want %v", got, want)
+	}
+	// And the client's own map is not the request's, or one turn's header
+	// would be on every turn after it.
+	if base["X-Tenant"] != "client" || len(base) != 2 {
+		t.Errorf("the client's headers = %v, want them untouched by the call", base)
 	}
 }

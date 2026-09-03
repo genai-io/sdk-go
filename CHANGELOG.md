@@ -163,6 +163,24 @@ Catalog, provider and auth:
   hooks again. A turn may therefore hold calls to more than one model, which is
   what `TurnEnd.Usage` now says: it sums tokens, and a cost is folded from each
   `MessageEnd` against the model that answered it.
+- **`Hook.PreStep` and `agent.PreStepContext`**, the place a caller changes the
+  conversation itself rather than one call. At each step boundary the loop
+  hands over what it holds and what sending it would cost — the system prompt
+  and the tool schemas included — and a returned slice replaces it, announced
+  there and then as `MessagesReplaced`. This is where compaction lives: a
+  conversation outgrows its window mid-turn, and `PreInfer` could only edit one
+  call, so compacting from there meant writing the change twice and having it
+  recorded a step late. The size is measured fresh at every boundary rather
+  than remembered from the last response, which is what stops a just-shortened
+  conversation from still reading as full.
+- **`CompactionStart` and `CompactionEnd`**, the span around that wait.
+  Shortening a conversation is a model call and a stream that says nothing for
+  that long looks stopped, but whether a boundary is about to make one is known
+  only inside the hook deciding it — so the hook opens the span with
+  `agent.Compacting`, the same shape as `agent.Report` and through the same
+  context, and the loop closes it on what opened it however the hook returns,
+  including when it failed or thought better of it. A hook that announces
+  nothing produces no span.
 - **A unit-test layer in every package that lacked one**: the stream lifecycle
   and the consumer that breaks mid-stream, `Repair`, `Classify`, `Retry`, schema
   derivation and checking, the Gemini SSE parser, tool-call accumulation, error

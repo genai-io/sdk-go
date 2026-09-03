@@ -58,7 +58,7 @@ its `Turn`, which it alone did not.
 
 ### Fixed
 
-Three that a caller could not work around:
+Four that a caller could not work around:
 
 - **A consumer that stopped reading mid-stream panicked the process.**
   `Client.Stream` yielded `EventDone` after a yield had already been refused.
@@ -70,6 +70,13 @@ Three that a caller could not work around:
 - **A session created empty could not be reopened.** `SetMessages` announced a
   replacement of nothing, and the fold read the resulting empty snapshot as a
   corrupt file. Both shipped examples did exactly that.
+- **A compaction made during the last exchange went unrecorded.** `SetMessages`
+  was announced as `MessagesReplaced` at the start of the *next* exchange, and
+  when there was none — the person quit, the run ended — the session kept the
+  messages appended after the replacement and no news that everything before
+  them had been thrown away. A replacement is now announced at the next step
+  boundary, where queued messages already entered, and an exchange opens with
+  one of those.
 
 `pkg/ai`:
 

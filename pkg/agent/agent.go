@@ -43,8 +43,7 @@ type Agent struct {
 	tools    []Tool
 	hooks    []Hook
 	// replaced and pending are the two ways the conversation changes from
-	// outside an exchange: a replacement is announced at the start of the next
-	// one, queued messages at the next step boundary or ahead of its input.
+	// outside the loop, and settle applies both at the next step boundary.
 	replaced bool
 	pending  []ai.Message
 	// stopTurn ends the turn in flight. Never nil: between turns it is a
@@ -208,8 +207,10 @@ func (a *Agent) Messages() []ai.Message {
 // both work. To add to it instead use AddMessages: reading Messages and
 // setting the result back races with the exchange that may be running.
 //
-// The next exchange announces this as MessagesReplaced, unless there was
-// nothing to replace and nothing to replace it with.
+// It is announced as MessagesReplaced at the next step boundary, which is
+// where queued messages enter too and where an idle agent's next exchange
+// starts. Replacing nothing with nothing is not announced: that happened to
+// nobody.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -243,11 +244,12 @@ func (a *Agent) takeReplaced() (bool, []ai.Message) {
 // in one agrees.
 func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 
-// AddMessages puts messages into the conversation from outside an exchange —
+// AddMessages puts messages into the conversation from outside the loop —
 // typed while the model worked, or routed in from elsewhere. They enter at the
 // next step boundary, which is the one place it is safe to change what the
-// model is about to see, or ahead of the next exchange's own input once no step
-// boundary is left. Between exchanges, pass them to Run instead.
+// model is about to see, and ahead of the next exchange's own input when that
+// boundary is the one an exchange opens with. Between exchanges, pass them to
+// Run instead.
 func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

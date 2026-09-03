@@ -55,6 +55,10 @@ Nine things break.
   `json.RawMessage` an array of integers — schemas that reject the JSON their
   own type writes. `MarshalText` still derives, as a string.
 
+The module also needs Go 1.25 now. `github.com/openai/openai-go/v3` declares
+`go 1.25.0` from v3.46.0 on, and a module inherits the highest directive in its
+graph; CI runs 1.25 and 1.26.
+
 Removed with no caller anywhere: `ai.Content.IsEmpty`, `ai.Content.Images`,
 `ai.Client.ContextWindow`, `ai.IsOverflow`. `auth.Transport` and
 `session.NewRecorder` are unexported — the recorder built by the latter

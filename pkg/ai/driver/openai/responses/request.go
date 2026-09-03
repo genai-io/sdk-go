@@ -180,7 +180,7 @@ func (d *Driver) convertInput(req *ai.Request) wire.ResponseInputParam {
 					r := block.ToolResult
 					items = append(items, wire.ResponseInputItemUnionParam{
 						OfFunctionCallOutput: &wire.ResponseInputItemFunctionCallOutputParam{
-							CallID: r.ToolCallID,
+							CallID: sdk.Opt(r.ToolCallID),
 							Output: toolOutput(r),
 						},
 					})

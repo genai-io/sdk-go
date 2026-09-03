@@ -304,6 +304,8 @@ client, err := ai.New(ai.Config{
 })
 ```
 
+**按调用变、而不是按端点变的 header**——一个 trace tag、某一轮才用得上的开关——是调用上的 `ai.WithHeaders`，叠在上面这些之上；为改一个 header 再建一个 client，等于连它的连接池一起再建一个。
+
 `pkg/ai/auth` 是那个**选择性开启**、确实会读环境的入口。`pkg/ai/provider` 夹在目录行和客户端之间：一个配好的 host 加上它上面的模型，其中**"读列表"和"拉列表"是两个动词**。
 
 ### 支持的协议

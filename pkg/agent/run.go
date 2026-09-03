@@ -188,6 +188,13 @@ var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream 
 // and running out cancels the stream, only the stream, with errStalled as the
 // cause. Why a call ended is then read off the context that ended it.
 func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*ai.Response, error) {
+	// The call goes where the inference says, which is the agent's own client
+	// until a hook says otherwise.
+	client := inf.Client
+	if client == nil {
+		client = a.Client()
+	}
+
 	streamCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 
@@ -196,7 +203,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 
 	var resp *ai.Response
 	var err error
-	for evt, streamErr := range a.client.Stream(streamCtx, inf.Messages, inf.options()...) {
+	for evt, streamErr := range client.Stream(streamCtx, inf.Messages, inf.options()...) {
 		quiet.Reset(a.streamIdle)
 		if streamErr != nil {
 			// A failed call still spent tokens and may have produced text.

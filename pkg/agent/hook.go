@@ -117,6 +117,12 @@ func (a *Agent) postInfer(ctx context.Context, resp *ai.Response) error {
 //	    return nil
 //	},
 type Inference struct {
+	// Client is where this call goes: the agent's own, unless a hook points it
+	// elsewhere — a cheaper model for a summarising step, a second endpoint
+	// after the first ran out of quota. Nil is the agent's own. It is rebuilt
+	// for every attempt, so a retry can be sent where the attempt before it
+	// was not; SetClient moves every later call instead of this one.
+	Client   *ai.Client
 	System   string
 	Messages []ai.Message
 	// Tools is what the model is offered. Empty means none and says so,

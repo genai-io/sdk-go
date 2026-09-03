@@ -139,6 +139,15 @@ Catalog, provider and auth:
   could only be changed by building a second client, and a second client is a
   second connection pool. All four protocols apply them, `CountTokens`
   included.
+- **`agent.Inference.Client` and `Agent.SetClient`/`Agent.Client`**, so an agent
+  is no longer welded to the model it was built on. `SetClient` is a person
+  switching model mid-session: the conversation, the prompt and the tools are
+  what they were, and only where the next call goes is different.
+  `Inference.Client` routes one call — a cheaper model for a step that only
+  summarises, a fallback endpoint on a retry, since every attempt asks the
+  hooks again. A turn may therefore hold calls to more than one model, which is
+  what `TurnEnd.Usage` now says: it sums tokens, and a cost is folded from each
+  `MessageEnd` against the model that answered it.
 - **A unit-test layer in every package that lacked one**: the stream lifecycle
   and the consumer that breaks mid-stream, `Repair`, `Classify`, `Retry`, schema
   derivation and checking, the Gemini SSE parser, tool-call accumulation, error

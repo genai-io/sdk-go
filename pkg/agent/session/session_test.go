@@ -557,3 +557,63 @@ func TestEveryEntryCarriesItsTurn(t *testing.T) {
 		}
 	}
 }
+
+// A name survives being stored and read back, which is the point of having one
+// at all: an application that records rows against these has to find the same
+// rows after a restart. Both entry kinds carry it — a message that was
+// appended, and a snapshot the whole conversation was replaced with.
+func TestNamesSurviveTheRoundTrip(t *testing.T) {
+	st := store(t)
+
+	client := ai.NewClientWithDriver(
+		&scripted{scripts: [][]ai.Delta{text("first"), text("second")}},
+		ai.Model{ID: "stub", API: "stub"})
+	a, err := agent.New(client, agent.WithMessageIDs(counterIDs()))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rec, _, err := session.Open(context.Background(), st, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	converse(t, a, rec, ai.UserMessage("hello"))
+
+	// A compaction, so the fold has to come back through a snapshot too.
+	a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
+	converse(t, a, rec, ai.UserMessage("and again"))
+
+	restored, err := session.Messages(context.Background(), st, rec.ID())
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(restored) == 0 {
+		t.Fatal("nothing was restored")
+	}
+	for i, m := range restored {
+		if m.ID == "" {
+			t.Errorf("restored message %d came back unnamed", i)
+		}
+	}
+
+	// And they are the agent's own names, not new ones invented on the way in.
+	held := a.Messages()
+	if len(held) != len(restored) {
+		t.Fatalf("the agent holds %d messages and the store returned %d",
+			len(held), len(restored))
+	}
+	for i := range held {
+		if held[i].ID != restored[i].ID {
+			t.Errorf("message %d is %q in the agent and %q in the store",
+				i, held[i].ID, restored[i].ID)
+		}
+	}
+}
+
+func counterIDs() func() string {
+	n := 0
+	return func() string {
+		n++
+		return "m" + strconv.Itoa(n)
+	}
+}

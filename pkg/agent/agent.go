@@ -33,6 +33,11 @@ type Agent struct {
 	// reading them needs a case for it.
 	streamFirst time.Duration
 	streamIdle  time.Duration
+	// mintID names a message that arrived without a name, or is nil and none
+	// are named. Read without the lock, and called without it too: it is the
+	// caller's code, and one that reached back into the agent under the lock
+	// would deadlock on it.
+	mintID func() string
 
 	// Everything a caller can change while the agent runs, and the lock that
 	// makes that safe. Read or write one of these and you hold mu.
@@ -102,6 +107,26 @@ func WithMessages(msgs []ai.Message) Option {
 
 // WithMaxSteps caps model calls per exchange. Zero means no cap.
 func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
+
+// WithMessageIDs names every message in the conversation, using the generator
+// given — the identity an application needs when it has to point at one turn
+// later: the row a person is editing, the entry a store already holds, the
+// turn a fork branches at.
+//
+//	agent.WithMessageIDs(func() string { return uuid.NewString() })
+//
+// next is called once per message that arrives without an ID, so a restored
+// conversation keeps the names it was stored with and a message you named
+// yourself keeps yours. Everything the loop makes is named too — the answer,
+// the batch of tool results, a continuation prompt — since a conversation
+// half of which can be pointed at is one an application cannot rely on.
+//
+// The format is yours, and so is uniqueness: this package calls next and
+// keeps what it returns. Off by default, and then every ID is empty, because
+// a conversation nothing outside the loop has to point at needs no names.
+func WithMessageIDs(next func() string) Option {
+	return func(a *Agent) { a.mintID = next }
+}
 
 // WithStreamTimeout bounds how long a model stream may say nothing: first is
 // how long the endpoint has to say anything at all, idle how long it may pause
@@ -192,6 +217,9 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 			opt(a)
 		}
 	}
+	// After the options rather than inside WithMessages, so that seeding a
+	// conversation and asking for names are two options in either order.
+	a.messages = a.named(a.messages)
 	return a, nil
 }
 
@@ -212,6 +240,8 @@ func (a *Agent) Messages() []ai.Message {
 // starts. Replacing nothing with nothing is not announced: that happened to
 // nobody.
 func (a *Agent) SetMessages(msgs []ai.Message) {
+	msgs = a.named(msgs)
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.setMessages(msgs)
@@ -227,6 +257,24 @@ func (a *Agent) setMessages(msgs []ai.Message) {
 		a.replaced = true
 	}
 	a.messages = slices.Clone(msgs)
+}
+
+// named fills in the messages that arrived without an ID, and is a copy
+// whenever it does: the slice belongs to whoever passed it, and naming their
+// messages behind their back is not this package's to do.
+//
+// Called off the lock, since next is the caller's code.
+func (a *Agent) named(msgs []ai.Message) []ai.Message {
+	if a.mintID == nil {
+		return msgs
+	}
+	out := slices.Clone(msgs)
+	for i := range out {
+		if out[i].ID == "" {
+			out[i].ID = a.mintID()
+		}
+	}
+	return out
 }
 
 // takeReplaced reports a replacement since the last exchange, and what it left.

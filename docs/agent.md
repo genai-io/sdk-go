@@ -558,6 +558,27 @@ flowchart LR
 Solid arrows are the write path, dotted the read path. They meet nowhere inside
 the agent: it is handed a `[]ai.Message` and never learns where it came from.
 
+### Naming the turns
+
+A store that has to point back at one message — the row a person is editing,
+the entry it already holds, the turn a fork branches at — asks for names:
+
+```go
+agent.WithMessageIDs(func() string { return uuid.NewString() })
+```
+
+Every message that enters the conversation gets one, the loop's own answers,
+tool-result batches and continuation prompts included, because a conversation
+half of which can be pointed at is one you cannot build a store on. A message
+that arrived already named keeps its name, which is what makes a restore land
+on the entries it was stored as rather than renaming the whole transcript. The
+format and the uniqueness are yours; this calls your generator and keeps what
+it returns.
+
+It is off by default and then every `ID` is empty. Nothing is ever sent — no
+protocol has a field for it, `Repair` carries it through untouched, and it
+costs no tokens, so a conversation the model reads is the same either way.
+
 ### What is written
 
 A span is stored once, when it closes — the closing event already carried the

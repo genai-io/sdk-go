@@ -28,19 +28,17 @@ func TestVertexIsHeldToTheAnthropicRules(t *testing.T) {
 		"a signed thinking block replays on Vertex": {
 			api: APIAnthropicVertex, messages: thinkingTurn("hmm", "sig"),
 		},
-		"an unsigned thinking block is refused on Messages": {
+		// Reasoning state is not a validation subject any more: what a model
+		// cannot replay is dropped, not refused. TestVertexStripsWhatMessages
+		// StripsToo holds the parity these cases used to.
+		"an unsigned thinking block is not an error on Messages": {
 			api: APIAnthropicMessages, messages: thinkingTurn("hmm", ""),
-			wantErr: "requires its signature",
 		},
-		"an unsigned thinking block is refused on Vertex": {
-			// Without this the driver drops the block on the floor and the
-			// model loses its own reasoning with nothing said.
+		"an unsigned thinking block is not an error on Vertex": {
 			api: APIAnthropicVertex, messages: thinkingTurn("hmm", ""),
-			wantErr: "requires its signature",
 		},
-		"a signature belongs to no other protocol": {
+		"a signature on another protocol is not an error either": {
 			api: APIOpenAIChat, messages: thinkingTurn("hmm", "sig"),
-			wantErr: "signed thinking blocks belong to the Anthropic Messages protocol",
 		},
 		"sampling extensions have nowhere to go on Messages": {
 			api:      APIAnthropicMessages,
@@ -228,5 +226,106 @@ func TestAToolResultHoldsTextAndImagesAndNothingElse(t *testing.T) {
 		if !strings.Contains(err.Error(), "tool result") {
 			t.Errorf("err = %q, want it to say where the block was", err)
 		}
+	}
+}
+
+// Vertex carries the Anthropic Messages protocol, so it must keep and drop
+// exactly what Messages does. A rule written for one and not the other is how
+// thinking replay silently stopped working on Vertex once before.
+func TestVertexStripsWhatMessagesStripsToo(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msgs []Message
+		kept bool
+	}{
+		{"a signed block replays", thinkingTurn("hmm", "sig"), true},
+		{"an unsigned one cannot be proved and goes", thinkingTurn("hmm", ""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := Model{ID: "m", API: APIAnthropicMessages}.strip(tc.msgs)
+			vertex := Model{ID: "m", API: APIAnthropicVertex}.strip(tc.msgs)
+
+			if got := hasThinking(messages); got != tc.kept {
+				t.Errorf("Messages kept thinking = %v, want %v", got, tc.kept)
+			}
+			if got := hasThinking(vertex); got != tc.kept {
+				t.Errorf("Vertex kept thinking = %v, want %v", got, tc.kept)
+			}
+		})
+	}
+}
+
+func hasThinking(msgs []Message) bool {
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			if b.Type == BlockThinking {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// A conversation that loses nothing is not copied: strip runs on every call,
+// and the common case is a conversation staying with the model that made it.
+func TestStrippingNothingKeepsTheSameSlice(t *testing.T) {
+	msgs := thinkingTurn("hmm", "sig")
+	out := Model{ID: "m", API: APIAnthropicMessages}.strip(msgs)
+	if &out[0] != &msgs[0] {
+		t.Error("a conversation with nothing to drop was copied anyway")
+	}
+}
+
+// What the caller wrote is still refused, which is the other half of the line:
+// a picture a tool returned is content the model would answer about wrongly if
+// it never arrived, not state it can do without.
+func TestCallerContentIsStillRefused(t *testing.T) {
+	msgs := []Message{{Role: RoleUser, Content: Content{ToolResultBlock(ToolResult{
+		ToolCallID: "c1",
+		Content:    Content{TextBlock("here"), ImageBlock(Image{MediaType: "image/png", Data: "x"})},
+	})}}}
+
+	err := Model{ID: "m", API: APIOpenAIChat}.Validate(msgs)
+	if err == nil || !strings.Contains(err.Error(), "only text in a tool result") {
+		t.Errorf("err = %v, want the image refused", err)
+	}
+}
+
+// Every protocol's answer, because this decides silently: a block kept where
+// it does not belong is a rejected request, and one dropped where it does is a
+// model that starts its reasoning over on every turn.
+func TestWhichProtocolReplaysWhichReasoningState(t *testing.T) {
+	signed := ThinkingBlock("hmm", "sig")
+	plain := ThinkingBlock("hmm", "")
+	opaque := ReasoningBlock(ReasoningItem{ID: "r1", EncryptedContent: "x"})
+
+	chatWithReasoning := Model{ID: "m", API: APIOpenAIChat,
+		Compat: OpenAIChatCompat{ReasoningContent: true}}
+
+	for _, tc := range []struct {
+		name  string
+		model Model
+		block Block
+		want  bool
+	}{
+		{"Anthropic replays what it signed", Model{API: APIAnthropicMessages}, signed, true},
+		{"Anthropic cannot prove unsigned thinking", Model{API: APIAnthropicMessages}, plain, false},
+		{"Vertex answers as Messages does", Model{API: APIAnthropicVertex}, signed, true},
+		{"Chat takes it only where the endpoint says so", chatWithReasoning, plain, true},
+		{"Chat without reasoning_content takes none", Model{API: APIOpenAIChat}, plain, false},
+		{"no Chat endpoint takes a signature", chatWithReasoning, signed, false},
+		{"Gemini takes the text as a thought", Model{API: APIGoogleGenAI}, plain, true},
+		{"Gemini takes no signature either", Model{API: APIGoogleGenAI}, signed, false},
+		{"Responses replays items, not readable thinking", Model{API: APIOpenAIResponses}, plain, false},
+		{"opaque items belong to Responses", Model{API: APIOpenAIResponses}, opaque, true},
+		{"and nowhere else", Model{API: APIAnthropicMessages}, opaque, false},
+		{"a protocol this package does not know is left alone", Model{API: "custom"}, signed, false},
+		{"a model that states no protocol keeps everything", Model{}, opaque, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.model.replays(tc.block); got != tc.want {
+				t.Errorf("replays = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

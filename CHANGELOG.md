@@ -9,6 +9,24 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A conversation could not be sent to a second model.** `Agent.SetClient` and
+  `Inference.Client` exist so a person can switch model mid-session with the
+  conversation unchanged — and a reasoning conversation could not, because the
+  state the first model left in it made the next request invalid.
+  `Model.Validate` refused an unsigned thinking block on Anthropic, a signature
+  anywhere else, and an opaque reasoning item off the Responses protocol. All
+  three are the model's own state, put there by this package and impossible for
+  a caller to remove without editing the history by hand.
+
+  A request now drops the reasoning state the model being asked cannot replay,
+  and refuses only what the caller wrote — an image in a tool result on a
+  protocol that carries only text there stays an error, because a model asked
+  about a picture it was never shown answers anyway, while a model that lost
+  its own scratch state merely thinks again. `Model.Validate` says nothing
+  about thinking or reasoning any more.
+
 ## [0.3.0] - 2026-09-03
 
 Two releases in one. It is an audit — thirteen defects, each reproduced before

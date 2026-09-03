@@ -3,12 +3,20 @@ package ai
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 )
 
 // Validate checks a call against what the model can actually do, before it
 // reaches the network. It takes the same arguments as Complete, so a caller
 // can ask whether a request is sendable without sending it.
+//
+// It reports what a caller wrote and this model cannot take — an image in a
+// tool result on a protocol that carries only text there, a sampling extension
+// the protocol has nowhere to put. It says nothing about thinking or reasoning
+// blocks, which are the model's own state rather than the caller's: the ones
+// this model cannot replay are dropped on the way out, so a conversation stays
+// sendable to whichever model is asked next.
 func (m Model) Validate(messages []Message, opts ...Option) error {
 	return m.validate(newRequest(m, messages, opts))
 }
@@ -176,26 +184,78 @@ func (m Model) validateProtocolBlock(block Block) error {
 			return fmt.Errorf("the Gemini protocol carries only text in a tool result")
 		}
 	}
-	if block.Type == BlockReasoning && m.API != "" && m.API != APIOpenAIResponses {
-		return fmt.Errorf("opaque reasoning blocks belong to the OpenAI Responses protocol")
-	}
-	if block.Type != BlockThinking {
-		return nil
-	}
-	if block.Signature != "" && m.API != "" && !m.API.anthropicFamily() {
-		return fmt.Errorf("signed thinking blocks belong to the Anthropic Messages protocol")
-	}
-	switch {
-	case m.API.anthropicFamily():
-		if block.Text != "" && block.Signature == "" {
-			return fmt.Errorf("thinking replay on the Anthropic Messages protocol requires its signature")
-		}
-	case m.API == APIOpenAIChat:
-		if !CompatOf[OpenAIChatCompat](m).ReasoningContent {
-			return fmt.Errorf("this Chat Completions endpoint cannot replay thinking blocks")
-		}
-	}
+	// Thinking and reasoning are not checked here: they are the model's own
+	// state, and strip drops the ones this model cannot replay before anything
+	// reaches this point. Refusing over them would make switching model
+	// mid-conversation impossible for exactly the models it matters for.
 	return nil
+}
+
+// replays reports whether this model can be sent a block of another model's
+// reasoning state. Each protocol wants its own and tolerates no other's:
+// Anthropic replays a thinking block only with the signature proving the text
+// was not edited; a Chat Completions endpoint carries it as reasoning_content,
+// which only some accept and none accept a signature with; the Responses
+// protocol replays opaque items instead, so its readable thinking is
+// display-only; Gemini takes the text as a thought part.
+//
+// A protocol this package does not know is left alone: nothing here knows
+// better than the driver that declared it.
+func (m Model) replays(block Block) bool {
+	switch block.Type {
+	case BlockReasoning:
+		return m.API == "" || m.API == APIOpenAIResponses
+	case BlockThinking:
+		switch {
+		case m.API == "":
+			return true
+		case m.API.anthropicFamily():
+			return block.Signature != ""
+		case m.API == APIOpenAIChat:
+			return block.Signature == "" && CompatOf[OpenAIChatCompat](m).ReasoningContent
+		case m.API == APIGoogleGenAI:
+			return block.Signature == ""
+		default:
+			// APIOpenAIResponses, and any protocol that carries reasoning as
+			// items rather than as text.
+			return false
+		}
+	}
+	return true
+}
+
+// strip drops the reasoning state this model cannot replay, which is what
+// makes a conversation portable between models. It is the counterpart of
+// validate: state the model produced is dropped, content the caller wrote is
+// refused.
+//
+// A message is rebuilt only when it loses something, so a conversation that
+// stays with one model is not copied on every call.
+func (m Model) strip(msgs []Message) []Message {
+	for i, msg := range msgs {
+		keep := true
+		for _, block := range msg.Content {
+			if !m.replays(block) {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			continue
+		}
+		out := slices.Clone(msgs)
+		for j := i; j < len(out); j++ {
+			content := make(Content, 0, len(out[j].Content))
+			for _, block := range out[j].Content {
+				if m.replays(block) {
+					content = append(content, block)
+				}
+			}
+			out[j].Content = content
+		}
+		return out
+	}
+	return msgs
 }
 
 func validateBlock(role Role, block Block) error {

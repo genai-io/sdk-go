@@ -327,3 +327,55 @@ func TestACallsHeadersLayerOverTheClients(t *testing.T) {
 		t.Errorf("the client's headers = %v, want them untouched by the call", base)
 	}
 }
+
+// The conversation is the same conversation whichever model is asked, which is
+// what Agent.SetClient and Inference.Client are for. A reasoning model leaves
+// its own state in it — a signed thinking block, an opaque reasoning item —
+// and the next model is usually not the one that produced them.
+//
+// That state is the model's, not the caller's, so it is dropped for a model
+// that cannot replay it. Refusing instead would make switching model mid-
+// conversation impossible for exactly the models where it matters most, and
+// would refuse over something no caller put there or can take out.
+func TestModelStateThatCannotBeReplayedIsDroppedNotRefused(t *testing.T) {
+	// Anthropic's own turn: thinking with the signature that proves it.
+	history := []Message{
+		UserMessage("think about it"),
+		{Role: RoleAssistant, Content: Content{
+			ThinkingBlock("step one, step two", "sig-from-anthropic"),
+			TextBlock("the answer"),
+		}},
+		UserMessage("and now?"),
+	}
+
+	for _, tc := range []struct {
+		name  string
+		model Model
+	}{
+		{"a Chat endpoint that cannot carry it", Model{ID: "m", API: APIOpenAIChat}},
+		{"the Responses protocol, which replays reasoning items instead",
+			Model{ID: "m", API: APIOpenAIResponses}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &scripted{scripts: []script{{deltas: []Delta{{Block: TextBlock("fine")}}}}}
+			c := NewClientWithDriver(d, tc.model)
+
+			if _, err := c.Complete(context.Background(), history); err != nil {
+				t.Fatalf("switching to this model failed: %v", err)
+			}
+
+			sent := d.reqs[0].Messages
+			for _, m := range sent {
+				for _, b := range m.Content {
+					if b.Type == BlockThinking {
+						t.Errorf("a thinking block this model cannot replay was sent anyway")
+					}
+				}
+			}
+			// And what the caller actually said is still there.
+			if len(sent) != 3 || sent[1].Text() != "the answer" {
+				t.Errorf("the conversation came out as %d messages, want the three that went in", len(sent))
+			}
+		})
+	}
+}

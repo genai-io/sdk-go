@@ -17,8 +17,6 @@ import (
 //
 //	for e, err := range a.Run(ctx, ai.UserMessage("hi")) { … }
 type Agent struct {
-	client *ai.Client
-
 	// Settled at construction and never written again, so they are read
 	// without the lock. Anything given a setter has to move to the group
 	// below and take the lock with it.
@@ -39,6 +37,7 @@ type Agent struct {
 	// Everything a caller can change while the agent runs, and the lock that
 	// makes that safe. Read or write one of these and you hold mu.
 	mu       sync.Mutex
+	client   *ai.Client
 	system   string
 	messages []ai.Message
 	tools    []Tool
@@ -290,6 +289,31 @@ func (a *Agent) definitions() []ai.Tool {
 	return defs
 }
 
+// Client returns the model handle the agent calls by default. Where a given
+// inference actually went is on its Inference, which a hook may have pointed
+// elsewhere.
+func (a *Agent) Client() *ai.Client {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.client
+}
+
+// SetClient replaces the model handle, from the next inference on: a person
+// switching model mid-session, with the conversation, the tools and the prompt
+// unchanged. Setting Inference.Client in a PreInfer hook moves one call
+// instead.
+//
+// A nil client is ignored, because New already said an agent cannot exist
+// without one.
+func (a *Agent) SetClient(c *ai.Client) {
+	if c == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.client = c
+}
+
 // System returns the system prompt as it stands.
 func (a *Agent) System() string {
 	a.mu.Lock()
@@ -314,9 +338,9 @@ func (a *Agent) SetSystem(prompt string) {
 	a.system = prompt
 }
 
-// String names the agent by the model it is bound to, which is the one thing
-// about it that is both stable and worth reading in a log.
-func (a *Agent) String() string { return fmt.Sprintf("agent(%s)", a.client.Model().ID) }
+// String names the agent by the model it is calling, which is the one thing
+// about it worth reading in a log.
+func (a *Agent) String() string { return fmt.Sprintf("agent(%s)", a.Client().Model().ID) }
 
 // inference is the call this agent would make. One lock, not three: a prompt
 // read before SetTools and a toolset read after it would describe an agent
@@ -326,6 +350,7 @@ func (a *Agent) inference() *Inference {
 	defer a.mu.Unlock()
 
 	return &Inference{
+		Client:   a.client,
 		System:   a.system,
 		Messages: slices.Clone(a.messages),
 		Tools:    a.definitions(),

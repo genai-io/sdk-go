@@ -224,6 +224,11 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 	if found.Attempt != 1 {
 		t.Errorf("attempt = %d, want 1", found.Attempt)
 	}
+	// Per inference, not per session: an exchange routed to a second model
+	// records each call against the one that answered it.
+	if found.Model != "stub" {
+		t.Errorf("model = %q, want the client that answered", found.Model)
+	}
 }
 
 func TestForkingASessionLeavesTheOriginalAlone(t *testing.T) {

@@ -78,6 +78,9 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 			}
 		}
 		if v.Response != nil {
+			// The model is on the response, which pkg/ai stamps with the
+			// client that was called — so an inference a hook routed elsewhere
+			// is recorded where it went, and a session may name more than one.
 			rec.Model = v.Response.Model
 			rec.Usage = v.Response.Usage
 			rec.StopReason = v.Response.StopReason

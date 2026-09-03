@@ -226,11 +226,24 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 },
 ```
 
-`System`、`Messages`、`Tools` 是 agent 贡献的那部分,这一次调用里归 hook 支配。**其余一切**——为这一步强制某个工具、为这一次答案指定 schema、给这一次调用设上限、某个协议独有的设置——都通过**追加 `Options`** 达成,它是最后叠上去的一层,盖在 client 自己的设置之上。
+`Client`、`System`、`Messages`、`Tools` 是 agent 贡献的那部分,这一次调用里归 hook 支配。**其余一切**——为这一步强制某个工具、为这一次答案指定 schema、给这一次调用设上限、某个协议独有的设置——都通过**追加 `Options`** 达成,它是最后叠上去的一层,盖在 client 自己的设置之上。
 
 用这个形状而不用 `ai.Request` 是有原因的:一个**半填的** request 说不清哪些字段是有意为之——对它上面每一个值类型,"没动过"和"特意设成零"是同一串字节,而这正是 `ai.Request.Temperature` 用指针要避开的歧义。追加一个 option 没有这个问题(在就是在,不在就是不在),而且分层本来就是 `pkg/ai` 组装一次调用的方式。
 
-想改 agent 本身而不是某一次调用,用 `SetMessages` / `SetTools` / `SetSystem`。
+`Client` 是这次调用**打到哪里**——默认是 agent 自己的那个,直到某个 hook 把这一次指向别处:
+
+```go
+PreInfer: func(_ context.Context, inf *agent.Inference) error {
+    if summarising(inf) {
+        inf.Client = cheap
+    }
+    return nil
+},
+```
+
+它每次尝试都会重建,所以重试可以发到上一次尝试没去过的地方:**备用端点是一个 hook,不是第二个循环**。传一个你已经持有的 client——`ai.New` 会建一个 driver,而 driver 会带上一整个连接池。
+
+想改 agent 本身而不是某一次调用,用 `SetMessages` / `SetTools` / `SetSystem` / `SetClient`。`SetClient` 就是一个人在会话中途换模型:agent 的其余部分原封不动,变的只是下一次调用去哪里。
 
 ## 工具
 

@@ -142,7 +142,10 @@ type TurnEnd struct {
 	// Message is the last message the model produced, zero if it produced
 	// none. Reading it off the conversation is wrong: that ends in tool
 	// results when a turn stopped on terminated or max_steps.
-	Message    ai.Message
+	Message ai.Message
+	// Usage is the tokens the exchange spent, summed. Money is not summable
+	// the same way: a turn routed to a second model spent them under two rate
+	// cards, so fold a cost from each MessageEnd instead.
 	Usage      ai.Usage
 	StopReason StopReason
 	Err        error

@@ -306,8 +306,8 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 },
 ```
 
-`System`, `Messages` and `Tools` are what the agent contributes, and the hook
-owns them for the call. Everything else a model call can carry — a forced tool
+`Client`, `System`, `Messages` and `Tools` are what the agent contributes, and
+the hook owns them for the call. Everything else a model call can carry — a forced tool
 for this step, a schema for this answer, a cap on these tokens, a protocol's
 own setting — is reached by appending to `Options`, which is layered on last,
 over the client's.
@@ -318,8 +318,27 @@ half-filled cannot say which fields were meant: for every value type on it,
 `ai.Request.Temperature` is a pointer to avoid. An appended option has no such
 problem, and layering is how `pkg/ai` composes a call to begin with.
 
+`Client` is where the call goes — the agent's own, until a hook points that one
+call somewhere else:
+
+```go
+PreInfer: func(_ context.Context, inf *agent.Inference) error {
+    if summarising(inf) {
+        inf.Client = cheap
+    }
+    return nil
+},
+```
+
+It is rebuilt for every attempt, so a retry can be sent where the attempt
+before it was not: a fallback endpoint is a hook, not a second loop. Hand over
+a client you already hold — `ai.New` builds a driver, and a driver brings a
+connection pool with it.
+
 To change the agent itself rather than one call, use `SetMessages`, `SetTools`,
-`SetSystem`.
+`SetSystem`, `SetClient`. `SetClient` is a person switching model mid-session:
+everything else about the agent is what it was, and only where the next call
+goes is different.
 
 ## Tools
 

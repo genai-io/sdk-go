@@ -174,11 +174,14 @@ reasoning model start over every turn.
 
 That state belongs to the model that produced it, and the next model is often
 not that one — switching model mid-conversation is a thing this package
-supports and a person does. So a request drops the reasoning state the model
-being asked cannot replay: an unsigned thinking block on Anthropic, any
-signature anywhere else, readable thinking on a Responses endpoint that
-replays opaque items instead. **What the caller wrote is refused; what the
-model left behind is dropped.** Refusing over the second would make one
+supports and a person does. So a request reduces the reasoning state to
+what the model being asked can replay. An unsigned thinking block goes on
+Anthropic, which has nothing to prove the text with; readable thinking goes on
+a Responses endpoint, which replays opaque items instead. A signature from
+another protocol comes off and **the thinking stays**, because the signature is
+Anthropic's proof of the text and the text is the part worth replaying.
+**What the caller wrote is refused; what the model left behind is trimmed to
+fit.** Refusing over the second would make one
 conversation unusable by a second model, over something no caller put there
 and none can take out.
 

@@ -369,3 +369,22 @@ func TestAForeignSignatureComesOffAndTheThinkingStays(t *testing.T) {
 		t.Error("strip wrote through to the caller's messages")
 	}
 }
+
+// The signature rides with the thinking rather than being its text, so Thinking
+// cannot return it and an application replaying a turn would otherwise have to
+// walk the blocks itself.
+func TestThinkingSignatureIsReadableWithoutWalkingTheBlocks(t *testing.T) {
+	c := Content{TextBlock("before"), ThinkingBlock("weighing it", "sig-1"), TextBlock("after")}
+	if got := c.ThinkingSignature(); got != "sig-1" {
+		t.Errorf("ThinkingSignature = %q, want sig-1", got)
+	}
+	// Thinking a provider signs nothing still reads as thinking.
+	unsigned := Content{ThinkingBlock("weighing it", "")}
+	if got := unsigned.ThinkingSignature(); got != "" {
+		t.Errorf("ThinkingSignature = %q, want empty for unsigned thinking", got)
+	}
+	plain := Content{TextBlock("no thinking here")}
+	if got := plain.ThinkingSignature(); got != "" {
+		t.Errorf("ThinkingSignature = %q, want empty", got)
+	}
+}

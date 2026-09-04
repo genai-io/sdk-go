@@ -223,3 +223,27 @@ func TestErrorRendersOnlyThePartsItHas(t *testing.T) {
 		})
 	}
 }
+
+// An application asking whether to retry holds a bare error, not the six
+// things a driver hands Classify. A dropped connection is worth another go
+// whether or not somebody wrapped it first.
+func TestIsRetryableAnswersForAnUnwrappedTransportFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"a mid-stream cutoff", io.ErrUnexpectedEOF, true},
+		{"a request that timed out", context.DeadlineExceeded, true},
+		{"a user interrupt", context.Canceled, false},
+		{"something else entirely", errors.New("bad json"), false},
+		{"nothing at all", nil, false},
+		{"a classified failure still answers from its kind",
+			&Error{Kind: KindAuth}, false},
+		{"and so does a retryable one", &Error{Kind: KindOverloaded}, true},
+	} {
+		if got := IsRetryable(tc.err); got != tc.want {
+			t.Errorf("IsRetryable(%s) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

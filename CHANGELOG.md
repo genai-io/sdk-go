@@ -9,6 +9,26 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-04
+
+### Added
+
+- **`Content.ThinkingSignature()`.** `Content` had a reader for the text of
+  every block kind and none for the proof that rides with one. An application
+  replaying a turn has to send the signature back attached to the thinking it
+  belongs to, and until now had to walk the blocks itself to find it.
+
+### Fixed
+
+- **`IsRetryable` no longer needs the error to have been wrapped first.** A
+  dropped connection or a request timeout is worth another attempt whether or
+  not it passed through a driver on the way to the caller. It used to answer
+  `false` for anything that was not already an `*ai.Error`, which left an
+  application reconstructing one — `ai.StreamError("", 0, nil, "", "", err)`,
+  six arguments of which five were zero — purely to be told what the SDK
+  already knew. An unclassified error is now put to the same transport test a
+  driver applies.
+
 ## [0.4.1] - 2026-09-03
 
 ### Fixed
@@ -540,6 +560,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.4.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.2
 [0.4.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.1
 [0.4.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.0
 [0.3.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.3.0

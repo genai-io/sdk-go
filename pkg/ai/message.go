@@ -117,6 +117,20 @@ func (c Content) Text() string { return c.textOf(BlockText) }
 // Thinking concatenates human-readable thinking blocks.
 func (c Content) Thinking() string { return c.textOf(BlockThinking) }
 
+// ThinkingSignature is the provider token that proves this turn's thinking, or
+// empty. It rides with a thinking block rather than being its text, which is
+// why Thinking cannot return it: an application replaying a turn has to send
+// it back attached to the block it belongs to, or the provider rejects the
+// whole turn.
+func (c Content) ThinkingSignature() string {
+	for _, block := range c {
+		if block.Type == BlockThinking && block.Signature != "" {
+			return block.Signature
+		}
+	}
+	return ""
+}
+
 func (c Content) textOf(kind BlockType) string {
 	var out strings.Builder
 	for _, block := range c {

@@ -361,6 +361,8 @@ Some rules here are conventions and some are checked. It is worth knowing which:
     |
     +-- pkg/ai/jsonschema a Go type becoming a schema a provider accepts
     |
+    +-- pkg/ai/aitest     a model that does what a test tells it to
+    |
     +-- pkg/ai/driver/*   one package per protocol. Each pulls in that
     |                     protocol's vendor SDK, and nothing else does.
     |
@@ -379,10 +381,13 @@ Some rules here are conventions and some are checked. It is worth knowing which:
   `internal/`.
 - `pkg/ai`, `pkg/ai/jsonschema`, `pkg/ai/catalog` and `pkg/ai/provider` have **zero
   module dependencies** between them and the standard library. A vendor SDK
-  enters the build only through the driver you blank-import.
+  enters the build only through the driver you blank-import — and
+  `pkg/agent/mcp` is the same bargain for the Model Context Protocol SDK:
+  import it and you link it, do not and you do not.
 - `ProtocolOptions` / `ProtocolConfig` reject a value that was never meant to be
   one, at compile time.
-- `Driver` is two methods, so a stub in a test is two methods.
+- `Driver` is two methods, so a stub in a test is two methods — and
+  `pkg/ai/aitest` is that stub, so no application writes it a fifteenth time.
 
 And some are only documented, which means only review catches them:
 
@@ -439,3 +444,13 @@ repair, error classification, schema derivation, the SSE parser, tool-call
 accumulation, the catalog's invariants, the credential store. The contract
 tests say the five protocols agree; the unit tests say each one is right about
 the case no other protocol exercises.
+
+Both sit on `pkg/ai/aitest`: a driver that plays a list of turns, because faking
+a model means faking the protocol and that is the seam five real drivers already
+sit behind. It exists because this repo had written it three times and San
+fourteen more, and because every copy got to decide separately what happens when
+a test provokes one more call than it wrote for — two of them answered with an
+empty stream, which reads as the model choosing to say nothing, so a test
+asserting on that passed for the wrong reason. `Turn` is a function taking the
+call's context and request, so the constructors are conveniences rather than a
+closed set.

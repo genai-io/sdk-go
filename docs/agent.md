@@ -434,6 +434,21 @@ fresh at every boundary rather than remembered from the last response. A figure
 that lagged one call behind would still read as full against the conversation
 that had just replaced it, and ask for that one to be replaced too.
 
+It comes from `ai.EstimateTokens`, which counts by pre-token run rather than by
+a flat characters-per-token ratio. Four bytes a token is the ratio for English
+prose, and the rest of an agent's prompt is not English prose: measured against
+`o200k_base`, the flat ratio read a machine-written JSON tool result at 71% of
+its real size and a page of tool output at 85%, while reading prose at 110%.
+Wrong high on the one part that is prose and wrong low on everything else is
+the worst arrangement available, because low is the failing direction — it is
+how a conversation is judged to fit, is not compacted, and overflows the window
+on the call after that. The ratios now come out **above** `o200k` everywhere,
+deliberately: it is the most token-efficient tokenizer this SDK talks to, so an
+estimate landing exactly on it would land under the others.
+
+`ai.EstimateTokens` takes a string, for an application breaking a window down by
+category; `(*ai.Request).EstimateTokens` sizes a whole prompt.
+
 The replacement is announced there and then as `MessagesReplaced`, so a session
 records the compaction at the step that made it, and a fold never passes
 through a conversation the agent had already discarded. `PreInfer` is the other
@@ -519,6 +534,43 @@ spinner the moment it stops; the results handed back to the model go in the
 order it asked for them, so replaying a session produces the same transcript
 every time.
 
+### Tools from an MCP server
+
+An MCP server advertises a name, a JSON Schema and a way to call it. So does
+`Tool`. `pkg/agent/mcp` is the translation, and hands back values `WithTools`
+already takes:
+
+```go
+c, err := mcp.Connect(ctx, mcp.Server{Name: "fs", Command: "mcp-server-filesystem", Args: []string{root}})
+defer c.Close()
+
+tools, err := c.Tools(ctx)
+a, err := agent.New(client, agent.WithTools(tools...))
+```
+
+The protocol is not this SDK's: the package wraps
+`github.com/modelcontextprotocol/go-sdk`, on the same terms as every driver in
+`pkg/ai/driver`, which wrap their vendor's own client rather than restating a
+wire format. Import it and you link the MCP SDK; do not, and you do not.
+
+**Naming the server namespaces its tools.** Two servers may both advertise
+`search`, and an agent handed both answers every call with whichever came first
+— silently, because nothing about two tools with one name is an error until the
+model picks the wrong one. `Server.Name` turns `search` into `fs__search`; left
+empty, names arrive as the server gave them, which is right for one server and a
+silent collision for two. The server is still called by its own name on the wire.
+
+**A failed tool returns both its content and an error.** The loop tells the
+model the content — which is where a server puts the reason, so the model can
+correct itself — and records the call as failed. MCP says the same in its own
+words: a tool's own failure belongs in the content with `isError`, not as a
+protocol error, "otherwise the LLM would not be able to see that an error
+occurred and self-correct."
+
+`Client` also answers `Resources` and `Prompts`, for an interface that shows
+what else a server brought, and `Done`/`Alive` for one that has to notice a
+server dying.
+
 ### Ending a turn from a tool
 
 `Result.Terminate` ends the turn after this batch instead of showing the
@@ -594,6 +646,29 @@ all.
 | `TurnEnd` | `outcome` | how the turn ended, and why |
 | `MessageStart` `MessageUpdate` `ToolStart` `ToolUpdate` `TurnStart` | — | the closing event says it all |
 
+### Your own events, in the same log
+
+The five entries above are what an agent's loop produces. An application has
+events of its own that belong beside them — a permission asked for and
+answered, a hook that fired, a tool a person added mid-session — and what makes
+them worth storing here rather than in a log of their own is the order. That a
+permission was granted between the third tool call and the fourth is the fact;
+two logs cannot state it.
+
+```go
+rec.Record(ctx, turn, "permission.decided", decision)
+```
+
+`Data` is stored and handed back and never read, on the terms `ToolRun.Details`
+already set: the value is yours, and so is the question it answers. `Kind` is
+your vocabulary too — namespace it, so a store holding more than one
+application's sessions stays legible. A fold walks past these: they explain the
+conversation, they are not it.
+
+`Record` is on the `Recorder` rather than left to `store.Append`, which you can
+already call, because the turn an entry belongs to is numbered from the
+session's beginning and the offset is the recorder's.
+
 ### What is read
 
 Restoring folds the entries back. Messages append; **a snapshot starts the fold
@@ -653,6 +728,7 @@ pkg/agent/
   event.go     the ten events
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
+  mcp/         an MCP server's tools, as this package's own
   session/     events → durable entries, and back
     jsonl/     a store on the filesystem, a directory per session
 ```

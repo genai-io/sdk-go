@@ -25,7 +25,8 @@ protocols, and an agent runtime that runs the loop around it.
 - **Everything as events** — ten types on one sequence, and the conversation is the fold of two of them.
 - **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
-- **Sessions** — record what an agent did, restore the conversation from it.
+- **Sessions** — record what an agent did, restore the conversation from it, and keep your own events in the same log.
+- **MCP** — an MCP server's tools arrive as the agent's own, ready for `WithTools`.
 
 [Installation](#installation) · [中文文档](README.zh-CN.md)
 

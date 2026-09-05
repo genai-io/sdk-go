@@ -304,6 +304,12 @@ PreStep: func(ctx context.Context, c agent.PreStepContext) ([]ai.Message, error)
 
 `Tokens` 是整个 prompt 的估算——对话、system prompt,以及十几个就能盖过对话的工具 schema——**每个边界现算,不记住上一次响应报的数**。落后一次调用的数字,对着刚刚替换出来的新对话仍会读作"满",于是要求把它也替换掉。
 
+这个数来自 `ai.EstimateTokens`,它**按 pre-token run 分类计数**,而不是一个平坦的字符/token 比率。「4 字节 1 token」是英文散文的比率,而 agent 的 prompt 大部分不是英文散文:对着 `o200k_base` 量,平坦比率把机器生成的 JSON 工具结果读成真实大小的 **71%**、把一页工具输出读成 85%,却把散文读成 110%。**唯独在散文那一半偏高、在其余全部偏低,是最坏的一种安排**——因为偏低才是失败方向:对话被判定「装得下」、不压缩,然后在下一次调用溢出窗口。
+
+现在这套比率在 `o200k` 上**处处偏高**,这是故意的:`o200k` 是本 SDK 接的几个 tokenizer 里最省的,正好压在它上面就会压到别家下面。
+
+`ai.EstimateTokens` 接一个字符串,给按类别拆解窗口的应用用;`(*ai.Request).EstimateTokens` 量整个 prompt。
+
 替换在**当场**以 `MessagesReplaced` 播报,所以会话把这次压缩记在做出它的那一步上,折叠时不会路过一份 agent 早已丢弃的对话。`PreInfer` 是这一对里的另一半:它只改这一次调用,不动对话。
 
 不过 `Tokens` 终究是估算,**真正知道的是端点**——算下来在阈值以内的 prompt,照样可能被判太长,而开了 prompt 缓存之后,响应里报的那些数字也很容易读错。那种情况归 [`OnInferError`](#重试答不了的失败):等提供方开口之后,在调用的另一侧做同一件缩短。`agent.Compacting` 从那里也开得出同一个 span,这正是它不按任何一个 hook 命名的原因。
@@ -355,6 +361,26 @@ rec, history, err := session.Open(ctx, store, resume, session.WithToolDetails(
 **并行。** 一批工具默认并发执行。`agent.Sequential(t)` 标记一个不能与别人同时跑的工具,而**一批里只要有一个这样的,整批就串行**——一批工具只有在每个成员都安全时才能并行。
 
 **并行批次里有两种顺序,谁也不能让步。** `ToolEnd` 按**完成顺序**发出,所以界面能在某个工具一停就收掉它的 spinner;而交回给模型的结果按**模型提问的顺序**排列,所以重放一个会话每次得到的是同一份记录。
+
+### 来自 MCP 服务器的工具
+
+一个 MCP 服务器提供的是:一个名字、一份 JSON Schema、一种调用方式。`Tool` 也是。`pkg/agent/mcp` 就是这中间的翻译,交回来的值 `WithTools` 直接就能收:
+
+```go
+c, err := mcp.Connect(ctx, mcp.Server{Name: "fs", Command: "mcp-server-filesystem", Args: []string{root}})
+defer c.Close()
+
+tools, err := c.Tools(ctx)
+a, err := agent.New(client, agent.WithTools(tools...))
+```
+
+**协议不是本 SDK 的**:这个包包的是 `github.com/modelcontextprotocol/go-sdk`,和 `pkg/ai/driver` 里每个 driver 一样的做法——包住厂商自己的客户端,而不是把线上格式再写一遍。你 import 它才会链进去,不 import 就不会。
+
+**给服务器起名字,就是给它的工具加命名空间。** 两个服务器可能都提供 `search`,而同时拿到两者的 agent 会用先来的那个应答每一次调用——**静默地**,因为「两个工具一个名字」在模型挑错之前都不算错误。`Server.Name` 把 `search` 变成 `fs__search`;留空则按服务器给的名字原样收下,这对单个服务器是对的,对两个就是一次静默碰撞。发到线上的仍然是服务器自己的名字。
+
+**失败的工具会同时交回内容和错误。** 循环把内容告诉模型——服务器把原因写在那里,模型据此自我纠正——同时把这次调用记为失败。MCP 规范自己也是这么说的:工具自身的失败属于 content 加 `isError`,而不是协议级错误,「否则 LLM 就看不到出过错,也就无法自我纠正」。
+
+`Client` 还答 `Resources` 和 `Prompts`,给要展示服务器还带了什么的界面用;以及 `Done`/`Alive`,给需要察觉服务器死掉的那一方。
 
 ### 从工具里结束一个 turn
 
@@ -413,6 +439,18 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 | `TurnEnd` | `outcome` | 这一轮怎么结束的,以及为什么 |
 | `MessageStart` `MessageUpdate` `ToolStart` `ToolUpdate` `TurnStart` | —— | 收尾事件已经说完了 |
 
+### 你自己的事件,进同一条日志
+
+上面那五种条目,是 agent 循环产生的东西。应用有它**自己的**事件也该记在旁边——一次权限的询问与回答、一个 hook 触发了、有人中途加了个工具——而它们值得记在这里而不是另起一条日志,原因是**顺序**:「权限是在第三次工具调用和第四次之间批的」这件事,两条日志说不出来。
+
+```go
+rec.Record(ctx, turn, "permission.decided", decision)
+```
+
+`Data` 存进去、原样交回来、从不解读,和 `ToolRun.Details` 是同一套规矩:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
+
+`Record` 放在 `Recorder` 上,而不是让你直接 `store.Append`(你本来就能调),因为条目属于第几轮是**从会话开头**数的,而那个偏移量在 recorder 手里。
+
 ### 读出来什么
 
 恢复就是把这些记录折回去。消息往后追加,**遇到 snapshot 则从头开始折**——因为在它之前播报过的一切,都是 agent 已经丢弃的:
@@ -459,6 +497,7 @@ pkg/agent/
   event.go     10 个事件
   hook.go      4 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
+  mcp/         MCP 服务器的工具,变成这个包自己的
   session/     事件 → 持久条目,以及折回来
     jsonl/     文件系统上的 store,一个会话一个目录
 ```

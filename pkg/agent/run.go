@@ -272,9 +272,9 @@ func (a *Agent) stepContext(msgs []ai.Message) PreStepContext {
 	msgs = slices.Clone(msgs)
 	return PreStepContext{
 		Messages: msgs,
-		Tokens: ai.EstimateTokens(&ai.Request{
+		Tokens: (&ai.Request{
 			System: a.system, Messages: msgs, Tools: a.definitions(),
-		}),
+		}).EstimateTokens(),
 		Client: a.client,
 	}
 }

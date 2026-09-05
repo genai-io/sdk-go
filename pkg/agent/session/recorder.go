@@ -127,6 +127,33 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 	}
 }
 
+// Record stores an application's own event in this session's log, in order
+// with the loop's. See [Custom] for what belongs here and what does not.
+//
+// turn is the exchange it happened in, as the agent numbers them — the Turn on
+// any event this recorder was handed. Zero for something that happened between
+// exchanges, which is where a session is forked or renamed.
+//
+// A value that will not marshal is dropped rather than failing the session:
+// what a restore needs is the conversation, and this is not it. Like Handle,
+// this stops after the first failed write and reports through Err.
+func (r *Recorder) Record(ctx context.Context, turn int, kind string, v any) {
+	if r.Err() != nil || kind == "" {
+		return
+	}
+	rec := Custom{Kind: kind}
+	if v != nil {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		if string(raw) != "null" {
+			rec.Data = raw
+		}
+	}
+	r.write(ctx, turn, Entry{Type: EntryCustom, Custom: &rec})
+}
+
 // Err reports the write that stopped recording, if one did.
 func (r *Recorder) Err() error {
 	r.mu.Lock()

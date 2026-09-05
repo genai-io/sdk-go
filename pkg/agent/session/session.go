@@ -77,6 +77,9 @@ const (
 	EntryToolRun EntryType = "tool"
 	// EntryOutcome closes a turn with how it ended.
 	EntryOutcome EntryType = "outcome"
+	// EntryCustom is something the application recorded, which this package
+	// stores and returns without reading. See [Custom].
+	EntryCustom EntryType = "custom"
 )
 
 // Entry is one durable record. Seq orders it within its session and is
@@ -95,6 +98,7 @@ type Entry struct {
 	Inference *Inference   `json:"inference,omitempty"`
 	ToolRun   *ToolRun     `json:"tool,omitempty"`
 	Outcome   *Outcome     `json:"outcome,omitempty"`
+	Custom    *Custom      `json:"custom,omitempty"`
 }
 
 // payload reports whether the entry carries what its Type says. A wire format
@@ -114,8 +118,33 @@ func (e Entry) payload() bool {
 		return e.ToolRun != nil
 	case EntryOutcome:
 		return e.Outcome != nil
+	case EntryCustom:
+		return e.Custom != nil
 	}
 	return false
+}
+
+// Custom is an application's own event, kept in the session's log beside the
+// loop's.
+//
+// The five types above are what an agent's loop produces. An application has
+// events of its own that belong in the same log — a permission asked for and
+// answered, a hook that fired, a tool the user added mid-session — and what
+// makes them worth storing here rather than in a log of their own is the
+// order: that the permission was granted between the third tool call and the
+// fourth is the fact, and two logs cannot state it.
+//
+// This package stores Data and hands it back, and never reads it. It cannot:
+// the value is the application's, and so is the question it answers. Kind is
+// the application's vocabulary too — namespace it ("permission.decided"), so
+// that a store holding more than one application's sessions stays legible.
+//
+// [Recorder.Record] is how one is written, because the turn an entry belongs to
+// is numbered from the session's beginning and only the recorder knows the
+// offset.
+type Custom struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // Inference is one model call as it is kept.
@@ -234,6 +263,8 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 		case EntryOutcome:
 			turns++
 		}
+		// EntryCustom and EntryInference and EntryToolRun are not the
+		// conversation: they explain it. A fold walks past them.
 	}
 	return msgs, turns, nil
 }

@@ -3,11 +3,9 @@ package session_test
 import (
 	"context"
 	"errors"
-	"iter"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -15,49 +13,12 @@ import (
 	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/agent/session/memory"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
-// scripted is a model that streams a script per call — enough for a session
-// test, which cares about the events an exchange produced and not about how
-// the model produced them.
-type scripted struct {
-	scripts [][]ai.Delta
-
-	mu    sync.Mutex
-	calls int
-}
-
-func (d *scripted) Name() string { return "scripted" }
-
-func (d *scripted) Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
-	d.mu.Lock()
-	n := d.calls
-	d.calls++
-	d.mu.Unlock()
-	return func(yield func(ai.Delta, error) bool) {
-		if n >= len(d.scripts) {
-			yield(ai.Delta{}, errors.New("scripted: no script for call "+strconv.Itoa(n)))
-			return
-		}
-		for _, delta := range d.scripts[n] {
-			if !yield(delta, nil) {
-				return
-			}
-		}
-	}
-}
-
-func text(s string) []ai.Delta {
-	return []ai.Delta{
-		{Block: ai.TextBlock(s)},
-		{EndBlock: true},
-		{StopReason: ai.StopEndTurn},
-	}
-}
-
-func newAgent(t *testing.T, history []ai.Message, scripts ...[]ai.Delta) *agent.Agent {
+func newAgent(t *testing.T, history []ai.Message, turns ...aitest.Turn) *agent.Agent {
 	t.Helper()
-	client := ai.NewClientWithDriver(&scripted{scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
+	client := aitest.New(turns...).Client()
 	a, err := agent.New(client, agent.WithMessages(history))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -111,7 +72,7 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
 
-	first := newAgent(t, nil, text("the capital of France is Paris"))
+	first := newAgent(t, nil, aitest.Says("the capital of France is Paris"))
 	rec, history, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -128,7 +89,7 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	second := newAgent(t, history, text("it has about two million people"))
+	second := newAgent(t, history, aitest.Says("it has about two million people"))
 
 	msgs := second.Messages()
 	if len(msgs) != 2 {
@@ -159,7 +120,7 @@ func TestFragmentsAreNotPersistedButTheSpansThatCloseThemAre(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
 
-	a := newAgent(t, nil, text("hello"))
+	a := newAgent(t, nil, aitest.Says("hello"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -192,11 +153,11 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
 
-	a := newAgent(t, nil, []ai.Delta{
-		{Block: ai.TextBlock("answer")},
-		{EndBlock: true},
-		{Usage: &ai.Usage{Input: 120, Output: 8}, StopReason: ai.StopEndTurn},
-	})
+	a := newAgent(t, nil, aitest.Replies(ai.Response{
+		Content:    ai.TextContent("answer"),
+		Usage:      ai.Usage{Input: 120, Output: 8},
+		StopReason: ai.StopEndTurn,
+	}))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -226,7 +187,7 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 	}
 	// Per inference, not per session: an exchange routed to a second model
 	// records each call against the one that answered it.
-	if found.Model != "stub" {
+	if found.Model != "aitest" {
 		t.Errorf("model = %q, want the client that answered", found.Model)
 	}
 }
@@ -237,7 +198,7 @@ func TestForkingASessionLeavesTheOriginalAlone(t *testing.T) {
 	st := jsonlStore(t)
 	ctx := context.Background()
 
-	a := newAgent(t, nil, text("one"), text("two"))
+	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -292,7 +253,7 @@ func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 	// part of the Store contract this package depends on.
 	st := jsonlStore(t)
 
-	a := newAgent(t, nil, text("still working"))
+	a := newAgent(t, nil, aitest.Says("still working"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -324,7 +285,7 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	a := newAgent(t, nil, text("morning"), text("afternoon"))
+	a := newAgent(t, nil, aitest.Says("morning"), aitest.Says("afternoon"))
 	rec, history, err := session.Open(ctx, first, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -371,7 +332,7 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	}
 
 	// And it carries on: a second exchange lands after the first, not on top.
-	b := newAgent(t, restored, text("afternoon"))
+	b := newAgent(t, restored, aitest.Says("afternoon"))
 	converse(t, b, rec2, ai.UserMessage("still there?"))
 
 	final, err := session.Messages(ctx, second, id)
@@ -411,11 +372,8 @@ func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 	st := &flaky{Store: store(t), failOn: 3}
 
 	a := newAgent(t, nil,
-		[]ai.Delta{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("done"))
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"}),
+		aitest.Says("done"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatal(err)
@@ -448,7 +406,7 @@ func TestTurnsAreNumberedFromTheSessionsBeginning(t *testing.T) {
 	ctx := context.Background()
 	st := store(t)
 
-	a := newAgent(t, nil, text("one"), text("two"))
+	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatal(err)
@@ -456,7 +414,7 @@ func TestTurnsAreNumberedFromTheSessionsBeginning(t *testing.T) {
 	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
 
 	// A second run, resuming: the agent starts counting at one again.
-	b := newAgent(t, nil, text("three"))
+	b := newAgent(t, nil, aitest.Says("three"))
 	rec2, history, err := session.Open(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +443,7 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 	ctx := context.Background()
 	st := store(t)
 
-	a := newAgent(t, nil, text("one"))
+	a := newAgent(t, nil, aitest.Says("one"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +451,7 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 	converse(t, a, rec, ai.UserMessage("first"))
 
 	for range 5 {
-		b := newAgent(t, nil, text("again"))
+		b := newAgent(t, nil, aitest.Says("again"))
 		rec2, history, err := session.Open(ctx, st, rec.ID())
 		if err != nil {
 			t.Fatal(err)
@@ -525,12 +483,9 @@ func TestEveryEntryCarriesItsTurn(t *testing.T) {
 	st := store(t)
 
 	a := newAgent(t, nil,
-		[]ai.Delta{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("first done"),
-		text("second done"))
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("first done"),
+		aitest.Says("second done"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatal(err)
@@ -566,7 +521,7 @@ func TestNamesSurviveTheRoundTrip(t *testing.T) {
 	st := store(t)
 
 	client := ai.NewClientWithDriver(
-		&scripted{scripts: [][]ai.Delta{text("first"), text("second")}},
+		aitest.New(aitest.Says("first"), aitest.Says("second")),
 		ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client, agent.WithMessageIDs(counterIDs()))
 	if err != nil {
@@ -615,5 +570,113 @@ func counterIDs() func() string {
 	return func() string {
 		n++
 		return "m" + strconv.Itoa(n)
+	}
+}
+
+// An application's own events belong in the same log as the loop's, because
+// the order across both is the fact worth keeping: that the permission was
+// answered between the tool call and the next inference is not something two
+// separate logs can state.
+func TestAnApplicationsOwnEventsInterleaveWithTheLoops(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+
+	a := newAgent(t, nil,
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"}),
+		aitest.Says("done"))
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for e, err := range a.Run(ctx, ai.UserMessage("go")) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if v, ok := e.(agent.ToolStart); ok {
+			rec.Record(ctx, v.Turn, "permission.decided",
+				map[string]string{"tool": v.Name, "decision": "permit"})
+		}
+		rec.Handle(ctx, e)
+	}
+	if err := rec.Err(); err != nil {
+		t.Fatalf("recording: %v", err)
+	}
+
+	var order []string
+	var decided *session.Custom
+	for e, err := range st.Entries(ctx, rec.ID()) {
+		if err != nil {
+			t.Fatalf("Entries: %v", err)
+		}
+		order = append(order, string(e.Type))
+		if e.Type == session.EntryCustom {
+			decided = e.Custom
+		}
+	}
+
+	if decided == nil {
+		t.Fatal("the application's record is not in the session")
+	}
+	if decided.Kind != "permission.decided" {
+		t.Errorf("kind = %q", decided.Kind)
+	}
+	if got := string(decided.Data); got != `{"decision":"permit","tool":"noop"}` {
+		t.Errorf("data = %s, want it handed back as it went in", got)
+	}
+
+	// The point: it sits where it happened, before the tool run it decided.
+	custom := slices.Index(order, "custom")
+	tool := slices.Index(order, "tool")
+	if custom == -1 || tool == -1 || custom > tool {
+		t.Errorf("entry order %v — the decision is not recorded before the run it permitted", order)
+	}
+}
+
+// The blocker this replaced: an entry type the fold did not know made the whole
+// session unreadable, so an application could not put anything of its own in
+// one. A record that is not the conversation is walked past, not refused.
+func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+
+	a := newAgent(t, nil, aitest.Says("hello"))
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	converse(t, a, rec, ai.UserMessage("hi"))
+	rec.Record(ctx, 1, "skill.state.changed", map[string]string{"skill": "review"})
+	rec.Record(ctx, 0, "session.renamed", nil)
+	if err := rec.Err(); err != nil {
+		t.Fatalf("recording: %v", err)
+	}
+
+	msgs, err := session.Messages(ctx, st, rec.ID())
+	if err != nil {
+		t.Fatalf("a session carrying application records would not fold: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Errorf("the conversation restored as %d messages, want the 2 that were said", len(msgs))
+	}
+
+	// And it does not count as an exchange, or resuming would number the next
+	// turn past the end.
+	b := newAgent(t, msgs, aitest.Says("still one exchange in"))
+	rec2, _, err := session.Open(ctx, st, rec.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	converse(t, b, rec2, ai.UserMessage("again"))
+
+	var turns []int
+	for e, err := range st.Entries(ctx, rec2.ID()) {
+		if err != nil {
+			t.Fatalf("Entries: %v", err)
+		}
+		turns = append(turns, e.Turn)
+	}
+	if got := slices.Max(turns); got != 2 {
+		t.Errorf("the second exchange was numbered %d, want 2 — a record is not an exchange", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // Compaction replaces the conversation, and a session that only folded what
@@ -19,7 +20,7 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
 
-	a := newAgent(t, nil, text("one"), text("two"), text("three"))
+	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"), aitest.Says("three"))
 	rec, _, err := session.Open(ctx, st, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -59,13 +60,10 @@ func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
 			a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
 			return agent.TextResult("compacted"), nil
 		})
-	client := ai.NewClientWithDriver(&scripted{scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "compact", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("done"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "compact", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("done"),
+	), ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithTools(compact))
 	if err != nil {
@@ -100,13 +98,10 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 	ctx := context.Background()
 
 	done := false
-	client := ai.NewClientWithDriver(&scripted{scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("done"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("done"),
+	), ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
 		PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
@@ -177,7 +172,7 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
-			first := newAgent(t, nil, text("hello"))
+			first := newAgent(t, nil, aitest.Says("hello"))
 			first.SetMessages(history) // what the examples do, verbatim
 			converse(t, first, rec, ai.UserMessage("hi"))
 			if err := rec.Err(); err != nil {
@@ -192,7 +187,7 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 				t.Fatalf("restored %d messages, want the 2 that were recorded", len(restored))
 			}
 
-			second := newAgent(t, nil, text("still here"))
+			second := newAgent(t, nil, aitest.Says("still here"))
 			second.SetMessages(restored)
 			converse(t, second, rec2, ai.UserMessage("again"))
 
@@ -222,7 +217,7 @@ func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 			st := impl.open(t)
 			ctx := context.Background()
 
-			a := newAgent(t, nil, text("one"), text("two"))
+			a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
 			rec, _, err := session.Open(ctx, st, "")
 			if err != nil {
 				t.Fatalf("Open: %v", err)
@@ -255,13 +250,10 @@ func detailsAgent(t *testing.T, details any) *agent.Agent {
 		func(context.Context, struct{}) (agent.Result, error) {
 			return agent.Result{Content: ai.TextContent("ok"), Details: details}, nil
 		})
-	client := ai.NewClientWithDriver(&scripted{scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "run", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("done"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "run", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("done"),
+	), ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client, agent.WithTools(tool))
 	if err != nil {
 		t.Fatalf("New: %v", err)

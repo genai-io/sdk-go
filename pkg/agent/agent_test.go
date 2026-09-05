@@ -12,6 +12,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 func newAgent(t *testing.T, d ai.Driver, opts ...agent.Option) *agent.Agent {
@@ -120,7 +121,7 @@ func assertSequence(t *testing.T, got []agent.Event, want []string) {
 // An exchange closes nothing, so a caller may take several in a row, and the
 // turns are numbered in order.
 func TestExchangesRunInSequence(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("first"), text("second")}})
+	a := newAgent(t, aitest.New(aitest.Says("first"), aitest.Says("second")))
 
 	for i, want := range []string{"first", "second"} {
 		out, err := outcome(t, a, ai.UserMessage("ask"))
@@ -138,10 +139,10 @@ func TestExchangesRunInSequence(t *testing.T) {
 
 // A failure ends its own exchange and nothing more: the next one runs.
 func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
-	a := newAgent(t, &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "no key"}},
-		Scripts: [][]ai.Delta{nil, text("second time")},
-	})
+	a := newAgent(t, aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "no key"}),
+		aitest.Says("second time"),
+	))
 
 	if _, err := outcome(t, a, ai.UserMessage("first")); err == nil {
 		t.Fatal("the failure never reached the caller")
@@ -165,10 +166,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 			return agent.TextResult("done"), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "wait", `{}`),
-		text("finished"),
-	}}, agent.WithTools(blocking))
+	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "wait", Input: `{}`}), aitest.Says("finished")), agent.WithTools(blocking))
 
 	started := make(chan struct{})
 	done := make(chan error, 1)
@@ -202,7 +200,7 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 // Repeating an exchange is a for loop the caller writes, which is what lets it
 // decide the batching and what a failure means.
 func TestSeveralExchangesAreACallersLoop(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("first"), text("second")}})
+	a := newAgent(t, aitest.New(aitest.Says("first"), aitest.Says("second")))
 
 	var answers []string
 	for _, batch := range [][]ai.Message{
@@ -231,7 +229,7 @@ func TestSeveralExchangesAreACallersLoop(t *testing.T) {
 // Collect folds an exchange for a caller that wants the answer rather than the
 // progress — the shape a subagent behind a tool call needs.
 func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("the answer")}})
+	a := newAgent(t, aitest.New(aitest.Says("the answer")))
 
 	out, err := outcome(t, a, ai.UserMessage("ask"))
 	if err != nil {
@@ -254,10 +252,7 @@ func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
 			return agent.TextResult("echoed"), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "echo", `{}`),
-		text("done"),
-	}}, agent.WithTools(echo))
+	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "echo", Input: `{}`}), aitest.Says("done")), agent.WithTools(echo))
 
 	var announced []string
 	for e, err := range a.Run(context.Background(), ai.UserMessage("first")) {
@@ -296,10 +291,7 @@ func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
 // on the next inference, not mid-stream. A turn holds several inferences, so
 // "next" is a real moment inside one — and nothing pinned it.
 func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
-	d := &scripted{Scripts: [][]ai.Delta{
-		toolCall("1", "before", "{}"),
-		text("done"),
-	}, Keep: true}
+	d := aitest.New(aitest.Asks(ai.ToolCall{ID: "1", Name: "before", Input: "{}"}), aitest.Says("done"))
 	before := agent.ToolFunc("before", "the tool it starts with",
 		func(context.Context, struct{}) (agent.Result, error) { return agent.TextResult("ok"), nil })
 	after := agent.ToolFunc("after", "the tool it is given mid-turn",
@@ -365,11 +357,11 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 			time.Sleep(30 * time.Millisecond)
 			return agent.TextResult("done"), nil
 		})
-	d := &scripted{Scripts: [][]ai.Delta{
-		toolCall("1", "slow", "{}"),
-		toolCall("2", "slow", "{}"),
-		text("finished"),
-	}}
+	d := aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "1", Name: "slow", Input: "{}"}),
+		aitest.Asks(ai.ToolCall{ID: "2", Name: "slow", Input: "{}"}),
+		aitest.Says("finished"),
+	)
 	a := newAgent(t, d, agent.WithTools(slow))
 
 	running := make(chan struct{})
@@ -428,7 +420,7 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
 	stray := ai.ToolFunc("stray", "configured on the client",
 		func(context.Context, struct{}) (string, error) { return "", nil })
-	driver := &scripted{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
+	driver := aitest.New(aitest.Says("ok"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
 		ai.WithTools(stray))
 
@@ -456,11 +448,11 @@ func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
 			a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
 			return agent.TextResult("compacted"), nil
 		})
-	a = newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "compact", `{}`),
-		text("done"),
-		text("and again"),
-	}}, agent.WithTools(swap))
+	a = newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "compact", Input: `{}`}),
+		aitest.Says("done"),
+		aitest.Says("and again"),
+	), agent.WithTools(swap))
 
 	during, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {
@@ -508,7 +500,7 @@ func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
 // Replacing nothing with nothing happened to nobody: announcing it records a
 // snapshot of an empty conversation, which a fold then reads as corrupt.
 func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("hello"), text("still here")}})
+	a := newAgent(t, aitest.New(aitest.Says("hello"), aitest.Says("still here")))
 	a.SetMessages(nil) // what session.Open hands back for a session that is new
 
 	events, err := collect(t, a, ai.UserMessage("go"))
@@ -541,7 +533,7 @@ func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
 // conversation ahead of the next exchange's own input: it was said first, and a
 // fold is only the conversation if that order is the truth.
 func TestMessagesQueuedBetweenExchangesEnterAheadOfTheNextInput(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("first"), text("second")}})
+	a := newAgent(t, aitest.New(aitest.Says("first"), aitest.Says("second")))
 
 	if _, err := outcome(t, a, ai.UserMessage("one")); err != nil {
 		t.Fatalf("first turn: %v", err)

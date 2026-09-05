@@ -8,6 +8,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // counter is a generator whose output says how many times it ran, so a test
@@ -39,10 +40,10 @@ func TestEveryMessageInTheConversationIsNamed(t *testing.T) {
 			return agent.TextResult(a.S), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "echo", `{"s":"hi"}`),
-		text("done"),
-	}}, agent.WithTools(echo), agent.WithMessageIDs(counter()))
+	a := newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "echo", Input: `{"s":"hi"}`}),
+		aitest.Says("done"),
+	), agent.WithTools(echo), agent.WithMessageIDs(counter()))
 
 	events, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {
@@ -90,7 +91,7 @@ func TestAMessageThatArrivedNamedKeepsItsName(t *testing.T) {
 			agent.WithMessageIDs(counter()), agent.WithMessages(stored)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}}, tc.opts...)
+			a := newAgent(t, aitest.New(aitest.Says("ok")), tc.opts...)
 
 			got := ids(a.Messages())
 			if want := []string{"from-storage", "m1"}; !slices.Equal(got, want) {
@@ -106,7 +107,7 @@ func TestAMessageThatArrivedNamedKeepsItsName(t *testing.T) {
 func TestNamingDoesNotTouchTheCallersSlice(t *testing.T) {
 	mine := []ai.Message{{Role: ai.RoleUser, Content: ai.TextContent("hi")}}
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+	a := newAgent(t, aitest.New(aitest.Says("ok")),
 		agent.WithMessageIDs(counter()))
 	a.SetMessages(mine)
 
@@ -121,7 +122,7 @@ func TestNamingDoesNotTouchTheCallersSlice(t *testing.T) {
 // Off by default, and then every ID is empty. An agent nothing outside the
 // loop has to point at should not be calling a generator on every message.
 func TestMessagesAreUnnamedUnlessAsked(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}})
+	a := newAgent(t, aitest.New(aitest.Says("ok")))
 
 	if _, err := outcome(t, a, ai.UserMessage("hi")); err != nil {
 		t.Fatalf("turn failed: %v", err)
@@ -137,7 +138,7 @@ func TestMessagesAreUnnamedUnlessAsked(t *testing.T) {
 // compaction whose summary had no name would put the one message a session
 // most needs to point at beyond pointing at.
 func TestAReplacedConversationIsNamedToo(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+	a := newAgent(t, aitest.New(aitest.Says("ok")),
 		agent.WithMessageIDs(counter()),
 		agent.WithHooks(agent.Hook{
 			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {

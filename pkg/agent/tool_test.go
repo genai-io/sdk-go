@@ -11,6 +11,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // ToolEnd is emitted the moment the tool lands, before PostTool runs, so a
@@ -23,10 +24,7 @@ func TestToolEndCarriesTheToolsOwnResult(t *testing.T) {
 			return agent.TextResult("raw"), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("call-1", "echo", `{}`),
-		text("done"),
-	}}, agent.WithTools(echo), agent.WithHooks(agent.Hook{
+	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "call-1", Name: "echo", Input: `{}`}), aitest.Says("done")), agent.WithTools(echo), agent.WithHooks(agent.Hook{
 		PostTool: func(context.Context, agent.PostToolContext) (*agent.Result, error) {
 			replacement := agent.TextResult("replaced")
 			return &replacement, nil
@@ -72,14 +70,10 @@ func TestParallelToolsEndInCompletionOrderButRecordInSourceOrder(t *testing.T) {
 			return agent.TextResult("done: " + args.Key), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "wait", Input: `{"key":"a"}`})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "wait", Input: `{"key":"b"}`})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("both done"),
-	}}, agent.WithTools(wait))
+	a := newAgent(t, aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "wait", Input: `{"key":"a"}`})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "wait", Input: `{"key":"b"}`})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("both done"),
+	), agent.WithTools(wait))
 
 	// b finishes first, though the model asked for a first.
 	go func() {
@@ -115,10 +109,10 @@ func TestParallelToolsEndInCompletionOrderButRecordInSourceOrder(t *testing.T) {
 }
 
 func TestAnUnknownToolIsReportedRatherThanFatal(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("call-1", "nosuchtool", `{}`),
-		text("sorry"),
-	}})
+	a := newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "call-1", Name: "nosuchtool", Input: `{}`}),
+		aitest.Says("sorry"),
+	))
 
 	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
 		t.Fatalf("an unknown tool should not fail the turn: %v", err)
@@ -138,10 +132,10 @@ func TestBadArgumentsAreCaughtBeforeTheToolRuns(t *testing.T) {
 			return agent.Result{}, nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("call-1", "strict", `{"count":"not a number"}`),
-		text("retrying"),
-	}}, agent.WithTools(strict))
+	a := newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "call-1", Name: "strict", Input: `{"count":"not a number"}`}),
+		aitest.Says("retrying"),
+	), agent.WithTools(strict))
 
 	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
 		t.Fatalf("turn failed: %v", err)
@@ -161,10 +155,7 @@ func TestAToolReportsWhileItWorks(t *testing.T) {
 			return agent.TextResult("built"), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "build", `{}`),
-		text("done"),
-	}}, agent.WithTools(slow))
+	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "build", Input: `{}`}), aitest.Says("done")), agent.WithTools(slow))
 
 	var partials []string
 	var final string
@@ -273,15 +264,10 @@ func TestASequentialToolRunsAloneThroughADecorator(t *testing.T) {
 			return agent.TextResult("ok"), nil
 		})
 
-	d := &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "touch", Input: "{}"})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "touch", Input: "{}"})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "3", Name: "touch", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("done"),
-	}}
+	d := aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "touch", Input: "{}"})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "touch", Input: "{}"})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "3", Name: "touch", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("done"),
+	)
 	a := newAgent(t, d, agent.WithTools(agent.Sequential(logged{slow})))
 
 	for _, err := range a.Run(context.Background(), ai.UserMessage("touch it three times")) {
@@ -356,14 +342,10 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 			return agent.TextResult("still here"), nil
 		})
 
-	d := &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "boom", Input: "{}"})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "fine", Input: "{}"})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("carried on"),
-	}}
+	d := aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "1", Name: "boom", Input: "{}"})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "2", Name: "fine", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("carried on"),
+	)
 	a := newAgent(t, d, agent.WithTools(boom, fine))
 
 	var failed *agent.PanicError
@@ -413,14 +395,10 @@ func TestAToolsetChangedMidBatchStillAnswersTheBatch(t *testing.T) {
 	write := agent.ToolFunc("write", "Write a file.",
 		func(context.Context, struct{}) (agent.Result, error) { return agent.TextResult("written"), nil })
 
-	d := &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "read", Input: `{}`})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "write", Input: `{}`})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("done"),
-	}, Keep: true}
+	d := aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "read", Input: `{}`})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "write", Input: `{}`})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("done"),
+	)
 	a = newAgent(t, d, agent.WithTools(read, write), agent.WithHooks(agent.Hook{
 		// The gate takes the write tool away while the batch is being vetted.
 		PreTool: func(_ context.Context, c agent.PreToolContext) (agent.Decision, error) {
@@ -461,10 +439,7 @@ func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 			agent.Report(ctx, agent.TextResult("halfway"))
 			return agent.TextResult("done scanning"), nil
 		})
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "scan", `{}`),
-		text("finished"),
-	}}, agent.WithTools(tool))
+	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "scan", Input: `{}`}), aitest.Says("finished")), agent.WithTools(tool))
 
 	events, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {
@@ -515,10 +490,10 @@ func TestAToolsImageReachesTheModel(t *testing.T) {
 				ai.ImageBlock(ai.Image{MediaType: "image/png", Data: "AAAA"}),
 			}}, nil
 		})
-	driver := &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "screenshot", `{}`),
-		text("a login form"),
-	}, Keep: true}
+	driver := aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "screenshot", Input: `{}`}),
+		aitest.Says("a login form"),
+	)
 	a := newAgent(t, driver, agent.WithTools(shot))
 
 	if _, err := collect(t, a, ai.UserMessage("what does it look like?")); err != nil {

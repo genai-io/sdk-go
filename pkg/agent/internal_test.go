@@ -2,14 +2,11 @@ package agent
 
 import (
 	"context"
-	"errors"
-	"iter"
 	"runtime"
-	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // Run keeps a channel per exchange so Interrupt can say when that one is over.
@@ -21,7 +18,7 @@ import (
 // the only honest place to check it — a finalizer test here proves whichever
 // local went out of scope, not what the agent still holds.
 func TestAFinishedExchangeHandsBackItsChannel(t *testing.T) {
-	a := newTestAgent(t, text("one"), text("two"))
+	a := newTestAgent(t, aitest.Says("one"), aitest.Says("two"))
 
 	a.mu.Lock()
 	atStart := a.stopped
@@ -75,11 +72,11 @@ func TestAFinishedExchangeHandsBackItsChannel(t *testing.T) {
 func TestManyExchangesDoNotAccumulate(t *testing.T) {
 	const runs = 500
 
-	scripts := make([][]ai.Delta, runs)
-	for i := range scripts {
-		scripts[i] = text("ok")
+	turns := make([]aitest.Turn, runs)
+	for i := range turns {
+		turns[i] = aitest.Says("ok")
 	}
-	a := newTestAgent(t, scripts...)
+	a := newTestAgent(t, turns...)
 
 	settle := func() uint64 {
 		runtime.GC()
@@ -107,50 +104,11 @@ func TestManyExchangesDoNotAccumulate(t *testing.T) {
 	}
 }
 
-func newTestAgent(t *testing.T, scripts ...[]ai.Delta) *Agent {
+func newTestAgent(t *testing.T, turns ...aitest.Turn) *Agent {
 	t.Helper()
-	client := ai.NewClientWithDriver(&scripted{scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
-	a, err := New(client)
+	a, err := New(aitest.New(turns...).Client())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return a
-}
-
-// scripted is a model that streams a script per call. These two tests are
-// in-package because the invariant they check is a field, so they cannot use
-// the stub the external tests share.
-type scripted struct {
-	scripts [][]ai.Delta
-
-	mu    sync.Mutex
-	calls int
-}
-
-func (d *scripted) Name() string { return "scripted" }
-
-func (d *scripted) Stream(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
-	d.mu.Lock()
-	n := d.calls
-	d.calls++
-	d.mu.Unlock()
-	return func(yield func(ai.Delta, error) bool) {
-		if n >= len(d.scripts) {
-			yield(ai.Delta{}, errors.New("scripted: no script for call "+strconv.Itoa(n)))
-			return
-		}
-		for _, delta := range d.scripts[n] {
-			if !yield(delta, nil) {
-				return
-			}
-		}
-	}
-}
-
-func text(s string) []ai.Delta {
-	return []ai.Delta{
-		{Block: ai.TextBlock(s)},
-		{EndBlock: true},
-		{StopReason: ai.StopEndTurn},
-	}
 }

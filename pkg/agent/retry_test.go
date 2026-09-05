@@ -1,24 +1,22 @@
 package agent_test
 
 import (
-	"context"
-	"iter"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // The claim that lets a retry need no event of its own: it is two spans with
 // nothing appended between them, and that absence is the signal.
 func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
-	a := newAgent(t, &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
-		Scripts: [][]ai.Delta{nil, text("second time lucky")},
-	}, agent.WithRetry(3, 0))
+	a := newAgent(t, aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}),
+		aitest.Says("second time lucky"),
+	), agent.WithRetry(3, 0))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -61,7 +59,7 @@ func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 // on it as if the model had simply said nothing.
 func TestExhaustingRetriesReturnsTheFailure(t *testing.T) {
 	overloaded := &ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}
-	a := newAgent(t, &scripted{Errs: []error{overloaded, overloaded, overloaded}})
+	a := newAgent(t, aitest.Always(aitest.Fails(overloaded)))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err == nil {
@@ -80,12 +78,9 @@ func TestExhaustingRetriesReturnsTheFailure(t *testing.T) {
 
 // A call that failed still spent what it spent. Losing that hides real money.
 func TestAFailedCallStillReportsItsCost(t *testing.T) {
-	a := newAgent(t, &scripted{
-		Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}},
-		Scripts: [][]ai.Delta{
-			{{Usage: &ai.Usage{Input: 120, Output: 4}}},
-		},
-	})
+	a := newAgent(t, aitest.New(
+		aitest.Then(aitest.Streams(ai.Delta{Usage: &ai.Usage{Input: 120, Output: 4}}), aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "bad key"})),
+	))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err == nil {
@@ -97,46 +92,11 @@ func TestAFailedCallStillReportsItsCost(t *testing.T) {
 	}
 }
 
-// stalling is an endpoint that says nothing until its context ends, which is
-// the failure a stream watchdog exists for: it looks exactly like work.
-type stalling struct {
-	mu      sync.Mutex
-	started chan struct{}
-	calls   int
-	// after is how many calls stall before one answers.
-	after int
-}
-
-func (d *stalling) Name() string { return "stalling" }
-
-func (d *stalling) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
-	d.mu.Lock()
-	n := d.calls
-	d.calls++
-	d.mu.Unlock()
-
-	return func(yield func(ai.Delta, error) bool) {
-		if n >= d.after {
-			for _, delta := range text("answered at last") {
-				if !yield(delta, nil) {
-					return
-				}
-			}
-			return
-		}
-		if d.started != nil && n == 0 {
-			close(d.started)
-		}
-		<-ctx.Done()
-		yield(ai.Delta{}, ctx.Err())
-	}
-}
-
 // A stream that goes quiet is a transient failure, and the one the client
 // structurally cannot retry — ending the stall cancels the context ai.Retry
 // would wait on — so it is what the agent's own budget is for.
 func TestAStalledStreamIsRetried(t *testing.T) {
-	a := newAgent(t, &stalling{after: 1},
+	a := newAgent(t, aitest.New(aitest.Hangs(), aitest.Says("answered at last")),
 		agent.WithStreamTimeout(20*time.Millisecond, 20*time.Millisecond),
 		agent.WithRetry(2, 0))
 
@@ -167,7 +127,7 @@ func TestAStalledStreamIsRetried(t *testing.T) {
 // A watchdog nobody asked for does not fire: zero means no limit, and a slow
 // endpoint is not an error.
 func TestNoStreamTimeoutMeansNoWatchdog(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("fine")}},
+	a := newAgent(t, aitest.New(aitest.Says("fine")),
 		agent.WithStreamTimeout(0, 0))
 
 	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
@@ -180,13 +140,12 @@ func TestNoStreamTimeoutMeansNoWatchdog(t *testing.T) {
 // a loop that counts attempts without ever waiting does exactly that.
 func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
 	const askedFor = 60 * time.Millisecond
-	a := newAgent(t, &scripted{
-		Errs: []error{&ai.Error{
+	a := newAgent(t, aitest.New(
+		aitest.Fails(&ai.Error{
 			Kind: ai.KindRateLimit, Message: "slow down", RetryAfter: askedFor,
-		}},
-		Scripts: [][]ai.Delta{nil, text("thank you for waiting")},
-		// A backoff of zero, so anything waited for came from the endpoint.
-	}, agent.WithRetry(2, 0))
+		}),
+		aitest.Says("thank you for waiting"),
+	), agent.WithRetry(2, 0))
 
 	start := time.Now()
 	if _, err := outcome(t, a, ai.UserMessage("hi")); err != nil {
@@ -201,10 +160,10 @@ func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
 // two budgets multiply: three attempts here on a client wrapping ai.Retry(3)
 // is nine model calls for one step.
 func TestAnAgentDoesNotRetryUnlessAsked(t *testing.T) {
-	d := &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
-		Scripts: [][]ai.Delta{nil, text("would have been the retry")},
-	}
+	d := aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}),
+		aitest.Says("would have been the retry"),
+	)
 	a := newAgent(t, d)
 
 	if _, err := outcome(t, a, ai.UserMessage("hi")); err == nil {

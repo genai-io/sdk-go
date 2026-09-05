@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -12,14 +11,12 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 func TestTheGateSeesTheMessageThatRequestedTheCall(t *testing.T) {
 	var seen int
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
-		toolCall("call-1", "noop", `{}`),
-		text("fine"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(aitest.Asks(ai.ToolCall{ID: "call-1", Name: "noop", Input: `{}`}), aitest.Says("fine")), ai.Model{ID: "stub", API: "stub"})
 
 	noop := agent.ToolFunc("noop", "Do nothing.",
 		func(context.Context, struct{}) (agent.Result, error) {
@@ -57,10 +54,10 @@ func TestABlockedCallBecomesAToolErrorTheModelCanRead(t *testing.T) {
 			return agent.Result{}, nil
 		})
 
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
-		toolCall("call-1", "rm", `{}`),
-		text("understood"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "call-1", Name: "rm", Input: `{}`}),
+		aitest.Says("understood"),
+	), ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
 		agent.WithTools(dangerous),
@@ -97,10 +94,7 @@ func TestTheFirstRefusalIsFinal(t *testing.T) {
 		})
 
 	var asked []string
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "rm", `{}`),
-		text("understood"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "rm", Input: `{}`}), aitest.Says("understood")), ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
 		agent.WithTools(tool),
@@ -142,10 +136,10 @@ func TestHooksChainTheirRewrites(t *testing.T) {
 			return agent.TextResult(args.Text), nil
 		})
 
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "echo", `{"text":"one"}`),
-		text("done"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "echo", Input: `{"text":"one"}`}),
+		aitest.Says("done"),
+	), ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
 		agent.WithTools(tool),
@@ -181,10 +175,7 @@ func TestPreInferRunsOnEveryStep(t *testing.T) {
 		})
 
 	var sizes []int
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "echo", `{}`),
-		text("done"),
-	}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "echo", Input: `{}`}), aitest.Says("done")), ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
 		agent.WithTools(echo),
@@ -221,7 +212,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	}
 
 	var sent *agent.Inference
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("fine")}}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(aitest.Says("fine")), ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client,
 		agent.WithSystem("the agent's own prompt"),
 		agent.WithTools(tools...),
@@ -277,7 +268,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 // inventing a turn to carry the error would report something that never took
 // place. Nor is there a span — a call that never started is never ended.
 func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
-	driver := &scripted{Scripts: [][]ai.Delta{text("never reached")}}
+	driver := aitest.New(aitest.Says("never reached"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	var second bool
@@ -339,7 +330,7 @@ func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
 // that, not a copy of its output. MessageStart reports the same request,
 // so a consumer sees exactly what the hook saw.
 func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("done")}},
+	client := ai.NewClientWithDriver(aitest.New(aitest.Says("done")),
 		ai.Model{ID: "stub", API: "stub"},
 		ai.WithMaxTokens(4096)) // a client default, applied after the hook
 
@@ -387,10 +378,10 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 // assembled fresh each time, so a hook is never handed its own previous edits.
 func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 	var prompts []string
-	client := ai.NewClientWithDriver(&scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
-		Scripts: [][]ai.Delta{nil, text("second time lucky")},
-	}, ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}),
+		aitest.Says("second time lucky"),
+	), ai.Model{ID: "stub", API: "stub"})
 
 	attempts := 0
 	a, err := agent.New(client,
@@ -425,7 +416,7 @@ func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 
 // Several PreInfer hooks run in order, each seeing what the one before it did.
 func TestPreInferHooksChain(t *testing.T) {
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("fine")}},
+	client := ai.NewClientWithDriver(aitest.New(aitest.Says("fine")),
 		ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
@@ -469,7 +460,7 @@ func TestAPreInferHookEditsTheCallItIsGiven(t *testing.T) {
 			return agent.TextResult("mild"), nil
 		})
 
-	driver := &scripted{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
+	driver := aitest.New(aitest.Says("ok"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
 		ai.WithMaxTokens(4096), ai.WithEffort(ai.EffortLow))
 
@@ -532,7 +523,7 @@ func TestAPreInferHookEditsTheCallItIsGiven(t *testing.T) {
 // PostInfer runs on what came back, and edits it before it enters the
 // conversation — the seam a redaction or an annotation needs.
 func TestPostInferEditsWhatEntersTheConversation(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("my number is 555-1234")}},
+	a := newAgent(t, aitest.New(aitest.Says("my number is 555-1234")),
 		agent.WithHooks(agent.Hook{
 			PostInfer: func(_ context.Context, resp *ai.Response) error {
 				for i, b := range resp.Content {
@@ -564,7 +555,7 @@ func TestPostInferEditsWhatEntersTheConversation(t *testing.T) {
 // A PostInfer that objects ends the turn without another attempt: it made a
 // decision, and repeating the call would be ignoring it.
 func TestAPostInferRefusalIsNotRetried(t *testing.T) {
-	driver := &scripted{Scripts: [][]ai.Delta{text("one"), text("two"), text("three")}}
+	driver := aitest.New(aitest.Says("one"), aitest.Says("two"), aitest.Says("three"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
@@ -605,7 +596,7 @@ func TestAPostInferRefusalIsNotRetried(t *testing.T) {
 // happens to look transient must still not be retried, and must not leave an
 // MessageEnd with no MessageStart before it.
 func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
-	driver := &scripted{Scripts: [][]ai.Delta{text("one"), text("two"), text("three")}}
+	driver := aitest.New(aitest.Says("one"), aitest.Says("two"), aitest.Says("three"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client, agent.WithHooks(agent.Hook{
@@ -668,10 +659,10 @@ func TestAGateRefusesWithADecisionAndFailsWithAnError(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ran = 0
-			d := &scripted{Scripts: [][]ai.Delta{
-				toolCall("c1", "rm", `{}`),
-				text("all right then"),
-			}}
+			d := aitest.New(
+				aitest.Asks(ai.ToolCall{ID: "c1", Name: "rm", Input: `{}`}),
+				aitest.Says("all right then"),
+			)
 			a := newAgent(t, d, agent.WithTools(tool),
 				agent.WithHooks(agent.Hook{PreTool: tc.gate}))
 
@@ -728,10 +719,10 @@ func TestAFailedToolHookStillClosesTheSpan(t *testing.T) {
 			}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-				toolCall("c1", "look", `{}`),
-				text("unreachable"),
-			}}, agent.WithTools(tool), agent.WithHooks(tc.hook))
+			a := newAgent(t, aitest.New(
+				aitest.Asks(ai.ToolCall{ID: "c1", Name: "look", Input: `{}`}),
+				aitest.Says("unreachable"),
+			), agent.WithTools(tool), agent.WithHooks(tc.hook))
 
 			events, _ := collect(t, a, ai.UserMessage("go"))
 
@@ -765,7 +756,7 @@ func TestAFailedToolHookStillClosesTheSpan(t *testing.T) {
 // the agent owes is to come out of it idle rather than holding the exchange.
 func TestAPanickingHookIsTheCallersToCatch(t *testing.T) {
 	first := true
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("never reached"), text("fine")}},
+	a := newAgent(t, aitest.New(aitest.Says("never reached"), aitest.Says("fine")),
 		agent.WithHooks(agent.Hook{
 			PreInfer: func(context.Context, *agent.Inference) error {
 				if first {
@@ -803,14 +794,10 @@ func TestAFailedHookClosesTheCallsThatWillNeverRun(t *testing.T) {
 			return agent.TextResult("touched"), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "touch", Input: `{}`})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "touch", Input: `{}`})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("unreachable"),
-	}}, agent.WithTools(tool), agent.WithHooks(agent.Hook{
+	a := newAgent(t, aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "touch", Input: `{}`})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "touch", Input: `{}`})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("unreachable"),
+	), agent.WithTools(tool), agent.WithHooks(agent.Hook{
 		PreTool: func(_ context.Context, c agent.PreToolContext) (agent.Decision, error) {
 			if c.Call.ID == "c2" {
 				return agent.Decision{}, errors.New("the gate lost its database")
@@ -848,7 +835,7 @@ func TestAFailedHookClosesTheCallsThatWillNeverRun(t *testing.T) {
 // announced there: before the call that carries it, with nothing appended in
 // between for a fold to pass through.
 func TestPreStepReplacesTheConversationAtTheBoundary(t *testing.T) {
-	driver := &scripted{Scripts: [][]ai.Delta{text("ok")}, Keep: true}
+	driver := aitest.New(aitest.Says("ok"))
 	a := newAgent(t, driver, agent.WithHooks(agent.Hook{
 		PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
 			if c.Tokens == 0 {
@@ -892,7 +879,7 @@ func TestPreStepReplacesTheConversationAtTheBoundary(t *testing.T) {
 // most steps: announcing a replacement that replaced nothing would record a
 // snapshot per step forever.
 func TestPreStepReturningNilChangesNothing(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+	a := newAgent(t, aitest.New(aitest.Says("ok")),
 		agent.WithHooks(agent.Hook{
 			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
 				return nil, nil
@@ -919,10 +906,7 @@ func TestPreStepReturningNilChangesNothing(t *testing.T) {
 func TestPreStepIsPricedAgainstTheConversationItHasNow(t *testing.T) {
 	var seen []int
 	done := false
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "noop", `{}`),
-		text("done"),
-	}},
+	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: `{}`}), aitest.Says("done")),
 		agent.WithMessages([]ai.Message{
 			ai.UserMessage(strings.Repeat("a long history. ", 200)),
 			ai.AssistantMessage(strings.Repeat("and a long answer. ", 200)),
@@ -954,7 +938,7 @@ func TestPreStepIsPricedAgainstTheConversationItHasNow(t *testing.T) {
 // pair is one replacement, because the conversation in between never reached
 // a model.
 func TestPreStepHooksChainIntoOneReplacement(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+	a := newAgent(t, aitest.New(aitest.Says("ok")),
 		agent.WithHooks(
 			agent.Hook{PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
 				return []ai.Message{ai.UserMessage("first")}, nil
@@ -988,7 +972,7 @@ func TestPreStepHooksChainIntoOneReplacement(t *testing.T) {
 // A hook that could not do its job ends the exchange, the same as every other.
 func TestPreStepFailingEndsTheExchange(t *testing.T) {
 	boom := errors.New("the summariser is down")
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("never asked")}},
+	a := newAgent(t, aitest.New(aitest.Says("never asked")),
 		agent.WithHooks(agent.Hook{
 			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
 				return nil, boom
@@ -1019,7 +1003,7 @@ func kinds(events []agent.Event) []string {
 // begins, because only the code deciding to shorten knows it is about to; the
 // loop closes it, after the replacement it caused.
 func TestCompactingOpensASpanAroundTheWait(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+	a := newAgent(t, aitest.New(aitest.Says("ok")),
 		agent.WithHooks(agent.Hook{
 			PreStep: func(ctx context.Context, _ agent.PreStepContext) ([]ai.Message, error) {
 				agent.Compacting(ctx)
@@ -1059,7 +1043,7 @@ func TestCompactingOpensASpanAroundTheWait(t *testing.T) {
 // A hook that says nothing costs nothing: the span is not opened around every
 // step boundary on the chance that this one was slow.
 func TestAQuietPreStepOpensNoSpan(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+	a := newAgent(t, aitest.New(aitest.Says("ok")),
 		agent.WithHooks(agent.Hook{
 			PreStep: func(context.Context, agent.PreStepContext) ([]ai.Message, error) {
 				return []ai.Message{ai.UserMessage("trimmed")}, nil
@@ -1098,7 +1082,7 @@ func TestAnAnnouncedCompactionAlwaysCloses(t *testing.T) {
 		}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("ok")}},
+			a := newAgent(t, aitest.New(aitest.Says("ok")),
 				agent.WithHooks(agent.Hook{PreStep: tc.hook}))
 
 			events, _ := collect(t, a, ai.UserMessage("go"))
@@ -1120,11 +1104,10 @@ func TestAnAnnouncedCompactionAlwaysCloses(t *testing.T) {
 // called too long is shortened and the same step is taken again. Replaying it
 // unchanged, which is all WithRetry could do, fails the same way every time.
 func TestOnInferErrorRecoversAnOversizedPrompt(t *testing.T) {
-	driver := &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}},
-		Scripts: [][]ai.Delta{nil, text("that fits")},
-		Keep:    true,
-	}
+	driver := aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}),
+		aitest.Says("that fits"),
+	)
 	asked := 0
 	a := newAgent(t, driver, agent.WithHooks(agent.Hook{
 		OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
@@ -1173,10 +1156,7 @@ func TestOnInferErrorRecoversAnOversizedPrompt(t *testing.T) {
 // Without the hook the loop's own answer stands: an oversized prompt is not
 // retryable, so nothing recovers it and the exchange ends on it.
 func TestAnOversizedPromptEndsTheExchangeWithNoHook(t *testing.T) {
-	a := newAgent(t, &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}},
-		Scripts: [][]ai.Delta{nil},
-	})
+	a := newAgent(t, aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"})))
 
 	out, err := outcome(t, a, ai.UserMessage("hi"))
 	if err == nil {
@@ -1192,10 +1172,12 @@ func TestAnOversizedPromptEndsTheExchangeWithNoHook(t *testing.T) {
 // changed, so it spends nothing and the replay budget starts over with it.
 func TestARecoveryDoesNotSpendTheRetryBudgetAndRestartsIt(t *testing.T) {
 	overloaded := &ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}
-	driver := &scripted{
-		Errs:    []error{overloaded, overloaded, overloaded, overloaded},
-		Scripts: [][]ai.Delta{nil, nil, nil, nil},
-	}
+	driver := aitest.New(
+		aitest.Fails(overloaded),
+		aitest.Fails(overloaded),
+		aitest.Fails(overloaded),
+		aitest.Fails(overloaded),
+	)
 
 	var attempts []int
 	a := newAgent(t, driver, agent.WithRetry(2, 0), agent.WithHooks(agent.Hook{
@@ -1226,7 +1208,7 @@ func TestARecoveryDoesNotSpendTheRetryBudgetAndRestartsIt(t *testing.T) {
 // model's own failure: the hook declined to answer it, it did not replace it.
 func TestDecliningToRecoverKeepsTheOriginalFailure(t *testing.T) {
 	tooLong := &ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}
-	a := newAgent(t, &scripted{Errs: []error{tooLong}, Scripts: [][]ai.Delta{nil}},
+	a := newAgent(t, aitest.New(aitest.Fails(tooLong)),
 		agent.WithHooks(agent.Hook{
 			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
 				return nil, nil
@@ -1244,10 +1226,7 @@ func TestDecliningToRecoverKeepsTheOriginalFailure(t *testing.T) {
 // about — the rule every other hook here already keeps.
 func TestAFailingRecoveryHookEndsTheExchange(t *testing.T) {
 	boom := errors.New("the summariser is down")
-	a := newAgent(t, &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"}},
-		Scripts: [][]ai.Delta{nil},
-	}, agent.WithHooks(agent.Hook{
+	a := newAgent(t, aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"})), agent.WithHooks(agent.Hook{
 		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
 			return nil, boom
 		},
@@ -1266,7 +1245,7 @@ func TestAFailingRecoveryHookEndsTheExchange(t *testing.T) {
 func TestAPostInferRefusalIsNotOfferedToTheRecoveryHook(t *testing.T) {
 	refused := errors.New("that answer will not do")
 	asked := false
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("here you go")}},
+	a := newAgent(t, aitest.New(aitest.Says("here you go")),
 		agent.WithHooks(agent.Hook{
 			PostInfer: func(context.Context, *ai.Response) error { return refused },
 			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
@@ -1290,10 +1269,7 @@ func TestAPostInferRefusalIsNotOfferedToTheRecoveryHook(t *testing.T) {
 func TestPreInferIsToldWhatEndedTheAttemptBefore(t *testing.T) {
 	tooLong := &ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}
 	var seen []error
-	a := newAgent(t, &scripted{
-		Errs:    []error{tooLong},
-		Scripts: [][]ai.Delta{nil, text("that fits")},
-	}, agent.WithHooks(agent.Hook{
+	a := newAgent(t, aitest.New(aitest.Fails(tooLong), aitest.Says("that fits")), agent.WithHooks(agent.Hook{
 		PreInfer: func(_ context.Context, inf *agent.Inference) error {
 			seen = append(seen, inf.LastErr)
 			return nil
@@ -1321,10 +1297,10 @@ func TestPreInferIsToldWhatEndedTheAttemptBefore(t *testing.T) {
 // nothing is announced: a consumer told the conversation was replaced would
 // throw away a history nobody replaced.
 func TestARouteOnlyRecoveryReplacesNothing(t *testing.T) {
-	a := newAgent(t, &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}},
-		Scripts: [][]ai.Delta{nil, text("the other endpoint")},
-	}, agent.WithHooks(agent.Hook{
+	a := newAgent(t, aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "bad key"}),
+		aitest.Says("the other endpoint"),
+	), agent.WithHooks(agent.Hook{
 		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
 			return &agent.Retry{}, nil
 		},
@@ -1345,10 +1321,10 @@ func TestARouteOnlyRecoveryReplacesNothing(t *testing.T) {
 // depend on registration order in a way nobody reading either could see.
 func TestTheFirstRecoveryAnswerIsTaken(t *testing.T) {
 	second := false
-	a := newAgent(t, &scripted{
-		Errs:    []error{&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"}},
-		Scripts: [][]ai.Delta{nil, text("ok")},
-	},
+	a := newAgent(t, aitest.New(
+		aitest.Fails(&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"}),
+		aitest.Says("ok"),
+	),
 		agent.WithHooks(agent.Hook{
 			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
 				return &agent.Retry{Messages: []ai.Message{ai.UserMessage("first")}}, nil
@@ -1372,24 +1348,11 @@ func TestTheFirstRecoveryAnswerIsTaken(t *testing.T) {
 	}
 }
 
-// waiting is an endpoint that never answers, so the only thing that can end a
-// call to it is the caller.
-type waiting struct{}
-
-func (waiting) Name() string { return "waiting" }
-
-func (waiting) Stream(ctx context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
-	return func(yield func(ai.Delta, error) bool) {
-		<-ctx.Done()
-		yield(ai.Delta{}, ctx.Err())
-	}
-}
-
 // A turn that was stopped is not a turn that failed to answer. Asking the hook
 // to recover it would restart the very exchange the caller just ended.
 func TestACancelledTurnIsNotOfferedToTheRecoveryHook(t *testing.T) {
 	var asked atomic.Bool
-	a := newAgent(t, waiting{}, agent.WithHooks(agent.Hook{
+	a := newAgent(t, aitest.Always(aitest.Hangs()), agent.WithHooks(agent.Hook{
 		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
 			asked.Store(true)
 			return &agent.Retry{}, nil

@@ -134,22 +134,21 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 // any event this recorder was handed. Zero for something that happened between
 // exchanges, which is where a session is forked or renamed.
 //
-// A value that will not marshal is dropped rather than failing the session:
-// what a restore needs is the conversation, and this is not it. Like Handle,
-// this stops after the first failed write and reports through Err.
+// A value that will not marshal is dropped and the entry is still written, on
+// the same terms WithToolDetails already set: the kind is the fact that
+// something happened, the value is the detail, and losing the fact because the
+// detail would not encode is the wrong way round. Like Handle, this stops after
+// the first failed write and reports through Err.
+//
+// A record with no kind is not written at all. There is nothing to read it back
+// by, and the alternative is a log of entries that say nothing.
 func (r *Recorder) Record(ctx context.Context, turn int, kind string, v any) {
 	if r.Err() != nil || kind == "" {
 		return
 	}
 	rec := Custom{Kind: kind}
-	if v != nil {
-		raw, err := json.Marshal(v)
-		if err != nil {
-			return
-		}
-		if string(raw) != "null" {
-			rec.Data = raw
-		}
+	if raw, err := json.Marshal(v); err == nil && string(raw) != "null" {
+		rec.Data = raw
 	}
 	r.write(ctx, turn, Entry{Type: EntryCustom, Custom: &rec})
 }

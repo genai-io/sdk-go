@@ -680,3 +680,37 @@ func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
 		t.Errorf("the second exchange was numbered %d, want 2 — a record is not an exchange", got)
 	}
 }
+
+// The kind is the fact that something happened and the data is the detail.
+// Losing the fact because the detail would not encode is the wrong way round,
+// and it is the trade WithToolDetails already makes for a tool's own value.
+func TestARecordSurvivesAValueThatWillNotEncode(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+
+	rec, _, err := session.Open(ctx, st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Record(ctx, 1, "hook.fired", make(chan int)) // channels do not marshal
+	rec.Record(ctx, 1, "", "no kind, no entry")
+	if err := rec.Err(); err != nil {
+		t.Fatalf("recording: %v", err)
+	}
+
+	var kinds []string
+	for e, err := range st.Entries(ctx, rec.ID()) {
+		if err != nil {
+			t.Fatalf("Entries: %v", err)
+		}
+		if e.Type == session.EntryCustom {
+			kinds = append(kinds, e.Custom.Kind)
+			if len(e.Custom.Data) != 0 {
+				t.Errorf("data = %s, want none — it did not encode", e.Custom.Data)
+			}
+		}
+	}
+	if len(kinds) != 1 || kinds[0] != "hook.fired" {
+		t.Errorf("kinds = %v, want just the one that had a kind", kinds)
+	}
+}

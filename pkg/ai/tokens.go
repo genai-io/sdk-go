@@ -136,32 +136,20 @@ const (
 	classPunct
 	classSpace
 	// classWide is the scripts written without spaces between words — Han,
-	// kana, Hangul. A tokenizer has no word boundaries to merge on, so these
-	// carry roughly a token each rather than merging into long runs.
+	// kana, Hangul. No word boundaries to merge on, so about a token each.
 	classWide
-	// classScript is the alphabetic scripts that are not Latin — Cyrillic,
-	// Greek, Arabic, Hebrew. They merge into words the same way, and are held
-	// apart only because no tokenizer represents them as well, so the same
-	// length of word costs more.
-	//
-	// Latin is not here even when it carries an accent. Splitting a run at
-	// every accent is what makes a word out of fragments — "génère" as five
-	// runs is five tokens, because a run never costs less than one.
+	// classScript is the non-Latin alphabets — Cyrillic, Greek, Arabic,
+	// Hebrew. Held apart from Latin only because no tokenizer represents them
+	// as well, so the same word costs more. Accented Latin is Latin: a run
+	// split at every accent is a word billed as its fragments.
 	classScript
-	// classSymbol is emoji and the rest of the non-letter, non-digit
-	// characters above ASCII. They are the expensive ones: an emoji is often
-	// several tokens, and a run of them merges into none of its neighbours.
+	// classSymbol is emoji and the other non-letter, non-digit runes above
+	// ASCII. The expensive ones: an emoji is often several tokens.
 	classSymbol
 )
 
-// classify groups one rune. The ASCII path is first because an agent's prompt
-// is mostly ASCII and the unicode tables are not free.
-//
-// Which scripts count as wide is the load-bearing decision here. Charging a
-// token per character is right for Han and kana, and wrong by a factor of four
-// for the alphabetic scripts above ASCII: Cyrillic runs about 4.2 characters to
-// the token and Arabic about 3.3, so both merge like words rather than standing
-// alone.
+// classify groups one rune. ASCII first: a prompt is mostly ASCII and the
+// unicode tables are not free.
 func classify(r rune) runeClass {
 	if r < 0x80 {
 		switch {
@@ -190,8 +178,6 @@ func classify(r rune) runeClass {
 	return classSymbol
 }
 
-// isWideScript reports whether a rune belongs to a script written without
-// spaces between words.
 func isWideScript(r rune) bool {
 	return unicode.Is(unicode.Han, r) ||
 		unicode.Is(unicode.Hiragana, r) ||
@@ -208,9 +194,7 @@ func runTokens(class runeClass, n int) int {
 	case classLetter:
 		return max((n+2)/4, 1)
 	case classScript:
-		// Three, not the four Latin gets: every tokenizer in use represents
-		// Latin best, so the same length of any other alphabet costs more.
-		// Charging it the Latin ratio reads Arabic a seventh short.
+		// Three, not Latin's four: Arabic runs about 3.3 characters a token.
 		return max((n+2)/3, 1)
 	case classDigit, classPunct:
 		// Both merge, but only in short groups: tokenizers chunk digits about
@@ -223,9 +207,7 @@ func runTokens(class runeClass, n int) int {
 	case classWide:
 		return n
 	case classSymbol:
-		// An emoji is rarely one token: a variation selector or a joiner in
-		// the sequence costs its own, and none of it merges with the text
-		// around it.
+		// A variation selector or a joiner in the sequence costs its own.
 		return 2 * n
 	default: // classSpace
 		// A lone space is absorbed into the token that follows it — " the" is
@@ -240,31 +222,13 @@ func runTokens(class runeClass, n int) int {
 // EstimateTokens approximates what a string costs in tokens without running a
 // tokenizer. Use [Request.EstimateTokens] to size a whole prompt.
 //
-// It counts by pre-token run rather than by a flat characters-per-token ratio.
-// A BPE tokenizer's pre-tokenizer splits text into runs of letters, digits,
-// punctuation and whitespace before it merges anything, so a run never spans
-// two classes and each class merges differently: words merge aggressively,
-// digits and punctuation only in short groups, non-ASCII runes stand alone.
+// It counts by pre-token run, because the familiar four-characters-per-token is
+// the ratio for prose and most of an agent's prompt is not prose: a flat ratio
+// reads a JSON tool result at 71% of its real size and English at 110%.
 //
-// The familiar "four characters per token" is the letter ratio, and holds for
-// prose. What it does not hold for is the rest of an agent's prompt. Measured
-// against o200k_base, the flat ratio read a machine-written JSON tool result at
-// 71% of its real size, a page of ripgrep output at 85%, and Go source at 93% —
-// while reading English prose at 110%. Being wrong high on the one part that is
-// prose and wrong low on everything else is the worst arrangement available,
-// because low is the failing direction: it is how a conversation is judged to
-// fit, is not compacted, and overflows the window on the call after that.
-//
-// The classes are scripts, not byte ranges. Han and kana carry about a token a
-// character because nothing separates their words; an alphabet does not, and
-// charging Cyrillic a token a character reads it at four times its size. Latin
-// keeps its own ratio whether or not it carries an accent, because a run split
-// at every accent is a word billed as its fragments.
-//
-// These ratios come out above o200k_base everywhere — by 12% to 45% across the
-// corpus they were fitted on. That is deliberate. o200k is the most
-// token-efficient tokenizer this SDK talks to, so an estimate landing exactly
-// on it would land under the others.
+// The result runs above o200k_base everywhere, by 12% to 45%. That is
+// deliberate — o200k is the most token-efficient tokenizer this SDK talks to,
+// so landing on it exactly would land under the others.
 func EstimateTokens(s string) int {
 	if s == "" {
 		return 0

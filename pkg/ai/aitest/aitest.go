@@ -1,11 +1,8 @@
 // Package aitest is a model that does what a test tells it to.
 //
-// Faking a model means faking the protocol, which is the seam [ai.Driver]
-// already is and the one every real driver sits behind: a test says what the
-// endpoint sends, and nothing between the endpoint and the caller has to be
-// stubbed. Writing that driver by hand is a dozen lines of iterator plumbing
-// per test file, and every copy gets to decide differently what happens when a
-// test provokes one more call than it wrote for.
+// Faking a model means faking the protocol — [ai.Driver], the seam every real
+// driver sits behind — so a test says what the endpoint sends and nothing in
+// between has to be stubbed.
 //
 // The shape is a driver playing a list of turns:
 //
@@ -30,27 +27,19 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Turn is what the model does on one call: the delta stream that call
-// produces.
+// Turn is what the model does on one call: the delta stream that call produces.
 //
-// It is handed the call's context, so a turn can outlast the caller's patience
-// on purpose — see [Hangs] — and the request, because a real model's answer
-// depends on what it was asked, and a test standing in for one sometimes has
-// to as well. The constructors below ignore both.
+// It gets the call's context, so a turn can outlast the caller's patience on
+// purpose (see [Hangs]), and the request, because a real model's answer depends
+// on what it was asked. The constructors below ignore both.
 type Turn func(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error]
 
 // Replies is the general turn: the model produces this answer.
 //
-// A [ai.Response] is already an ordered block sequence, so this walks it rather
-// than reassembling a stream out of parallel fields. A response carrying tool
-// calls stops on [ai.StopToolUse] whatever it says, because that is the only
-// stop reason that leaves the loop a call to run; one with no stop reason at
-// all ends the turn.
-//
-// A response with an Err is a call that got this far and then failed, which is
-// what [ai.Response.Err] means everywhere else. It streams what it has — the
-// usage included, because a failed call still spent what it spent — and ends
-// on the error instead of on a stop reason.
+// A response carrying tool calls stops on [ai.StopToolUse] whatever it says,
+// since that is the only stop reason leaving the loop a call to run; one with
+// no stop reason ends the turn. One with an Err got this far and then failed —
+// it streams what it has, usage included, and ends on the error.
 func Replies(r ai.Response) Turn {
 	var out []ai.Delta
 	calls := 0
@@ -96,14 +85,13 @@ func Says(text string) Turn {
 }
 
 // Stops is a model that says this much and then stops for the given reason —
-// [ai.StopMaxTokens] for an answer the output cap cut off, which is what
-// agent.WithContinuation exists to resume, or a refusal, or a stop sequence.
+// [ai.StopMaxTokens] for an answer the output cap cut off, a refusal, a stop
+// sequence.
 func Stops(reason ai.StopReason, text string) Turn {
 	return Replies(ai.Response{Content: ai.TextContent(text), StopReason: reason})
 }
 
-// Then is one turn made of several, played in order: what a call produced
-// before it stalled or failed.
+// Then plays several turns as one: what a call produced before it stalled.
 //
 //	aitest.Then(aitest.Streams(partial...), aitest.Hangs())
 func Then(turns ...Turn) Turn {
@@ -134,8 +122,7 @@ func Asks(calls ...ai.ToolCall) Turn {
 }
 
 // Fails is a call that produces nothing and ends on an error. For one that got
-// partway first — text, or the tokens it had already spent — put the error on
-// the response and use [Replies].
+// partway first, put the error on the response and use [Replies].
 func Fails(err error) Turn {
 	return func(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
 		return func(yield func(ai.Delta, error) bool) { yield(ai.Delta{}, err) }
@@ -143,7 +130,7 @@ func Fails(err error) Turn {
 }
 
 // Hangs is a model that never answers: the stream stays open until the context
-// ends, which is what a caller giving up on a slow endpoint has to survive.
+// ends.
 func Hangs() Turn {
 	return func(ctx context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
 		return func(yield func(ai.Delta, error) bool) {
@@ -153,9 +140,8 @@ func Hangs() Turn {
 	}
 }
 
-// Streams is the raw turn: send exactly these deltas. Use it for a stream
-// whose shape is the point — a block left unclosed, usage arriving before the
-// text it paid for.
+// Streams is the raw turn: send exactly these deltas. For a stream whose shape
+// is the point — a block left unclosed, usage before the text it paid for.
 func Streams(deltas ...ai.Delta) Turn {
 	return func(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
 		return func(yield func(ai.Delta, error) bool) {
@@ -174,9 +160,8 @@ func Streams(deltas ...ai.Delta) Turn {
 // test that provoked one more inference than it wrote for is told so, at the
 // call that did it.
 type Driver struct {
-	// Model is what Client reports talking to. The zero value is a model with
-	// no protocol rules of its own, so a test exercises the code under test
-	// rather than request validation.
+	// Model is what Client reports talking to. The zero value has no protocol
+	// rules of its own, so a test exercises its subject and not validation.
 	Model ai.Model
 
 	turns  []Turn
@@ -191,12 +176,9 @@ type Driver struct {
 func New(turns ...Turn) *Driver { return &Driver{turns: turns} }
 
 // Always returns a driver that answers every call the same way — an endpoint
-// that is down and stays down, or one that never answers at all.
-//
-// Prefer it to repeating a turn as often as the retry budget allows: writing
-// the budget into the model as well as into the assertion means a change to
-// either leaves the test passing for the wrong reason, having run out of turns
-// rather than out of attempts.
+// that is down and stays down. Prefer it to repeating a turn as often as a
+// retry budget allows, which writes that budget into the model as well as into
+// the assertion.
 func Always(turn Turn) *Driver { return &Driver{always: turn} }
 
 // Name identifies this driver the way a real one names its protocol.
@@ -236,12 +218,8 @@ func (d *Driver) Calls() int {
 }
 
 // Sent is what reached the driver, after the client merged its defaults in and
-// repaired the history — which is the request the provider would have seen,
-// not the one the caller wrote.
-//
-// A copy, because the driver goes on appending to its own: a test reading this
-// while a parallel batch is still calling should not have to reason about
-// whether that is safe.
+// repaired the history — the request the provider would have seen, not the one
+// the caller wrote. A copy: the driver goes on appending to its own.
 func (d *Driver) Sent() []*ai.Request {
 	d.mu.Lock()
 	defer d.mu.Unlock()

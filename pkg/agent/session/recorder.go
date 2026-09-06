@@ -127,21 +127,14 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 	}
 }
 
-// Record stores an application's own event in this session's log, in order
-// with the loop's. See [Custom] for what belongs here and what does not.
+// Record stores an application's own event in this session's log, in order with
+// the loop's. See [Custom] for what belongs here.
 //
-// turn is the exchange it happened in, as the agent numbers them — the Turn on
-// any event this recorder was handed. Zero for something that happened between
-// exchanges, which is where a session is forked or renamed.
-//
-// A value that will not marshal is dropped and the entry is still written, on
-// the same terms WithToolDetails already set: the kind is the fact that
-// something happened, the value is the detail, and losing the fact because the
-// detail would not encode is the wrong way round. Like Handle, this stops after
-// the first failed write and reports through Err.
-//
-// A record with no kind is not written at all. There is nothing to read it back
-// by, and the alternative is a log of entries that say nothing.
+// turn is the exchange it happened in, as the agent numbers them, or zero for
+// something between exchanges. A value that will not marshal is dropped and the
+// entry still written — the kind is the fact, the value is the detail — but a
+// record with no kind is not written at all. Like Handle, this stops after the
+// first failed write and reports through Err.
 func (r *Recorder) Record(ctx context.Context, turn int, kind string, v any) {
 	if r.Err() != nil || kind == "" {
 		return

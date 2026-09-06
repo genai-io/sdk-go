@@ -443,8 +443,13 @@ Wrong high on the one part that is prose and wrong low on everything else is
 the worst arrangement available, because low is the failing direction — it is
 how a conversation is judged to fit, is not compacted, and overflows the window
 on the call after that. The ratios now come out **above** `o200k` everywhere,
-deliberately: it is the most token-efficient tokenizer this SDK talks to, so an
-estimate landing exactly on it would land under the others.
+by 12% to 45%, deliberately: it is the most token-efficient tokenizer this SDK
+talks to, so an estimate landing exactly on it would land under the others.
+
+The classes are scripts rather than byte ranges, which is the part that is easy
+to get wrong. Han and kana cost about a token a character because nothing
+separates their words; an alphabet does not, and charging Cyrillic the same
+reads it at four times its size.
 
 `ai.EstimateTokens` takes a string, for an application breaking a window down by
 category; `(*ai.Request).EstimateTokens` sizes a whole prompt.

@@ -9,6 +9,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"strings"
+	"unicode"
 )
 
 // TokenCount is how large a prompt is, and how much that number can be
@@ -134,24 +135,68 @@ const (
 	classDigit
 	classPunct
 	classSpace
-	// classWide is CJK and every other non-ASCII rune. Held apart because
-	// these carry roughly a token each rather than merging into long runs.
+	// classWide is the scripts written without spaces between words — Han,
+	// kana, Hangul. A tokenizer has no word boundaries to merge on, so these
+	// carry roughly a token each rather than merging into long runs.
 	classWide
+	// classScript is the alphabetic scripts that are not Latin — Cyrillic,
+	// Greek, Arabic, Hebrew. They merge into words the same way, and are held
+	// apart only because no tokenizer represents them as well, so the same
+	// length of word costs more.
+	//
+	// Latin is not here even when it carries an accent. Splitting a run at
+	// every accent is what makes a word out of fragments — "génère" as five
+	// runs is five tokens, because a run never costs less than one.
+	classScript
+	// classSymbol is emoji and the rest of the non-letter, non-digit
+	// characters above ASCII. They are the expensive ones: an emoji is often
+	// several tokens, and a run of them merges into none of its neighbours.
+	classSymbol
 )
 
+// classify groups one rune. The ASCII path is first because an agent's prompt
+// is mostly ASCII and the unicode tables are not free.
+//
+// Which scripts count as wide is the load-bearing decision here. Charging a
+// token per character is right for Han and kana, and wrong by a factor of four
+// for the alphabetic scripts above ASCII: Cyrillic runs about 4.2 characters to
+// the token and Arabic about 3.3, so both merge like words rather than standing
+// alone.
 func classify(r rune) runeClass {
-	switch {
-	case r >= 0x80:
-		return classWide
-	case r == ' ' || r == '\t' || r == '\n' || r == '\r':
-		return classSpace
-	case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
-		return classLetter
-	case r >= '0' && r <= '9':
-		return classDigit
-	default:
-		return classPunct
+	if r < 0x80 {
+		switch {
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			return classSpace
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			return classLetter
+		case r >= '0' && r <= '9':
+			return classDigit
+		default:
+			return classPunct
+		}
 	}
+	switch {
+	case isWideScript(r):
+		return classWide
+	case unicode.Is(unicode.Latin, r):
+		return classLetter
+	case unicode.IsLetter(r):
+		return classScript
+	case unicode.IsDigit(r):
+		return classDigit
+	case unicode.IsSpace(r):
+		return classSpace
+	}
+	return classSymbol
+}
+
+// isWideScript reports whether a rune belongs to a script written without
+// spaces between words.
+func isWideScript(r rune) bool {
+	return unicode.Is(unicode.Han, r) ||
+		unicode.Is(unicode.Hiragana, r) ||
+		unicode.Is(unicode.Katakana, r) ||
+		unicode.Is(unicode.Hangul, r)
 }
 
 // runTokens estimates how many tokens a run of n same-class characters becomes.
@@ -162,6 +207,11 @@ func runTokens(class runeClass, n int) int {
 	switch class {
 	case classLetter:
 		return max((n+2)/4, 1)
+	case classScript:
+		// Three, not the four Latin gets: every tokenizer in use represents
+		// Latin best, so the same length of any other alphabet costs more.
+		// Charging it the Latin ratio reads Arabic a seventh short.
+		return max((n+2)/3, 1)
 	case classDigit, classPunct:
 		// Both merge, but only in short groups: tokenizers chunk digits about
 		// three at a time, and JSON and code are dominated by short punctuation
@@ -172,6 +222,11 @@ func runTokens(class runeClass, n int) int {
 		return max((n+2)/3, 1)
 	case classWide:
 		return n
+	case classSymbol:
+		// An emoji is rarely one token: a variation selector or a joiner in
+		// the sequence costs its own, and none of it merges with the text
+		// around it.
+		return 2 * n
 	default: // classSpace
 		// A lone space is absorbed into the token that follows it — " the" is
 		// one token, not two. Longer runs (indentation, blank lines) do cost.
@@ -200,10 +255,16 @@ func runTokens(class runeClass, n int) int {
 // because low is the failing direction: it is how a conversation is judged to
 // fit, is not compacted, and overflows the window on the call after that.
 //
-// These ratios come out above o200k_base everywhere, by 15% to 30%. That is
-// deliberate. o200k is the most token-efficient tokenizer this SDK talks to —
-// Anthropic's needs noticeably more tokens for the same English — so an
-// estimate landing exactly on o200k would land under the others.
+// The classes are scripts, not byte ranges. Han and kana carry about a token a
+// character because nothing separates their words; an alphabet does not, and
+// charging Cyrillic a token a character reads it at four times its size. Latin
+// keeps its own ratio whether or not it carries an accent, because a run split
+// at every accent is a word billed as its fragments.
+//
+// These ratios come out above o200k_base everywhere — by 12% to 45% across the
+// corpus they were fitted on. That is deliberate. o200k is the most
+// token-efficient tokenizer this SDK talks to, so an estimate landing exactly
+// on it would land under the others.
 func EstimateTokens(s string) int {
 	if s == "" {
 		return 0

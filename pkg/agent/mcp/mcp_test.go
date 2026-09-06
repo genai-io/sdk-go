@@ -19,7 +19,11 @@ import (
 // a real round trip: a process started, spoken to over its stdin and stdout,
 // and stopped. A fake transport would test the translation and nothing else,
 // and the translation is the easy half.
-const serverEnv = "SDK_GO_MCP_TEST_SERVER"
+const (
+	serverEnv = "SDK_GO_MCP_TEST_SERVER"
+	// notifyEnv makes that server add a tool once a client is connected.
+	notifyEnv = "SDK_GO_MCP_TEST_NOTIFY"
+)
 
 func TestMain(m *testing.M) {
 	if os.Getenv(serverEnv) == "1" {
@@ -66,6 +70,17 @@ func serve() {
 		func(context.Context, *mcpsdk.GetPromptRequest) (*mcpsdk.GetPromptResult, error) {
 			return &mcpsdk.GetPromptResult{}, nil
 		})
+
+	if os.Getenv(notifyEnv) == "1" {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			s.AddTool(&mcpsdk.Tool{Name: "late", Description: "added after connect.",
+				InputSchema: json.RawMessage(`{"type":"object"}`)},
+				func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+					return &mcpsdk.CallToolResult{}, nil
+				})
+		}()
+	}
 
 	if err := s.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
 		os.Exit(1)
@@ -322,5 +337,42 @@ func TestAServerAlsoSaysWhatElseItOffers(t *testing.T) {
 	}
 	if len(prompts) != 1 || prompts[0].Name != "review" {
 		t.Fatalf("prompts = %+v, want the one the server offers", prompts)
+	}
+}
+
+// A server that adds a tool while connected says so, and the handler has to be
+// able to ask what the tools now are — that is the only useful thing to do in
+// one. It works because the protocol layer dispatches the notification off the
+// goroutine reading the connection; if that ever stopped being true, a handler
+// like this would wait forever for a reply nobody is left to read, and the
+// session would be wedged rather than merely slow. So it is pinned here.
+func TestAToolsChangedHandlerCanAskWhatChanged(t *testing.T) {
+	saw := make(chan int, 4)
+	c, err := mcp.Connect(t.Context(), mcp.Server{
+		Command: os.Args[0],
+		Env:     map[string]string{serverEnv: "1", notifyEnv: "1"},
+	}, mcp.OnToolsChanged(func(c *mcp.Client) {
+		tools, err := c.Tools(context.Background())
+		if err != nil {
+			saw <- -1
+			return
+		}
+		saw <- len(tools)
+	}))
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	select {
+	case n := <-saw:
+		if n < 0 {
+			t.Fatal("the handler could not read the tools it was told had changed")
+		}
+		if n != 4 {
+			t.Errorf("the handler saw %d tools, want the 4 the server now offers", n)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no tools-changed notification, or a handler that never returned from asking")
 	}
 }

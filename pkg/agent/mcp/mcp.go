@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -82,13 +83,16 @@ type Client struct {
 	server  Server
 	session *mcpsdk.ClientSession
 	done    chan struct{}
+	// ready gates the change handler until session is set: it is installed
+	// before Connect, which is when the session it would ask does not exist.
+	ready atomic.Bool
 }
 
 // Option is something to ask of a session, set when it is opened.
 type Option func(*options)
 
 type options struct {
-	toolsChanged func()
+	toolsChanged func(*Client)
 	keepAlive    time.Duration
 }
 
@@ -98,9 +102,22 @@ type options struct {
 //
 // What to do about it is the caller's: an agent is given its tools when it is
 // built, so a set that changed is a set the application has to hand over again.
-// It runs on the session's own goroutine, so do the work elsewhere if it is
-// slow.
-func OnToolsChanged(fn func()) Option {
+//
+// The client is handed over rather than closed over, because the natural way
+// to write that closure is a race: the handler is installed before the session
+// exists, so `c, err := mcp.Connect(..., OnToolsChanged(func() { c.Tools(ctx) }))`
+// reads c while Connect is still assigning it. Nothing fires before the client
+// is whole, and the client it fires with is the one whose tools changed.
+//
+// Asking it what the tools now are is the one useful thing to do here, and it
+// works: the protocol layer dispatches a notification off the goroutine reading
+// the connection, so the reply this waits for is still read. There is a test
+// for that, because it is the sort of thing that holds until a dependency
+// changes its mind and then wedges a session for good.
+//
+// It is not run on a goroutine of its own. A caller who wants that writes `go`,
+// and one who wants these serialized cannot take it back.
+func OnToolsChanged(fn func(*Client)) Option {
 	return func(o *options) { o.toolsChanged = fn }
 }
 
@@ -130,10 +147,17 @@ func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 			opt(&cfg)
 		}
 	}
+	c := &Client{server: s, done: make(chan struct{})}
+
 	clientOpts := &mcpsdk.ClientOptions{KeepAlive: cfg.keepAlive}
 	if cfg.toolsChanged != nil {
 		clientOpts.ToolListChangedHandler = func(context.Context, *mcpsdk.ToolListChangedRequest) {
-			cfg.toolsChanged()
+			// A server may announce a change while the handshake is still in
+			// flight. There is nothing to ask yet, and whoever just connected
+			// is about to read the tools anyway.
+			if c.ready.Load() {
+				cfg.toolsChanged(c)
+			}
 		}
 	}
 
@@ -141,8 +165,8 @@ func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mcp: connecting to %s: %w", s.describe(), err)
 	}
-
-	c := &Client{server: s, session: session, done: make(chan struct{})}
+	c.session = session
+	c.ready.Store(true)
 	go func() {
 		defer close(c.done)
 		_ = session.Wait()

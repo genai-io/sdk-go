@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -40,7 +41,7 @@ func main() {
 	}
 }
 
-func run(ref, dir, url, question string) error {
+func run(ref, dir, url, question string) (err error) {
 	ctx := context.Background()
 
 	// Naming the server namespaces what it advertises — "files__read_file"
@@ -52,12 +53,13 @@ func run(ref, dir, url, question string) error {
 		server.Args = []string{"-y", "@modelcontextprotocol/server-filesystem", dir}
 	}
 
-	// Closing the client is what stops the child process.
+	// Closing the client is what stops the child process, so a failure to
+	// close is a process left behind and worth reporting.
 	c, err := mcp.Connect(ctx, server)
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { err = errors.Join(err, c.Close()) }()
 
 	tools, err := c.Tools(ctx)
 	if err != nil {

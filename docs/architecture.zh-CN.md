@@ -255,8 +255,6 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
     |
     +-- pkg/ai/jsonschema Go 类型变成一份 provider 会接受的 schema
     |
-    +-- pkg/ai/aitest     一个照测试吩咐行事的模型
-    |
     +-- pkg/ai/driver/*   一个协议一个包。厂商 SDK 只被它拖进来，
     |                     别的地方都不碰。
     |
@@ -272,7 +270,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 - `driver/openai/internal/errs` 对 `driver/anthropic` 不可达，靠 `internal/`。
 - `pkg/ai`、`pkg/ai/jsonschema`、`pkg/ai/catalog`、`pkg/ai/provider` 的**模块依赖数是 0**——除标准库外什么都不依赖。厂商 SDK 只能通过你 blank import 的那个 driver 进入构建；`pkg/agent/mcp` 对 Model Context Protocol SDK 是同一笔交易：import 它才链进去，不 import 就不会。
 - `ProtocolOptions` / `ProtocolConfig` 在编译期拒绝一个本来就不该是它的值。
-- `Driver` 只有两个方法，所以测试里的桩也只有两个方法——而 `pkg/ai/aitest` **就是**那个桩，于是没有哪个应用需要再写第十五遍。
+- `Driver` 只有两个方法，所以测试里的桩也只有两个方法。`pkg/ai/aitest` 就是那个桩，已经随包发出去，于是不必再写一遍。
 
 **只写在文档里的**（意味着只有 review 能拦住）：
 
@@ -299,4 +297,6 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 在它旁边，每个包测自己的单元——流式生命周期、历史修复、错误分类、schema 派生、SSE 解析、工具调用分片累积、目录的不变量、凭证存储。**契约测试说的是五个协议彼此一致，单元测试说的是每一个在别人碰不到的那个 case 上是对的。**
 
-两层都坐在 `pkg/ai/aitest` 上：一个照着一串 turn 播放的 driver。**伪造一个模型就是伪造协议**，而那正是五个真实 driver 已经坐在上面的那道缝。它之所以存在，是因为这个仓库自己写过三遍、San 又写了十四遍；也因为**每一份拷贝都各自决定了「测试引出的调用比它写的多一次时会怎样」**——其中两份回了一个空流，那读起来就是「模型选择什么都不说」，于是断言在这上面的测试是**因为错的理由通过的**。`Turn` 是一个拿到调用 ctx 和 request 的函数，所以这里的构造器是便利，不是一个封闭集合。
+两层都坐在 `pkg/ai/aitest` 上——一个照着一串 turn 播放的 driver：**伪造一个模型就是伪造协议**，而那正是五个真实 driver 已经坐在上面的那道缝。它随包发出来，是因为它不是可选的：每个跑循环的测试都需要一个，这个仓库在把它抽出来之前自己写过三遍，而每个对着这个 SDK 写测试的应用也都要写。
+
+再写一遍不只是重复，而是**每份拷贝都要各自做一个决定**：测试引出的调用比它写的多一次时会怎样。三份里有两份回了一个空流，那读起来就是「模型选择什么都不说」——于是断言在这上面的测试是**因为错的理由通过的**。`aitest` 把它变成一个点名是哪一次调用的错误。`Turn` 是一个拿到调用 ctx 和 request 的函数，所以构造器覆盖不到的行为，就是一个普通的字面量。

@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -237,10 +238,14 @@ func (d *Driver) Calls() int {
 // Sent is what reached the driver, after the client merged its defaults in and
 // repaired the history — which is the request the provider would have seen,
 // not the one the caller wrote.
+//
+// A copy, because the driver goes on appending to its own: a test reading this
+// while a parallel batch is still calling should not have to reason about
+// whether that is safe.
 func (d *Driver) Sent() []*ai.Request {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.sent
+	return slices.Clone(d.sent)
 }
 
 // Last is the most recent request, or nil before the first call.

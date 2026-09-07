@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -121,13 +122,19 @@ func TestAnInterruptedStreamClosesItsSpanAndKeepsWhatItCost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Still talking when the caller gives up: the tokens were spent
 			// whether or not the answer was kept.
-			a := newAgent(t, aitest.New(aitest.Then(
-				aitest.Streams(ai.Delta{
-					Block: ai.TextBlock("as far as it got"),
-					Usage: &ai.Usage{Input: 100, Output: 5},
-				}),
-				aitest.Hangs(),
-			)))
+			// Still talking when the caller gives up: the tokens were spent
+			// whether or not the answer was kept.
+			a := newAgent(t, aitest.New(func(ctx context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
+				return func(yield func(ai.Delta, error) bool) {
+					if !yield(ai.Delta{
+						Block: ai.TextBlock("as far as it got"),
+						Usage: &ai.Usage{Input: 100, Output: 5},
+					}, nil) {
+						return
+					}
+					<-ctx.Done()
+				}
+			}))
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()

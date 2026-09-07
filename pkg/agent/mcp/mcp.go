@@ -22,15 +22,14 @@ import (
 	"os/exec"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Separator joins a server's name to a tool's.
-const Separator = "__"
+// separator joins a server's name to a tool's.
+const separator = "__"
 
 // Server is an MCP server and how to reach it: exactly one of Command (a child
 // process, over its stdin and stdout) and URL (over HTTP).
@@ -76,7 +75,6 @@ type Option func(*options)
 
 type options struct {
 	toolsChanged func(*Client)
-	keepAlive    time.Duration
 }
 
 // OnToolsChanged is called when the server says its tool list has changed. An
@@ -91,14 +89,8 @@ func OnToolsChanged(fn func(*Client)) Option {
 	return func(o *options) { o.toolsChanged = fn }
 }
 
-// KeepAlive pings on this interval and closes the session when the server stops
-// answering. Without it a wedged server looks idle until the next call hangs.
-func KeepAlive(d time.Duration) Option {
-	return func(o *options) { o.keepAlive = d }
-}
-
-// Implementation is how this SDK introduces itself to a server.
-var Implementation = &mcpsdk.Implementation{Name: "genai-io/sdk-go", Version: "v1"}
+// implementation is how this SDK introduces itself to a server.
+var implementation = &mcpsdk.Implementation{Name: "genai-io/sdk-go", Version: "v1"}
 
 // Connect opens a session. The client must be closed; for a command server,
 // that is what stops the child process.
@@ -116,7 +108,7 @@ func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 	}
 	c := &Client{server: s, done: make(chan struct{})}
 
-	clientOpts := &mcpsdk.ClientOptions{KeepAlive: cfg.keepAlive}
+	clientOpts := &mcpsdk.ClientOptions{}
 	if cfg.toolsChanged != nil {
 		clientOpts.ToolListChangedHandler = func(context.Context, *mcpsdk.ToolListChangedRequest) {
 			// A server may announce a change while the handshake is still in
@@ -128,7 +120,7 @@ func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 		}
 	}
 
-	session, err := mcpsdk.NewClient(Implementation, clientOpts).Connect(ctx, transport, nil)
+	session, err := mcpsdk.NewClient(implementation, clientOpts).Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("mcp: connecting to %s: %w", s.describe(), err)
 	}
@@ -141,10 +133,7 @@ func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// Done closes when the session ends, however it ended.
-func (c *Client) Done() <-chan struct{} { return c.done }
-
-// Alive is Done's fact, for the caller asking rather than waiting.
+// Alive reports whether the session is still up.
 func (c *Client) Alive() bool {
 	select {
 	case <-c.done:
@@ -206,13 +195,11 @@ func (c *Client) Tools(ctx context.Context) ([]agent.Tool, error) {
 // Close ends the session, stopping a command server's child process.
 func (c *Client) Close() error { return c.session.Close() }
 
-func (c *Client) Server() Server { return c.server }
-
 func (s Server) qualify(name string) string {
 	if s.Name == "" {
 		return name
 	}
-	return s.Name + Separator + name
+	return s.Name + separator + name
 }
 
 func (s Server) describe() string {

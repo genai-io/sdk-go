@@ -276,22 +276,14 @@ func TestASessionSaysWhenItIsOver(t *testing.T) {
 	if !c.Alive() {
 		t.Fatal("a session reported itself dead as soon as it connected")
 	}
-	select {
-	case <-c.Done():
-		t.Fatal("Done closed on a live session")
-	default:
-	}
-
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	select {
-	case <-c.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("Done never closed after the session was closed")
-	}
-	if c.Alive() {
-		t.Error("a closed session still reports itself alive")
+	for deadline := time.Now().Add(5 * time.Second); c.Alive(); {
+		if time.Now().After(deadline) {
+			t.Fatal("a closed session still reports itself alive")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

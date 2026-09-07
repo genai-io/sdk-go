@@ -79,26 +79,6 @@ func Stops(reason ai.StopReason, text string) Turn {
 	return Replies(ai.Response{Content: ai.TextContent(text), StopReason: reason})
 }
 
-// Then plays several turns as one call.
-//
-//	aitest.Then(aitest.Streams(partial...), aitest.Hangs())
-func Then(turns ...Turn) Turn {
-	return func(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
-		return func(yield func(ai.Delta, error) bool) {
-			for _, turn := range turns {
-				for d, err := range turn(ctx, req) {
-					if !yield(d, err) {
-						return
-					}
-					if err != nil {
-						return
-					}
-				}
-			}
-		}
-	}
-}
-
 // Asks is a model that wants tools run. The loop runs them and calls again,
 // so the turn after this one is the model seeing their results.
 func Asks(calls ...ai.ToolCall) Turn {
@@ -143,10 +123,6 @@ func Streams(deltas ...ai.Delta) Turn {
 // Driver plays one turn per call, in order. Running out of turns is an error
 // naming the call that did it, not a silent end-of-turn.
 type Driver struct {
-	// Model is what Client reports talking to. The zero value has no protocol
-	// rules, so a test exercises its subject and not request validation.
-	Model ai.Model
-
 	turns  []Turn
 	always Turn
 
@@ -180,13 +156,10 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 	return d.turns[n](ctx, req)
 }
 
-// Client is this driver as an [ai.Client].
+// Client is this driver as an [ai.Client], on a model with no protocol rules of
+// its own. For a test about the model, use [ai.NewClientWithDriver].
 func (d *Driver) Client() *ai.Client {
-	model := d.Model
-	if model.ID == "" {
-		model = ai.Model{ID: "aitest", API: "aitest", ContextWindow: 200_000}
-	}
-	return ai.NewClientWithDriver(d, model)
+	return ai.NewClientWithDriver(d, ai.Model{ID: "aitest", API: "aitest", ContextWindow: 200_000})
 }
 
 // Calls is how many inferences reached the driver.

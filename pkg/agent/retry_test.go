@@ -79,7 +79,10 @@ func TestExhaustingRetriesReturnsTheFailure(t *testing.T) {
 // A call that failed still spent what it spent. Losing that hides real money.
 func TestAFailedCallStillReportsItsCost(t *testing.T) {
 	a := newAgent(t, aitest.New(
-		aitest.Then(aitest.Streams(ai.Delta{Usage: &ai.Usage{Input: 120, Output: 4}}), aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "bad key"})),
+		aitest.Replies(ai.Response{
+			Usage: ai.Usage{Input: 120, Output: 4},
+			Err:   &ai.Error{Kind: ai.KindAuth, Message: "bad key"},
+		}),
 	))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))

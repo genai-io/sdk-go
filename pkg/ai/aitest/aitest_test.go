@@ -148,15 +148,6 @@ func TestSentIsTheRequestThatWentOut(t *testing.T) {
 	}
 }
 
-func TestAModelCanBeGivenWhenTheTestIsAboutTheModel(t *testing.T) {
-	d := aitest.New(aitest.Says("ok"))
-	d.Model = ai.Model{ID: "narrow", API: "aitest", ContextWindow: 1000}
-
-	if got := d.Client().Model().ContextWindow; got != 1000 {
-		t.Errorf("ContextWindow = %d, want 1000", got)
-	}
-}
-
 // A call that failed still spent what it spent, and losing that hides real
 // money. The error rides on the response rather than replacing it.
 func TestAFailedCallStillReportsWhatItCost(t *testing.T) {

@@ -9,6 +9,74 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-07
+
+Four things an application had to build for itself, all four found by building
+one. Three are new packages or seams; the fourth is a number that was wrong in
+the direction that costs a request.
+
+### Added
+
+- **`pkg/ai/aitest` — a model that does what a test tells it to.** Every test
+  that exercises the loop needs a model that answers on cue, and faking a model
+  means faking the protocol: `ai.Driver`, the seam five real drivers already sit
+  behind. That is a dozen lines of iterator plumbing per test file, and this
+  repo had three copies of it. `aitest.New` plays a list of turns, `aitest.Always`
+  answers every call the same way, and `Turn` is a function taking the call's
+  context and request, so a behaviour the constructors do not cover is an
+  ordinary literal. Running out of turns is an error naming the call that did
+  it, rather than an empty stream that reads as the model choosing to say
+  nothing — which is how a test passes for the wrong reason.
+
+- **`pkg/agent/mcp` — an MCP server's tools, as the agent's own.** A server
+  advertises a name, a JSON Schema and a way to call it; so does `agent.Tool`.
+  `Connect` opens a session and `Client.Tools` hands back values `WithTools`
+  already takes; `OnToolsChanged` is handed that client, because a handler left
+  to close over one races with the `Connect` that is still assigning it. The protocol itself is
+  `github.com/modelcontextprotocol/go-sdk`, wrapped on the same terms as every
+  driver in `pkg/ai/driver` — import the package and you link that SDK, do not
+  and you do not. Naming a server namespaces its tools, because two servers may
+  both advertise `search` and an agent handed both answers every call with
+  whichever came first.
+
+- **`session.EntryCustom` and `Recorder.Record`.** An application's own events —
+  a permission asked for and answered, a hook that fired, a tool added
+  mid-session — belong in the same log as the loop's, because the order across
+  both is the fact worth keeping. `Data` is stored and handed back and never
+  read, on the terms `ToolRun.Details` already set.
+
+### Changed
+
+- **`EstimateTokens` splits in two, by what it sizes.** `ai.EstimateTokens` now
+  takes a string, for an application breaking a window down by category;
+  `(*ai.Request).EstimateTokens` sizes a whole prompt. Write
+  `req.EstimateTokens()` where you wrote `ai.EstimateTokens(req)`.
+
+- **`session.Entry` gains a `Custom` field**, and `fold` walks past an entry
+  type it does not recognise instead of refusing the session. A store written
+  by a newer version stays readable.
+
+### Fixed
+
+- **The token estimate read machine-written content at 71% of its size.** Four
+  bytes a token is the ratio for English prose, and the rest of an agent's
+  prompt is not English prose. Measured against `o200k_base`, the flat ratio
+  read a JSON tool result at 71%, a page of tool output at 85% and Go source at
+  93%, while reading prose at 110%. Wrong high on the one part that is prose and
+  wrong low on everything else is the worst arrangement available, because low
+  is the failing direction: `PreStepContext.Tokens` is this number, so a
+  conversation full of tool results was judged to fit, was not compacted, and
+  overflowed the window on the call after that.
+
+  It now counts by pre-token run, and the classes are scripts rather than byte
+  ranges. Charging every rune above ASCII a token each is right for Han and kana
+  and wrong by a factor of four for an alphabet — it read Cyrillic at 365% — and
+  Latin keeps its ratio whether or not it carries an accent, since a run split
+  at every accent is a word billed as its fragments. Across nineteen samples the
+  band is +12%..+45% and never under. It sits above `o200k` deliberately: that
+  is the most token-efficient tokenizer this SDK talks to, so landing on it
+  exactly would land under the others.
+
 ## [0.4.2] - 2026-09-04
 
 ### Added
@@ -560,6 +628,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.5.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.5.0
 [0.4.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.2
 [0.4.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.1
 [0.4.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.0

@@ -10,15 +10,16 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // Breaking out of the range ends the exchange: a consumer that stopped reading
 // has stopped caring about this turn.
 func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
-	driver := &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "never", `{}`),
-		text("unreachable"),
-	}}
+	driver := aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "never", Input: `{}`}),
+		aitest.Says("unreachable"),
+	)
 	a := newAgent(t, driver)
 
 	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
@@ -50,7 +51,7 @@ func TestInterruptSaysWhenTheExchangeIsOver(t *testing.T) {
 			}
 			return agent.TextResult("let go"), nil
 		})
-	d := &scripted{Scripts: [][]ai.Delta{toolCall("1", "hold", "{}"), text("done")}}
+	d := aitest.New(aitest.Asks(ai.ToolCall{ID: "1", Name: "hold", Input: "{}"}), aitest.Says("done"))
 	a := newAgent(t, d, agent.WithTools(held))
 
 	inTool := make(chan struct{})
@@ -91,7 +92,7 @@ func TestInterruptSaysWhenTheExchangeIsOver(t *testing.T) {
 // Between exchanges there is nothing to interrupt, and waiting on it must not
 // be a way to hang.
 func TestInterruptBetweenExchangesDoesNotBlock(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("hi")}})
+	a := newAgent(t, aitest.New(aitest.Says("hi")))
 
 	select {
 	case <-a.Interrupt():
@@ -108,19 +109,6 @@ func TestInterruptBetweenExchangesDoesNotBlock(t *testing.T) {
 // A model that is still talking when the user gives up on it: the stream is
 // abandoned, and the exchange has to say so without pretending the call was
 // free. The tokens were spent whether or not the answer was kept.
-type blockingStream struct{ usage ai.Usage }
-
-func (d *blockingStream) Name() string { return "blocking" }
-
-func (d *blockingStream) Stream(ctx context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
-	return func(yield func(ai.Delta, error) bool) {
-		if !yield(ai.Delta{Block: ai.TextBlock("as far as it got"), Usage: &d.usage}, nil) {
-			return
-		}
-		<-ctx.Done() // still thinking, until this exchange stops caring
-	}
-}
-
 // Ending an exchange mid-stream, both ways round: Interrupt, which ends this
 // turn, and cancelling the context Run was given, which ends everything.
 func TestAnInterruptedStreamClosesItsSpanAndKeepsWhatItCost(t *testing.T) {
@@ -132,7 +120,21 @@ func TestAnInterruptedStreamClosesItsSpanAndKeepsWhatItCost(t *testing.T) {
 		{"the caller's context ended", func(_ *agent.Agent, cancel context.CancelFunc) { cancel() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAgent(t, &blockingStream{usage: ai.Usage{Input: 100, Output: 5}})
+			// Still talking when the caller gives up: the tokens were spent
+			// whether or not the answer was kept.
+			// Still talking when the caller gives up: the tokens were spent
+			// whether or not the answer was kept.
+			a := newAgent(t, aitest.New(func(ctx context.Context, _ *ai.Request) iter.Seq2[ai.Delta, error] {
+				return func(yield func(ai.Delta, error) bool) {
+					if !yield(ai.Delta{
+						Block: ai.TextBlock("as far as it got"),
+						Usage: &ai.Usage{Input: 100, Output: 5},
+					}, nil) {
+						return
+					}
+					<-ctx.Done()
+				}
+			}))
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -201,15 +203,10 @@ func TestACancelledBatchStopsBeforeTheNextTool(t *testing.T) {
 			return agent.TextResult("done"), nil
 		}))
 
-	a = newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "step", Input: `{}`})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "step", Input: `{}`})},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c3", Name: "step", Input: `{}`})},
-			{StopReason: ai.StopToolUse},
-		},
-		text("never asked for"),
-	}}, agent.WithTools(slow))
+	a = newAgent(t, aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "step", Input: `{}`})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c2", Name: "step", Input: `{}`})}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c3", Name: "step", Input: `{}`})}, ai.Delta{StopReason: ai.StopToolUse}),
+		aitest.Says("never asked for"),
+	), agent.WithTools(slow))
 
 	// The turn ends canceled, so collect hands back that outcome's error;
 	// what this test is about is what the batch did on the way out.

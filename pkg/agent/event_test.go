@@ -12,11 +12,12 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // The plain exchange from the design's first sequence diagram.
 func TestTurnEmitsTheDocumentedTextSequence(t *testing.T) {
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{text("hello there")}})
+	a := newAgent(t, aitest.New(aitest.Says("hello there")))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -54,10 +55,10 @@ func TestTurnWithAToolRunsASecondInference(t *testing.T) {
 			return agent.TextResult("echoed: " + args.Text), nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("call-1", "echo", `{"text":"hi"}`),
-		text("done"),
-	}}, agent.WithTools(echo))
+	a := newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "call-1", Name: "echo", Input: `{"text":"hi"}`}),
+		aitest.Says("done"),
+	), agent.WithTools(echo))
 
 	events, err := collect(t, a, ai.UserMessage("echo hi"))
 	if err != nil {
@@ -102,7 +103,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 		also func(*testing.T, []agent.Event)
 	}{
 		{"the model answered", func(t *testing.T) *agent.Agent {
-			return newAgent(t, &scripted{Scripts: [][]ai.Delta{text("done")}})
+			return newAgent(t, aitest.New(aitest.Says("done")))
 		}, agent.StopEndTurn, nil},
 
 		{"the step budget ran out", func(t *testing.T) *agent.Agent {
@@ -110,12 +111,11 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 				func(context.Context, struct{}) (agent.Result, error) {
 					return agent.TextResult("again"), nil
 				})
-			scripts := make([][]ai.Delta, 8)
-			for i := range scripts {
-				scripts[i] = toolCall(fmt.Sprintf("c%d", i), "again", `{}`)
+			turns := make([]aitest.Turn, 8)
+			for i := range turns {
+				turns[i] = aitest.Asks(ai.ToolCall{ID: fmt.Sprintf("c%d", i), Name: "again", Input: `{}`})
 			}
-			client := ai.NewClientWithDriver(&scripted{Scripts: scripts}, ai.Model{ID: "stub", API: "stub"})
-			a, err := agent.New(client, agent.WithTools(again), agent.WithMaxSteps(2))
+			a, err := agent.New(aitest.New(turns...).Client(), agent.WithTools(again), agent.WithMaxSteps(2))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -131,7 +131,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 				func(context.Context, struct{}) (agent.Result, error) {
 					return agent.Result{Content: ai.TextContent("finished"), Terminate: true}, nil
 				})
-			return newAgent(t, &scripted{Scripts: [][]ai.Delta{toolCall("c1", "finish", `{}`)}},
+			return newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "finish", Input: `{}`})),
 				agent.WithTools(done))
 		}, agent.StopTerminated, func(t *testing.T, events []agent.Event) {
 			if n := steps(events); n != 1 {
@@ -140,7 +140,7 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 		}},
 
 		{"the model call failed", func(t *testing.T) *agent.Agent {
-			return newAgent(t, &scripted{Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}}})
+			return newAgent(t, aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "bad key"})))
 		}, agent.StopError, func(t *testing.T, events []agent.Event) {
 			last := events[len(events)-1].(agent.TurnEnd)
 			if !ai.IsAuth(last.Err) {
@@ -170,17 +170,18 @@ func TestEveryOutcomeSaysWhyItStopped(t *testing.T) {
 // A failed attempt still spent whatever it spent. Folding the retry into the
 // step made that visible: usage now accumulates per attempt, not per step.
 func TestAFailedAttemptStillCountsWhatItCost(t *testing.T) {
-	a := newAgent(t, &scripted{
-		Errs: []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
-		Scripts: [][]ai.Delta{
-			{{Usage: &ai.Usage{Input: 40, Output: 0}}}, // the attempt that failed
-			{
-				{Block: ai.TextBlock("second time lucky")},
-				{EndBlock: true},
-				{Usage: &ai.Usage{Input: 40, Output: 6}, StopReason: ai.StopEndTurn},
-			},
-		},
-	}, agent.WithRetry(3, 0))
+	a := newAgent(t, aitest.New(
+		// the attempt that failed, and what it had already spent
+		aitest.Replies(ai.Response{
+			Usage: ai.Usage{Input: 40},
+			Err:   &ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"},
+		}),
+		aitest.Replies(ai.Response{
+			Content:    ai.TextContent("second time lucky"),
+			Usage:      ai.Usage{Input: 40, Output: 6},
+			StopReason: ai.StopEndTurn,
+		}),
+	), agent.WithRetry(3, 0))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -214,14 +215,9 @@ func TestTurnEndCarriesTheModelsLastMessage(t *testing.T) {
 			return agent.Result{Content: ai.TextContent("done"), Terminate: true}, nil
 		})
 
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		{
-			{Block: ai.TextBlock("wrapping up")},
-			{EndBlock: true},
-			{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "finish", Input: `{}`})},
-			{StopReason: ai.StopToolUse},
-		},
-	}}, agent.WithTools(stop))
+	a := newAgent(t, aitest.New(
+		aitest.Streams(ai.Delta{Block: ai.TextBlock("wrapping up")}, ai.Delta{EndBlock: true}, ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "finish", Input: `{}`})}, ai.Delta{StopReason: ai.StopToolUse}),
+	), agent.WithTools(stop))
 
 	events, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {
@@ -255,7 +251,7 @@ func TestATruncatedAnswerSaysSo(t *testing.T) {
 		{EndBlock: true},
 		{StopReason: ai.StopMaxTokens},
 	}
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{cut}})
+	a := newAgent(t, aitest.New(aitest.Streams(cut...)))
 
 	events, err := collect(t, a, ai.UserMessage("write me an essay"))
 	if err != nil {
@@ -304,11 +300,9 @@ func TestEveryStopReasonIsTranslatedDeliberately(t *testing.T) {
 			continue
 		}
 		t.Run(string(reason), func(t *testing.T) {
-			d := &scripted{Scripts: [][]ai.Delta{{
-				{Block: ai.TextBlock("as far as it got")},
-				{EndBlock: true},
-				{StopReason: reason},
-			}}}
+			d := aitest.New(
+				aitest.Streams(ai.Delta{Block: ai.TextBlock("as far as it got")}, ai.Delta{EndBlock: true}, ai.Delta{StopReason: reason}),
+			)
 			out, err := outcome(t, newAgent(t, d), ai.UserMessage("go"))
 			if err != nil {
 				t.Fatal(err)
@@ -362,7 +356,7 @@ func stopReasonsDeclaredIn(t *testing.T, path string) []ai.StopReason {
 // And when nothing refuses, the span is announced with the request that was
 // actually sent — every hook's edit included.
 func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
-	client := ai.NewClientWithDriver(&scripted{Scripts: [][]ai.Delta{text("fine")}},
+	client := ai.NewClientWithDriver(aitest.New(aitest.Says("fine")),
 		ai.Model{ID: "stub", API: "stub"})
 
 	a, err := agent.New(client,
@@ -425,7 +419,7 @@ func TestAMessageUpdateSaysWhatFragmentItCarries(t *testing.T) {
 // error is for what happens outside a turn — ErrBusy — so a caller rendering
 // both does not report one failure twice.
 func TestAFailedTurnIsReportedOnceAndOnTheStream(t *testing.T) {
-	a := newAgent(t, &scripted{Errs: []error{&ai.Error{Kind: ai.KindAuth, Message: "bad key"}}})
+	a := newAgent(t, aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "bad key"})))
 
 	var events []agent.Event
 	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
@@ -456,11 +450,11 @@ func TestEveryEventCarriesItsTurn(t *testing.T) {
 			agent.Report(ctx, agent.TextResult("halfway"))
 			return agent.TextResult("found it"), nil
 		})
-	a := newAgent(t, &scripted{Scripts: [][]ai.Delta{
-		toolCall("c1", "look", `{}`),
-		text("here it is"),
-		text("and again"),
-	}}, agent.WithTools(slow), agent.WithMessages([]ai.Message{ai.UserMessage("from a session")}))
+	a := newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "look", Input: `{}`}),
+		aitest.Says("here it is"),
+		aitest.Says("and again"),
+	), agent.WithTools(slow), agent.WithMessages([]ai.Message{ai.UserMessage("from a session")}))
 
 	seen := map[string]bool{}
 	for turn := 1; turn <= 2; turn++ {

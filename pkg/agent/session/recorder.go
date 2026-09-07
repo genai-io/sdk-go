@@ -127,6 +127,23 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 	}
 }
 
+// Record stores an application's own event in this session's log, in order with
+// the loop's. See [Custom].
+//
+// turn is the exchange it happened in, or zero for something between them. A
+// value that will not marshal is dropped and the entry still written; one with
+// no kind is not written at all.
+func (r *Recorder) Record(ctx context.Context, turn int, kind string, v any) {
+	if r.Err() != nil || kind == "" {
+		return
+	}
+	rec := Custom{Kind: kind}
+	if raw, err := json.Marshal(v); err == nil && string(raw) != "null" {
+		rec.Data = raw
+	}
+	r.write(ctx, turn, Entry{Type: EntryCustom, Custom: &rec})
+}
+
 // Err reports the write that stopped recording, if one did.
 func (r *Recorder) Err() error {
 	r.mu.Lock()

@@ -379,10 +379,13 @@ Some rules here are conventions and some are checked. It is worth knowing which:
   `internal/`.
 - `pkg/ai`, `pkg/ai/jsonschema`, `pkg/ai/catalog` and `pkg/ai/provider` have **zero
   module dependencies** between them and the standard library. A vendor SDK
-  enters the build only through the driver you blank-import.
+  enters the build only through the driver you blank-import — and
+  `pkg/agent/mcp` is the same bargain for the Model Context Protocol SDK:
+  import it and you link it, do not and you do not.
 - `ProtocolOptions` / `ProtocolConfig` reject a value that was never meant to be
   one, at compile time.
-- `Driver` is two methods, so a stub in a test is two methods.
+- `Driver` is two methods, so a stub in a test is two methods. `pkg/ai/aitest`
+  is that stub, shipped, so no one writes it again.
 
 And some are only documented, which means only review catches them:
 
@@ -439,3 +442,17 @@ repair, error classification, schema derivation, the SSE parser, tool-call
 accumulation, the catalog's invariants, the credential store. The contract
 tests say the five protocols agree; the unit tests say each one is right about
 the case no other protocol exercises.
+
+Both sit on `pkg/ai/aitest`, a driver that plays a list of turns: faking a model
+means faking the protocol, and that is the seam five real drivers already sit
+behind. It is shipped because it is not optional — every test that exercises the
+loop needs one, this repo had written it three times before extracting it, and
+so does every application that tests against this SDK.
+
+Writing it again is not just repetition, it is a decision each copy makes
+separately: what happens when a test provokes one more call than it wrote for.
+Two of the three answered with an empty stream, which reads as the model
+choosing to say nothing — so a test asserting on that passes for the wrong
+reason. `aitest` makes it an error naming the call that did it. `Turn` is a
+function taking the call's context and request, so a behaviour the constructors
+do not cover is an ordinary literal.

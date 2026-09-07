@@ -6,24 +6,14 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
-
-func cutOff(s string) []ai.Delta {
-	return []ai.Delta{
-		{Block: ai.TextBlock(s)},
-		{EndBlock: true},
-		{StopReason: ai.StopMaxTokens},
-	}
-}
 
 // A model stopped by the output cap was interrupted, not finished. Asked to,
 // the loop takes another step in the same exchange rather than handing back
 // half an answer.
 func TestACutOffAnswerIsResumedWhenAsked(t *testing.T) {
-	d := &scripted{Scripts: [][]ai.Delta{
-		cutOff("the first half"),
-		text("the second half"),
-	}}
+	d := aitest.New(aitest.Stops(ai.StopMaxTokens, "the first half"), aitest.Says("the second half"))
 	a := newAgent(t, d, agent.WithContinuation(2, "carry on"))
 
 	out, err := outcome(t, a, ai.UserMessage("write at length"))
@@ -55,7 +45,7 @@ func TestACutOffAnswerIsResumedWhenAsked(t *testing.T) {
 
 // Off unless asked for: paying for more tokens is the application's call.
 func TestACutOffAnswerStopsWhenNotAsked(t *testing.T) {
-	d := &scripted{Scripts: [][]ai.Delta{cutOff("the first half"), text("never reached")}}
+	d := aitest.New(aitest.Stops(ai.StopMaxTokens, "the first half"), aitest.Says("never reached"))
 	a := newAgent(t, d)
 
 	out, err := outcome(t, a, ai.UserMessage("write at length"))
@@ -72,9 +62,12 @@ func TestACutOffAnswerStopsWhenNotAsked(t *testing.T) {
 
 // Running out of attempts is still a cut-off answer, and says so.
 func TestResumingGivesUpAndStillSaysItWasCutOff(t *testing.T) {
-	d := &scripted{Scripts: [][]ai.Delta{
-		cutOff("one"), cutOff("two"), cutOff("three"), cutOff("four"),
-	}}
+	d := aitest.New(
+		aitest.Stops(ai.StopMaxTokens, "one"),
+		aitest.Stops(ai.StopMaxTokens, "two"),
+		aitest.Stops(ai.StopMaxTokens, "three"),
+		aitest.Stops(ai.StopMaxTokens, "four"),
+	)
 	a := newAgent(t, d, agent.WithContinuation(2, "carry on"))
 
 	out, err := outcome(t, a, ai.UserMessage("go"))

@@ -77,6 +77,8 @@ const (
 	EntryToolRun EntryType = "tool"
 	// EntryOutcome closes a turn with how it ended.
 	EntryOutcome EntryType = "outcome"
+	// EntryCustom is the application's own, stored without being read.
+	EntryCustom EntryType = "custom"
 )
 
 // Entry is one durable record. Seq orders it within its session and is
@@ -95,6 +97,7 @@ type Entry struct {
 	Inference *Inference   `json:"inference,omitempty"`
 	ToolRun   *ToolRun     `json:"tool,omitempty"`
 	Outcome   *Outcome     `json:"outcome,omitempty"`
+	Custom    *Custom      `json:"custom,omitempty"`
 }
 
 // payload reports whether the entry carries what its Type says. A wire format
@@ -114,8 +117,24 @@ func (e Entry) payload() bool {
 		return e.ToolRun != nil
 	case EntryOutcome:
 		return e.Outcome != nil
+	case EntryCustom:
+		return e.Custom != nil
 	}
 	return false
+}
+
+// Custom is an application's own event — a permission answered, a hook fired —
+// kept in this log rather than one of its own because the order across both is
+// the fact worth keeping.
+//
+// Data is stored and handed back, never read: the value is the application's,
+// and so is the question it answers. Namespace Kind ("permission.decided"), so
+// a store holding more than one application's sessions stays legible.
+//
+// Written through [Recorder.Record], which knows what turn to file it under.
+type Custom struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // Inference is one model call as it is kept.
@@ -234,6 +253,8 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 		case EntryOutcome:
 			turns++
 		}
+		// EntryCustom and EntryInference and EntryToolRun are not the
+		// conversation: they explain it. A fold walks past them.
 	}
 	return msgs, turns, nil
 }

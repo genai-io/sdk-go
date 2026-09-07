@@ -210,7 +210,7 @@ func TestANameCostsNoTokens(t *testing.T) {
 		Role: RoleUser, Content: Content{TextBlock("how large is this?")},
 	}}}
 
-	if a, b := EstimateTokens(plain), EstimateTokens(named); a != b {
+	if a, b := plain.EstimateTokens(), named.EstimateTokens(); a != b {
 		t.Errorf("the named prompt is estimated at %d and the same prompt at %d", b, a)
 	}
 }

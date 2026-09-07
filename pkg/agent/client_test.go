@@ -7,6 +7,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
 // Where a call goes: the client the agent holds, and the one inference a hook
@@ -19,8 +20,8 @@ func stubClient(id string, d ai.Driver) *ai.Client {
 // SetClient is a person switching model mid-session. Everything else about the
 // agent — the conversation, the prompt, the tools — is what it was.
 func TestSetClientRedirectsTheNextInference(t *testing.T) {
-	first := &scripted{Scripts: [][]ai.Delta{text("first")}}
-	second := &scripted{Scripts: [][]ai.Delta{text("second")}}
+	first := aitest.New(aitest.Says("first"))
+	second := aitest.New(aitest.Says("second"))
 	a := newAgent(t, first)
 
 	if out, err := outcome(t, a, ai.UserMessage("one")); err != nil || out.Message.Text() != "first" {
@@ -50,8 +51,8 @@ func TestSetClientRedirectsTheNextInference(t *testing.T) {
 // agent's own client, because pointing a call somewhere is not moving the
 // agent there.
 func TestAHookRoutesOneInferenceWithoutMovingTheAgent(t *testing.T) {
-	home := &scripted{Scripts: [][]ai.Delta{text("home")}}
-	away := &scripted{Scripts: [][]ai.Delta{text("away")}}
+	home := aitest.New(aitest.Says("home"))
+	away := aitest.New(aitest.Says("away"))
 	elsewhere := stubClient("away", away)
 
 	once := true
@@ -98,11 +99,8 @@ func TestAHookRoutesOneInferenceWithoutMovingTheAgent(t *testing.T) {
 // attempt before it was not — which is what makes a fallback endpoint a hook
 // and not a second loop.
 func TestARetryCanBeRoutedToAnotherClient(t *testing.T) {
-	primary := &scripted{
-		Scripts: [][]ai.Delta{nil},
-		Errs:    []error{&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}},
-	}
-	fallback := &scripted{Scripts: [][]ai.Delta{text("the other endpoint")}}
+	primary := aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}))
+	fallback := aitest.New(aitest.Says("the other endpoint"))
 	spare := stubClient("spare", fallback)
 
 	asked := 0

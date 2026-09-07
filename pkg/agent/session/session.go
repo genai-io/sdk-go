@@ -77,8 +77,7 @@ const (
 	EntryToolRun EntryType = "tool"
 	// EntryOutcome closes a turn with how it ended.
 	EntryOutcome EntryType = "outcome"
-	// EntryCustom is something the application recorded, which this package
-	// stores and returns without reading. See [Custom].
+	// EntryCustom is the application's own, stored without being read.
 	EntryCustom EntryType = "custom"
 )
 
@@ -124,24 +123,15 @@ func (e Entry) payload() bool {
 	return false
 }
 
-// Custom is an application's own event, kept in the session's log beside the
-// loop's.
+// Custom is an application's own event — a permission answered, a hook fired —
+// kept in this log rather than one of its own because the order across both is
+// the fact worth keeping.
 //
-// The five types above are what an agent's loop produces. An application has
-// events of its own that belong in the same log — a permission asked for and
-// answered, a hook that fired, a tool the user added mid-session — and what
-// makes them worth storing here rather than in a log of their own is the
-// order: that the permission was granted between the third tool call and the
-// fourth is the fact, and two logs cannot state it.
+// Data is stored and handed back, never read: the value is the application's,
+// and so is the question it answers. Namespace Kind ("permission.decided"), so
+// a store holding more than one application's sessions stays legible.
 //
-// This package stores Data and hands it back, and never reads it. It cannot:
-// the value is the application's, and so is the question it answers. Kind is
-// the application's vocabulary too — namespace it ("permission.decided"), so
-// that a store holding more than one application's sessions stays legible.
-//
-// [Recorder.Record] is how one is written, because the turn an entry belongs to
-// is numbered from the session's beginning and only the recorder knows the
-// offset.
+// Written through [Recorder.Record], which knows what turn to file it under.
 type Custom struct {
 	Kind string          `json:"kind"`
 	Data json.RawMessage `json:"data,omitempty"`

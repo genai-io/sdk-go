@@ -6,9 +6,8 @@
 //	tools, err := c.Tools(ctx)
 //	a, err := agent.New(client, agent.WithTools(tools...))
 //
-// The protocol is github.com/modelcontextprotocol/go-sdk, wrapped on the same
-// terms as every driver in pkg/ai/driver. What is here is the translation an
-// MCP tool needs to become an agent's, and the few decisions in it.
+// The protocol is github.com/modelcontextprotocol/go-sdk, wrapped as every
+// driver in pkg/ai/driver wraps its vendor's client.
 package mcp
 
 import (
@@ -30,36 +29,31 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Separator joins a server's name to a tool's. Two servers may both advertise
-// "search", and an agent handed both answers every call with whichever came
-// first — silently, until the model picks the wrong one.
+// Separator joins a server's name to a tool's.
 const Separator = "__"
 
-// Server is an MCP server and how to reach it.
-//
-// Exactly one of Command and URL says which: a command is run as a child
-// process and spoken to over its stdin and stdout, a URL is reached over HTTP.
+// Server is an MCP server and how to reach it: exactly one of Command (a child
+// process, over its stdin and stdout) and URL (over HTTP).
 type Server struct {
-	// Name namespaces the tools this server advertises: "fs" turns "read" into
-	// "fs__read", and names the server in an error. Empty takes the server's
-	// own names — right for one server, a silent collision for two.
+	// Name namespaces the tools this server advertises — "fs" turns "read"
+	// into "fs__read" — and names the server in an error. Empty takes the
+	// server's own names, which collides silently across two servers.
 	Name string
 
-	// Command is the program to run, with Args, in Dir. Env is added to this
-	// process's environment rather than replacing it.
+	// Command runs with Args in Dir. Env adds to this process's environment
+	// rather than replacing it.
 	Command string
 	Args    []string
 	Env     map[string]string
 	Dir     string
 
-	// Stderr is where the child process's stderr goes; nil discards it. A
-	// server that fails to start usually says why here and nowhere else. Not
-	// os.Stderr from a full-screen program — it paints over the interface.
+	// Stderr is where the child's stderr goes; nil discards it, and a server
+	// that fails to start says why here and nowhere else. Not os.Stderr from a
+	// full-screen program — it paints over the interface.
 	Stderr io.Writer
 
-	// URL is the endpoint of a server reached over HTTP, with Headers on every
-	// request. SSE selects the older 2024-11-05 transport; the default is
-	// streamable HTTP.
+	// URL is reached over HTTP with Headers on every request. SSE selects the
+	// older 2024-11-05 transport; the default is streamable HTTP.
 	URL     string
 	Headers map[string]string
 	SSE     bool
@@ -68,7 +62,6 @@ type Server struct {
 	HTTPClient *http.Client
 }
 
-// Client is one connected session with one server.
 type Client struct {
 	server  Server
 	session *mcpsdk.ClientSession
@@ -78,7 +71,7 @@ type Client struct {
 	ready atomic.Bool
 }
 
-// Option is something to ask of a session, set when it is opened.
+// Option is set when a session is opened.
 type Option func(*options)
 
 type options struct {
@@ -86,34 +79,29 @@ type options struct {
 	keepAlive    time.Duration
 }
 
-// OnToolsChanged is called when the server says its tool list has changed,
-// which servers that load tools lazily or gate them behind a login do while
-// connected. An agent is given its tools when it is built, so a set that
-// changed is a set the application has to hand over again.
+// OnToolsChanged is called when the server says its tool list has changed. An
+// agent is given its tools when it is built, so a changed set is one the
+// application has to hand over again.
 //
-// The client is handed over rather than closed over: the handler is installed
-// before the session exists, so a closure over the variable Connect is still
-// assigning would race. Asking that client what the tools now are is safe.
-//
-// It runs on the notification's own goroutine, not one of its own. Write `go`
-// if you want that; a caller who wants these serialized cannot take it back.
+// The client is an argument because the handler is installed before Connect
+// returns, and a closure over that variable would race. Asking it for the
+// tools is safe. It runs on the notification's goroutine; write `go` yourself
+// if you want otherwise.
 func OnToolsChanged(fn func(*Client)) Option {
 	return func(o *options) { o.toolsChanged = fn }
 }
 
-// KeepAlive pings the server on this interval and closes the session when it
-// stops answering. Without it a wedged server is indistinguishable from an idle
-// one until the next call hangs.
+// KeepAlive pings on this interval and closes the session when the server stops
+// answering. Without it a wedged server looks idle until the next call hangs.
 func KeepAlive(d time.Duration) Option {
 	return func(o *options) { o.keepAlive = d }
 }
 
-// Implementation is how this SDK introduces itself to a server. A server may
-// log it, or vary what it advertises by it.
+// Implementation is how this SDK introduces itself to a server.
 var Implementation = &mcpsdk.Implementation{Name: "genai-io/sdk-go", Version: "v1"}
 
-// Connect opens a session with one server. The returned client must be closed;
-// for a command server, closing is what stops the child process.
+// Connect opens a session. The client must be closed; for a command server,
+// that is what stops the child process.
 func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 	transport, err := s.transport()
 	if err != nil {
@@ -166,7 +154,6 @@ func (c *Client) Alive() bool {
 	}
 }
 
-// transport is how this server is reached, or why it cannot be.
 func (s Server) transport() (mcpsdk.Transport, error) {
 	switch {
 	case s.Command != "" && s.URL != "":
@@ -195,9 +182,8 @@ func (s Server) transport() (mcpsdk.Transport, error) {
 	return nil, fmt.Errorf("mcp: server %s gives neither a command to run nor a URL to reach", s.describe())
 }
 
-// Tools is what this server advertises, ready to hand to agent.WithTools. Read
-// every time: a server may change what it offers while connected, and a cache
-// here would be a second answer to what the model can call.
+// Tools is what this server advertises, for agent.WithTools. Read every time: a
+// server may change what it offers while connected.
 func (c *Client) Tools(ctx context.Context) ([]agent.Tool, error) {
 	var out []agent.Tool
 	for t, err := range c.session.Tools(ctx, nil) {
@@ -217,14 +203,11 @@ func (c *Client) Tools(ctx context.Context) ([]agent.Tool, error) {
 	return out, nil
 }
 
-// Close ends the session. For a command server this stops the child process.
+// Close ends the session, stopping a command server's child process.
 func (c *Client) Close() error { return c.session.Close() }
 
-// Server is the server this client was opened for.
 func (c *Client) Server() Server { return c.server }
 
-// qualify is the name the model is told, which is the server's own only when
-// the caller did not namespace it.
 func (s Server) qualify(name string) string {
 	if s.Name == "" {
 		return name
@@ -244,7 +227,6 @@ func (s Server) describe() string {
 	return "(unnamed)"
 }
 
-// tool is one of a server's tools, as the loop takes it.
 type tool struct {
 	client *Client
 	name   string
@@ -253,9 +235,8 @@ type tool struct {
 
 func (t *tool) Schema() ai.Schema { return t.schema }
 
-// Run calls the tool. A tool that failed returns both its content and an
-// error: the loop tells the model the content, where the server put the reason
-// it can correct, and records the call as failed.
+// Run calls the tool. A failure returns both content and error: the loop shows
+// the model the content, where the server put the reason it can correct.
 func (t *tool) Run(ctx context.Context, call ai.ToolCall) (agent.Result, error) {
 	args, err := decodeArgs(call.Input)
 	if err != nil {
@@ -281,8 +262,7 @@ func (t *tool) Run(ctx context.Context, call ai.ToolCall) (agent.Result, error) 
 }
 
 // content is what the model is told. A kind this SDK cannot put in a prompt is
-// named rather than dropped: a result that silently loses half its answer reads
-// as a tool that did half the work.
+// named rather than dropped.
 func content(blocks []mcpsdk.Content) ai.Content {
 	var out ai.Content
 	for _, block := range blocks {
@@ -301,8 +281,7 @@ func content(blocks []mcpsdk.Content) ai.Content {
 	return out
 }
 
-// errorText is what the failure says, for a log and a session record. The
-// content itself still reaches the model.
+// errorText is what the failure says, for a log and a session record.
 func errorText(c ai.Content) string {
 	if text := strings.TrimSpace(c.Text()); text != "" {
 		return text
@@ -310,8 +289,8 @@ func errorText(c ai.Content) string {
 	return "the tool reported an error and said nothing about it"
 }
 
-// decodeArgs turns the model's arguments into the object a server expects. An
-// empty input is {}, not null: several servers reject a null there.
+// decodeArgs turns the model's arguments into the object a server expects.
+// Empty input is {}, not null: several servers reject a null there.
 func decodeArgs(input string) (map[string]any, error) {
 	if strings.TrimSpace(input) == "" {
 		return map[string]any{}, nil
@@ -326,9 +305,8 @@ func decodeArgs(input string) (map[string]any, error) {
 	return args, nil
 }
 
-// Resource is something a server offers to read: a file, a database row, a
-// page. Not a tool — the model cannot call it — and what to do with one is the
-// application's.
+// Resource is something a server offers to read. Not a tool: the model cannot
+// call it, and what to do with one is the application's.
 type Resource struct {
 	URI         string
 	Name        string
@@ -343,9 +321,8 @@ type Prompt struct {
 	Description string
 }
 
-// Resources is what this server offers to read. Reading one is not here, nor
-// is fetching a prompt's messages: turning those into ai.Message has decisions
-// in it no caller has yet had an opinion about.
+// Resources is what this server offers to read. Reading one is not here:
+// turning a resource into ai.Message has decisions no caller has asked for yet.
 func (c *Client) Resources(ctx context.Context) ([]Resource, error) {
 	var out []Resource
 	for r, err := range c.session.Resources(ctx, nil) {

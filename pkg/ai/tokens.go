@@ -33,10 +33,9 @@ func (c *Client) CountTokens(ctx context.Context, messages []Message, opts ...Op
 		if err == nil {
 			return TokenCount{Tokens: n, Exact: true}, nil
 		}
-		// An unavailable or transiently down counting endpoint should not stop
-		// the caller from sizing a prompt at all. Authentication, malformed
-		// requests and cancellation are different: estimating would hide an
-		// actionable failure that generation will hit too.
+		// A counting endpoint that is down should not stop a caller sizing a
+		// prompt. Auth, malformed requests and cancellation are different:
+		// estimating would hide a failure generation will hit too.
 		if IsUnsupported(err) || IsRetryable(err) {
 			return TokenCount{Tokens: req.EstimateTokens()}, nil
 		}
@@ -59,9 +58,8 @@ func (c *Client) Headroom(ctx context.Context, messages []Message, opts ...Optio
 	return max(window-count.Tokens, 0), count, nil
 }
 
-// Token-estimation constants. They lean towards over-counting: compacting a
-// little early costs some context, while discovering the prompt was too large
-// costs a whole request.
+// Token-estimation constants, leaning towards over-counting: compacting early
+// costs some context, discovering the prompt was too large costs a request.
 const (
 	// pixelsPerImageToken is Anthropic's published ratio, and close enough to
 	// the other vision models to be a fair estimate for all of them.
@@ -74,10 +72,8 @@ const (
 	messageOverhead = 4
 )
 
-// estimateContent sizes one sequence of blocks. A tool result holds a sequence
-// of its own, so this recurses into it: an image a tool returned costs what an
-// image costs anywhere else, and counting it as nothing is how a prompt that
-// was measured as small arrives over the window.
+// estimateContent sizes one sequence of blocks, recursing into a tool result:
+// an image a tool returned costs what an image costs anywhere else.
 func estimateContent(c Content) int {
 	total := 0
 	for _, block := range c {
@@ -103,9 +99,8 @@ func estimateContent(c Content) int {
 	return total
 }
 
-// EstimateTokens returns the estimated size of the whole prompt: the system
-// prompt, every message, and the tool definitions, which are part of what is
-// sent and are easy to forget — a dozen schemas can outweigh the conversation.
+// EstimateTokens is the whole prompt: system, messages, and the tool
+// definitions, a dozen of which can outweigh the conversation.
 func (r *Request) EstimateTokens() int {
 	if r == nil {
 		return 0
@@ -125,9 +120,8 @@ func (r *Request) EstimateTokens() int {
 	return total
 }
 
-// runeClass groups characters the way a BPE tokenizer's pre-tokenizer splits
-// them: it breaks text into runs of letters, digits, punctuation and
-// whitespace before merging anything, so a run never spans two classes.
+// runeClass is how a BPE pre-tokenizer splits text before merging anything, so
+// a run never spans two classes.
 type runeClass int
 
 const (
@@ -135,21 +129,18 @@ const (
 	classDigit
 	classPunct
 	classSpace
-	// classWide is the scripts written without spaces between words — Han,
-	// kana, Hangul. No word boundaries to merge on, so about a token each.
+	// classWide is written without spaces between words, so about a token
+	// a character: nothing for a tokenizer to merge on.
 	classWide
-	// classScript is the non-Latin alphabets — Cyrillic, Greek, Arabic,
-	// Hebrew. Held apart from Latin only because no tokenizer represents them
-	// as well, so the same word costs more. Accented Latin is Latin: a run
-	// split at every accent is a word billed as its fragments.
+	// classScript is the non-Latin alphabets. Held apart from Latin only
+	// because no tokenizer represents them as well. Accented Latin stays
+	// Latin: a run split at every accent is a word billed as its fragments.
 	classScript
-	// classSymbol is emoji and the other non-letter, non-digit runes above
-	// ASCII. The expensive ones: an emoji is often several tokens.
+	// classSymbol is emoji and the other non-letter runes above ASCII.
 	classSymbol
 )
 
-// classify groups one rune. ASCII first: a prompt is mostly ASCII and the
-// unicode tables are not free.
+// classify groups one rune. ASCII first: the unicode tables are not free.
 func classify(r rune) runeClass {
 	if r < 0x80 {
 		switch {
@@ -185,10 +176,7 @@ func isWideScript(r rune) bool {
 		unicode.Is(unicode.Hangul, r)
 }
 
-// runTokens estimates how many tokens a run of n same-class characters becomes.
-// The ratios approximate what BPE merging does within each class: words merge
-// aggressively, digits merge in groups of about three, punctuation merges only
-// in short common pairs, and every non-ASCII rune stands roughly on its own.
+// runTokens is what a run of n same-class characters costs.
 func runTokens(class runeClass, n int) int {
 	switch class {
 	case classLetter:
@@ -197,21 +185,18 @@ func runTokens(class runeClass, n int) int {
 		// Three, not Latin's four: Arabic runs about 3.3 characters a token.
 		return max((n+2)/3, 1)
 	case classDigit, classPunct:
-		// Both merge, but only in short groups: tokenizers chunk digits about
-		// three at a time, and JSON and code are dominated by short punctuation
-		// runs learned as single units — `":"`, `":{"`, `!=`, `:=`, `))`. So
-		// each sits well above one-token-per-character and well below prose.
-		// (The classes stay separate because they decide where runs break —
-		// `12+34` is three runs, not one — only the ratio is shared.)
+		// Digits chunk about three at a time; JSON and code are dominated by
+		// short punctuation runs learned as single units. Separate classes
+		// because they break runs differently — `12+34` is three runs.
 		return max((n+2)/3, 1)
 	case classWide:
 		return n
 	case classSymbol:
-		// A variation selector or a joiner in the sequence costs its own.
+		// A variation selector or joiner in the sequence costs its own.
 		return 2 * n
 	default: // classSpace
-		// A lone space is absorbed into the token that follows it — " the" is
-		// one token, not two. Longer runs (indentation, blank lines) do cost.
+		// A lone space is absorbed into the token after it; indentation and
+		// blank lines are not.
 		if n <= 1 {
 			return 0
 		}
@@ -219,16 +204,13 @@ func runTokens(class runeClass, n int) int {
 	}
 }
 
-// EstimateTokens approximates what a string costs in tokens without running a
-// tokenizer. Use [Request.EstimateTokens] to size a whole prompt.
+// EstimateTokens approximates what a string costs in tokens. Use
+// [Request.EstimateTokens] for a whole prompt.
 //
-// It counts by pre-token run, because the familiar four-characters-per-token is
-// the ratio for prose and most of an agent's prompt is not prose: a flat ratio
-// reads a JSON tool result at 71% of its real size and English at 110%.
-//
-// The result runs above o200k_base everywhere, by 12% to 45%. That is
-// deliberate — o200k is the most token-efficient tokenizer this SDK talks to,
-// so landing on it exactly would land under the others.
+// It counts by pre-token run: four-characters-per-token is the ratio for prose,
+// and most of an agent's prompt is not prose. The result runs 12% to 45% above
+// o200k_base, deliberately — o200k is the most token-efficient tokenizer this
+// SDK talks to, so landing on it exactly would land under the others.
 func EstimateTokens(s string) int {
 	if s == "" {
 		return 0

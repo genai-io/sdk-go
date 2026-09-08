@@ -572,9 +572,12 @@ words: a tool's own failure belongs in the content with `isError`, not as a
 protocol error, "otherwise the LLM would not be able to see that an error
 occurred and self-correct."
 
-`Client` also answers `Resources` and `Prompts`, for an interface that shows
-what else a server brought, and `Done`/`Alive` for one that has to notice a
-server dying.
+**A server may change what it offers while connected** — one that loads tools
+lazily, or gates them behind a login. `mcp.OnToolsChanged` says so; read
+`Client.Tools` again and hand the result to `Agent.SetTools`,
+which the next step picks up. `Client` also answers `Resources` and `Prompts`
+for an interface that shows what else a server brought, and `Alive` for one
+that has to notice a server dying.
 
 ### Ending a turn from a tool
 

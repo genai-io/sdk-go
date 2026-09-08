@@ -382,7 +382,7 @@ a, err := agent.New(client, agent.WithTools(tools...))
 
 **失败的工具会同时交回内容和错误。** 循环把内容告诉模型——服务器把原因写在那里,模型据此自我纠正——同时把这次调用记为失败。MCP 规范自己也是这么说的:工具自身的失败属于 content 加 `isError`,而不是协议级错误,「否则 LLM 就看不到出过错,也就无法自我纠正」。
 
-`Client` 还答 `Resources` 和 `Prompts`,给要展示服务器还带了什么的界面用;以及 `Done`/`Alive`,给需要察觉服务器死掉的那一方。
+**服务器在连接期间可能改变它提供的工具**——懒加载的、或者登录后才放出来的。`mcp.OnToolsChanged` 会告诉你;重新读一次 `Client.Tools`,把结果交给 `SetTools`,下一个 step 就会用上。`Client` 还答 `Resources` 和 `Prompts`,给要展示服务器还带了什么的界面用;以及 `Alive`,给需要察觉服务器死掉的那一方。
 
 ### 从工具里结束一个 turn
 

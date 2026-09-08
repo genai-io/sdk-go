@@ -77,9 +77,10 @@ type options struct {
 	toolsChanged func(*Client)
 }
 
-// OnToolsChanged is called when the server says its tool list has changed. An
-// agent is given its tools when it is built, so a changed set is one the
-// application has to hand over again.
+// OnToolsChanged is called when the server says its tool list has changed —
+// which servers that load tools lazily, or gate them behind a login, do while
+// connected. Read [Client.Tools] again and hand the result to
+// agent.Agent.SetTools; the next step uses it.
 //
 // The client is an argument because the handler is installed before Connect
 // returns, and a closure over that variable would race. Asking it for the

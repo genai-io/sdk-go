@@ -12,8 +12,10 @@ updates:
     labels:
       - "dependencies"
       - "go"
+    # "build" because pr-title-lint.yml only accepts Conventional Commits
+    # types, and "deps" is not one of them.
     commit-message:
-      prefix: "deps"
+      prefix: "build"
       include: "scope"
     open-pull-requests-limit: 5
     groups:

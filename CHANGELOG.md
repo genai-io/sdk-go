@@ -16,12 +16,20 @@ Each such change is listed under **Changed** with what to write instead.
   Credentials ride the transport, and the model's address names the project
   and location. The catalog row is `google-vertex`, read from
   `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` (default `global`) — the
-  variables Google's own Gen AI SDK reads. Vertex lists no models, so
-  `Models` reports `KindUnsupported` and a picker shows the row.
-  `ai.APIGoogleVertex` is the protocol value; like `APIAnthropicVertex` it
-  exists so the credential stack lands only in a build that asks for it.
-- `google.NewWithClient` builds the Gemini driver around a caller's client and
-  model collection, the seam the Vertex package stands on.
+  variables Google's own Gen AI SDK reads. Vertex lists no models, so the
+  driver is no `ModelLister` and a picker shows the row. The protocol value
+  is `ai.APIGoogleVertex`.
+- `google.NewAt` builds the Gemini driver for a model collection at another
+  address, the seam the Vertex package stands on.
+- `ai.VertexDeployment` reads and defaults the deployment both Vertex drivers
+  take, and `ai.VertexDefaultRegion` is the region an empty one resolves to.
+
+### Changed
+
+- `catalog.Vendor.Deployment` is handed the row's own `DeploymentEnv` along
+  with the lookup: `func(vars map[string]string, env func(string) string)`.
+  A row names each variable once; a caller with its own lookup passes
+  `v.DeploymentEnv` through, as `auth.Deployment` does.
 
 ## [0.5.0] - 2026-09-07
 

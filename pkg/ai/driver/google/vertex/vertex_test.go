@@ -2,11 +2,7 @@ package vertex
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -79,7 +75,7 @@ func TestRequestsCarryTheDeploymentAndTheToken(t *testing.T) {
 
 	d, err := New(ai.Config{
 		Model:          ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL:        s.URL,
+		BaseURL:        s.URL + "/",
 		ProtocolConfig: ai.VertexConfig{Project: "my-project", Region: "us-central1"},
 	})
 	if err != nil {
@@ -106,27 +102,53 @@ func TestRequestsCarryTheDeploymentAndTheToken(t *testing.T) {
 	}
 }
 
-// Vertex has no listing of the publisher's models, and saying so is what lets
-// a caller fall back to its catalog rather than show an empty picker.
-func TestModelsIsUnsupported(t *testing.T) {
+// The driver names the protocol as the caller reached it, on itself and on
+// every error it classifies. Reporting the Gemini API would send someone
+// debugging a Vertex deployment to the wrong console. And it claims no model
+// listing, which is what lets a caller fall back to its catalog rather than
+// show an empty picker.
+func TestTheDeploymentReportsItsOwnName(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"no"}}`)
+	}))
+	defer s.Close()
 	stubCredentials(t)
+
 	d, err := New(ai.Config{
 		Model:          ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
+		BaseURL:        s.URL,
 		ProtocolConfig: ai.VertexConfig{Project: "p"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = d.(ai.ModelLister).Models(context.Background())
-	var aiErr *ai.Error
-	if !errors.As(err, &aiErr) || aiErr.Kind != ai.KindUnsupported {
-		t.Fatalf("Models error = %v, want KindUnsupported", err)
+	if d.Name() != Name {
+		t.Errorf("Name = %q, want %q", d.Name(), Name)
+	}
+	if _, lists := d.(ai.ModelLister); lists {
+		t.Error("the Vertex driver claims a model listing, which Vertex does not publish")
+	}
+
+	var streamErr error
+	for _, err := range d.Stream(context.Background(), &ai.Request{Messages: []ai.Message{ai.UserMessage("hi")}}) {
+		if err != nil {
+			streamErr = err
+		}
+	}
+	var e *ai.Error
+	if !errors.As(streamErr, &e) {
+		t.Fatalf("error is %T (%v), want *ai.Error", streamErr, streamErr)
+	}
+	if e.Driver != Name {
+		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, Name)
 	}
 }
 
-// stubCredentials installs a service-account credential whose token endpoint
-// is a server that always hands out "stub-token", so the driver's ADC lookup
-// and token exchange both succeed without Google.
+// stubCredentials installs a user credential whose token endpoint is a server
+// that always hands out "stub-token", so the driver's ADC lookup and token
+// exchange both succeed without Google.
 func stubCredentials(t *testing.T) {
 	t.Helper()
 	tokens := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,13 +156,8 @@ func stubCredentials(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"access_token":"stub-token","token_type":"Bearer","expires_in":3600}`)
 	}))
 	t.Cleanup(tokens.Close)
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	creds := fmt.Sprintf(`{"type":"service_account","project_id":"p","client_email":"t@p.iam.gserviceaccount.com","private_key":%q,"token_uri":%q}`, pemKey, tokens.URL)
-	path := filepath.Join(t.TempDir(), "sa.json")
+	creds := fmt.Sprintf(`{"type":"authorized_user","client_id":"c","client_secret":"s","refresh_token":"r","token_uri":%q}`, tokens.URL)
+	path := filepath.Join(t.TempDir(), "adc.json")
 	if err := os.WriteFile(path, []byte(creds), 0o600); err != nil {
 		t.Fatal(err)
 	}

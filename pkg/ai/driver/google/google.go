@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
 )
 
 // Name is the driver's identifier.
@@ -44,9 +45,11 @@ func init() { ai.RegisterAPI(ai.APIGoogleGenAI, New) }
 type Driver struct {
 	client *http.Client
 	// api is the protocol as the caller reached it: the Gemini API, or the
-	// same body through Vertex AI, which lists nothing and counts tokens in
-	// its own shape.
-	api ai.API
+	// same body through Vertex AI, which counts tokens in its own shape. It
+	// is what the driver and its errors answer to, so a failure on Vertex
+	// does not send anyone to the Gemini API's console.
+	api  ai.API
+	fail errs.Classifier
 	// models is the collection the model sits in — the URL up to "/{model}:{method}".
 	// On the Gemini API that is "{base}/v1beta/models"; on Vertex the project
 	// and location come before "publishers/google/models".
@@ -67,25 +70,25 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	base = strings.TrimSuffix(base, "/")
-	return NewWithClient(cfg.HTTPClient, cfg, ai.APIGoogleGenAI, base+"/"+apiVersion+"/models")
+	return NewAt(cfg, ai.APIGoogleGenAI, strings.TrimSuffix(base, "/")+"/"+apiVersion+"/models")
 }
 
-// NewWithClient builds a driver around a client and a model collection, for a
-// package that serves this protocol from another address: google/vertex hands
-// in the client carrying its Google credential and the collection its project
-// and location name. A nil client is http.DefaultClient.
-func NewWithClient(client *http.Client, cfg ai.Config, api ai.API, models string) (*Driver, error) {
+// NewAt builds a driver for a model collection, for a package that serves
+// this protocol from another address: google/vertex passes the collection its
+// project and location name, with the Config's client carrying its Google
+// credential. A nil Config.HTTPClient is http.DefaultClient.
+func NewAt(cfg ai.Config, api ai.API, models string) (*Driver, error) {
 	if cfg.Model.ID == "" {
 		return nil, fmt.Errorf("%s: model ID is required", api)
 	}
+	client := cfg.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
 	}
-	models = strings.TrimSuffix(models, "/")
 	return &Driver{
 		client:  client,
 		api:     api,
+		fail:    errs.For(string(api), details),
 		models:  models,
 		apiKey:  cfg.APIKey,
 		headers: cfg.MergedHeaders(),
@@ -94,8 +97,8 @@ func NewWithClient(client *http.Client, cfg ai.Config, api ai.API, models string
 	}, nil
 }
 
-// Name identifies the driver.
-func (d *Driver) Name() string { return Name }
+// Name identifies the driver by the protocol it was reached through.
+func (d *Driver) Name() string { return string(d.api) }
 
 // Stream runs one streamGenerateContent call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
@@ -108,19 +111,19 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 		res, err := d.post(ctx, d.methodURL("streamGenerateContent", "alt=sse"), body, req.Headers)
 		if err != nil {
-			yield(ai.Delta{}, fail.WrapStream(err))
+			yield(ai.Delta{}, d.fail.WrapStream(err))
 			return
 		}
 		defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
 
 		for chunk, err := range sseEvents(res.Body) {
 			if err != nil {
-				yield(ai.Delta{}, fail.WrapStream(err))
+				yield(ai.Delta{}, d.fail.WrapStream(err))
 				return
 			}
 			var out generateResponse
 			if err := json.Unmarshal(chunk, &out); err != nil {
-				yield(ai.Delta{}, fail.WrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
+				yield(ai.Delta{}, d.fail.WrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
 				return
 			}
 			if !d.emit(out, yield) {
@@ -234,20 +237,20 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 
 	// Vertex takes those fields flat. The Gemini API takes them only inside a
 	// generateContentRequest wrapper, which also has to name the model.
-	body := &countTokensRequest{countTokensInner: inner}
+	var body any = inner
 	if d.api == ai.APIGoogleGenAI {
 		inner.Model = "models/" + d.model.ID
 		body = &countTokensRequest{GenerateContentRequest: inner}
 	}
 	res, err := d.post(ctx, d.methodURL("countTokens", ""), body, req.Headers)
 	if err != nil {
-		return 0, fail.Wrap(err)
+		return 0, d.fail.Wrap(err)
 	}
 	defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
 
 	var out countTokensResponse
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return 0, fail.Wrap(err)
+		return 0, d.fail.Wrap(err)
 	}
 	return int(out.TotalTokens), nil
 }
@@ -257,11 +260,6 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 // in supportedGenerationMethods. Experimental and "-latest" aliases are dropped
 // too: they duplicate a concrete model under a name whose meaning can change.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
-	if d.api != ai.APIGoogleGenAI {
-		// Vertex has no listing of the publisher's models; the catalog row is
-		// what there is to show.
-		return nil, &ai.Error{Driver: string(d.api), Kind: ai.KindUnsupported, Message: "Vertex AI does not list Gemini models"}
-	}
 	var out []ai.Model
 	for token := ""; ; {
 		query := "pageSize=1000"
@@ -270,13 +268,13 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		}
 		res, err := d.get(ctx, d.models+"?"+query)
 		if err != nil {
-			return nil, fail.Wrap(err)
+			return nil, d.fail.Wrap(err)
 		}
 		var page modelList
 		err = json.NewDecoder(res.Body).Decode(&page)
 		_ = res.Body.Close() // the decode error above is the one worth reporting
 		if err != nil {
-			return nil, fail.Wrap(err)
+			return nil, d.fail.Wrap(err)
 		}
 
 		for _, m := range page.Models {
@@ -297,7 +295,7 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 			out = append(out, ai.Model{
 				ID:            id,
 				Name:          name,
-				API:           d.api,
+				API:           ai.APIGoogleGenAI,
 				Vendor:        d.model.Vendor,
 				ContextWindow: int(m.InputTokenLimit),
 				MaxOutput:     int(m.OutputTokenLimit),
@@ -309,7 +307,7 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		token = page.NextPageToken
 	}
 	if len(out) == 0 {
-		return nil, &ai.Error{Driver: Name, Kind: ai.KindUnknown, Message: "endpoint listed no models that generate content"}
+		return nil, &ai.Error{Driver: d.Name(), Kind: ai.KindUnknown, Message: "endpoint listed no models that generate content"}
 	}
 	slices.SortFunc(out, func(a, b ai.Model) int { return strings.Compare(a.ID, b.ID) })
 	return out, nil

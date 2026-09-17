@@ -109,12 +109,11 @@ type usageMetadata struct {
 	CachedContentTokenCount int32 `json:"cachedContentTokenCount,omitempty"`
 }
 
-// countTokensRequest carries the whole request rather than bare contents: the
-// system instruction and the tool declarations count against the window too.
-// Vertex takes them flat; the Gemini API takes them only inside the wrapper.
-// Exactly one of the two is set.
+// countTokensRequest is the Gemini API's wrapper around a count: the system
+// instruction and the tool declarations count against the window too, and the
+// wrapper is the only form that endpoint accepts them in. Vertex takes the
+// inner form flat.
 type countTokensRequest struct {
-	*countTokensInner
 	GenerateContentRequest *countTokensInner `json:"generateContentRequest,omitempty"`
 }
 

@@ -60,6 +60,33 @@ type VertexConfig struct {
 // ProtocolConfig marks VertexConfig as a driver's construction settings.
 func (VertexConfig) ProtocolConfig() {}
 
+// VertexDefaultRegion is where a model is served when the deployment names no
+// region. Google recommends the global endpoint for availability; a specific
+// region is for data residency.
+const VertexDefaultRegion = "global"
+
+// VertexDeployment reads the deployment out of a Config for a Vertex driver,
+// with the region defaulted. No project is a credential failure named for
+// driver: the deployment is how a Vertex caller says who they are, and both
+// Vertex drivers refuse the same way.
+func VertexDeployment(cfg Config, driver string) (VertexConfig, error) {
+	deployment, err := ProtocolConfigAs[VertexConfig](cfg)
+	if err != nil {
+		return VertexConfig{}, err
+	}
+	if deployment.Project == "" {
+		return VertexConfig{}, &Error{
+			Driver:  driver,
+			Kind:    KindAuth,
+			Message: "no Google Cloud project: set Config.ProtocolConfig to an ai.VertexConfig, or use auth.Config to read it from the environment",
+		}
+	}
+	if deployment.Region == "" {
+		deployment.Region = VertexDefaultRegion
+	}
+	return deployment, nil
+}
+
 // Modality is a kind of content a model accepts as input.
 type Modality string
 

@@ -103,10 +103,10 @@ var vendors = []Vendor{
 		// variables below name the deployment, not a credential.
 		KeyEnv: nil,
 		DeploymentEnv: map[string]string{
-			"project": anthropicVertexProjectEnv,
-			"region":  anthropicVertexRegionEnv,
+			"project": "ANTHROPIC_VERTEX_PROJECT_ID",
+			"region":  "CLOUD_ML_REGION",
 		},
-		Deployment: vertexDeployment(anthropicVertexProjectEnv, anthropicVertexRegionEnv),
+		Deployment: vertexDeployment,
 		Input:      textImage,
 		Compat:     claudeAdaptiveNoTemp,
 		Reasoning:  claudeAdaptive,
@@ -244,17 +244,15 @@ var vendors = []Vendor{
 		// ones Google's own Gen AI SDK reads.
 		KeyEnv: nil,
 		DeploymentEnv: map[string]string{
-			"project": googleVertexProjectEnv,
-			"region":  googleVertexRegionEnv,
+			"project": "GOOGLE_CLOUD_PROJECT",
+			"region":  "GOOGLE_CLOUD_LOCATION",
 		},
-		Deployment: vertexDeployment(googleVertexProjectEnv, googleVertexRegionEnv),
+		Deployment: vertexDeployment,
 		Input:      textImage,
 		Compat:     ai.GoogleCompat{ThinkingLevel: true},
 		Reasoning:  geminiLevels,
 		Note: "Authenticates with Google Application Default Credentials; set GOOGLE_CLOUD_PROJECT and, optionally, GOOGLE_CLOUD_LOCATION (default global). " +
 			"Vertex does not list its models, so the row below is what a picker shows; Infer sizes any other ID you name.",
-		// The same line as the Gemini API serves — unpriced, as Vertex bills
-		// through Google.
 		Models: geminiLine,
 		Infer:  inferGoogle,
 	},

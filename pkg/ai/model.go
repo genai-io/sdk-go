@@ -27,6 +27,11 @@ const (
 	// where it points, which is why it is a separate protocol only so far as
 	// routing is concerned — the driver reuses the same conversion code.
 	APIAnthropicVertex API = "anthropic-vertex"
+	// APIGoogleVertex is the Gemini generateContent protocol served through
+	// Google Cloud Vertex AI. As with APIAnthropicVertex, the body is the one
+	// APIGoogleGenAI sends; the client authenticates and addresses the model
+	// differently, and the driver reuses the same conversion code.
+	APIGoogleVertex API = "google-vertex"
 )
 
 // anthropicFamily reports whether this protocol carries an Anthropic Messages
@@ -36,8 +41,14 @@ func (a API) anthropicFamily() bool {
 	return a == APIAnthropicMessages || a == APIAnthropicVertex
 }
 
+// googleFamily reports whether this protocol carries a Gemini generateContent
+// body, for the same reason anthropicFamily exists.
+func (a API) googleFamily() bool {
+	return a == APIGoogleGenAI || a == APIGoogleVertex
+}
+
 // VertexConfig is the deployment a Vertex-served model lives in. It is passed
-// as Config.ProtocolConfig to the anthropic/vertex driver.
+// as Config.ProtocolConfig to the anthropic/vertex and google/vertex drivers.
 type VertexConfig struct {
 	// Project is the GCP project ID serving the model.
 	Project string

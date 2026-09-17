@@ -20,6 +20,7 @@ var protocols = map[ai.API]string{
 	ai.APIOpenAIChat:        "ai.OpenAIChatCompat",
 	ai.APIOpenAIResponses:   "ai.OpenAIResponsesCompat",
 	ai.APIGoogleGenAI:       "ai.GoogleCompat",
+	ai.APIGoogleVertex:      "ai.GoogleCompat",
 }
 
 // compatName reports which protocol a compat value belongs to, by its concrete

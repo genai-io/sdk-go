@@ -11,12 +11,12 @@ protocols, and an agent runtime that runs the loop around it.
 
 **`pkg/ai` — one model call**
 
-- **One API, five protocols** — the same types whichever provider serves the request.
+- **One API, six protocols** — the same types whichever provider serves the request.
 - **Streaming** — text, thinking, tool calls and images on one start/delta/end lifecycle.
 - **Tool calling** — schema derived from your argument struct, arguments checked before your code runs.
 - **Structured outputs** — `CompleteAs[T]` derives the schema, constrains generation and decodes.
 - **Typed errors** — auth, rate limit, context exceeded and unsupported, not substrings to match.
-- **A model catalog** — 27 vendors, 55 models; endpoints, limits and pricing as data.
+- **A model catalog** — 28 vendors, 62 models; endpoints, limits and pricing as data.
 - **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
 
 **`pkg/agent` — the loop around it**
@@ -57,7 +57,7 @@ Requires Go 1.25 or later.
 
 ## The client — `pkg/ai`
 
-One model call, over any of five protocols. Everything in this half works
+One model call, over any of six protocols. Everything in this half works
 without `pkg/agent`.
 
 ### Quickstart
@@ -379,6 +379,7 @@ reading the list and fetching it are separate verbs.
 | Anthropic Messages | `pkg/ai/driver/anthropic` | 4 |
 | Anthropic on Vertex AI | `pkg/ai/driver/anthropic/vertex` | 1 |
 | Google Gemini | `pkg/ai/driver/google` | 1 |
+| Google Gemini on Vertex AI | `pkg/ai/driver/google/vertex` | 1 |
 
 A vendor is a catalog row, not a package: most ship an endpoint speaking
 somebody else's protocol, so adding one is a data change.

@@ -73,7 +73,7 @@ func (m Model) validateCapabilities(req *Request) error {
 	// extension, and Responses has no stop-sequence parameter. A per-model
 	// flag would have to be set on every row and would silently stop firing
 	// the first time someone forgot.
-	if len(req.SamplingParams) > 0 && (m.API.anthropicFamily() || m.API == APIGoogleGenAI) {
+	if len(req.SamplingParams) > 0 && (m.API.anthropicFamily() || m.API.googleFamily()) {
 		return m.unsupported("does not support OpenAI sampling parameter extensions")
 	}
 	if len(req.StopSequences) > 0 && m.API == APIOpenAIResponses {
@@ -177,10 +177,10 @@ func (m Model) validateProtocolBlock(block Block) error {
 		// Two of the four protocols take an image in a tool result. Sending
 		// one to the others drops it silently, and a model asked about a
 		// picture it was never shown answers anyway.
-		switch m.API {
-		case APIOpenAIChat:
+		switch {
+		case m.API == APIOpenAIChat:
 			return fmt.Errorf("the Chat Completions protocol carries only text in a tool result")
-		case APIGoogleGenAI:
+		case m.API.googleFamily():
 			return fmt.Errorf("the Gemini protocol carries only text in a tool result")
 		}
 	}
@@ -218,7 +218,7 @@ func (m Model) replayable(block Block) (Block, bool) {
 		case m.API == APIOpenAIChat:
 			block.Signature = ""
 			return block, CompatOf[OpenAIChatCompat](m).ReasoningContent
-		case m.API == APIGoogleGenAI:
+		case m.API.googleFamily():
 			block.Signature = ""
 			return block, true
 		default:

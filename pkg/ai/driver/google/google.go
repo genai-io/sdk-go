@@ -42,8 +42,15 @@ func init() { ai.RegisterAPI(ai.APIGoogleGenAI, New) }
 
 // Driver talks to one Gemini endpoint.
 type Driver struct {
-	client  *http.Client
-	baseURL string
+	client *http.Client
+	// api is the protocol as the caller reached it: the Gemini API, or the
+	// same body through Vertex AI, which lists nothing and counts tokens in
+	// its own shape.
+	api ai.API
+	// models is the collection the model sits in — the URL up to "/{model}:{method}".
+	// On the Gemini API that is "{base}/v1beta/models"; on Vertex the project
+	// and location come before "publishers/google/models".
+	models  string
 	apiKey  string
 	headers map[string]string
 	model   ai.Model
@@ -53,25 +60,33 @@ type Driver struct {
 // New builds a driver from a Config. Registered as the factory for
 // ai.APIGoogleGenAI.
 func New(cfg ai.Config) (ai.Driver, error) {
-	if cfg.Model.ID == "" {
-		return nil, fmt.Errorf("%s: model ID is required", Name)
-	}
 	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
-	}
-
-	client := cfg.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
 	}
 	base := cfg.URL()
 	if base == "" {
 		base = defaultBaseURL
 	}
+	base = strings.TrimSuffix(base, "/")
+	return NewWithClient(cfg.HTTPClient, cfg, ai.APIGoogleGenAI, base+"/"+apiVersion+"/models")
+}
 
+// NewWithClient builds a driver around a client and a model collection, for a
+// package that serves this protocol from another address: google/vertex hands
+// in the client carrying its Google credential and the collection its project
+// and location name. A nil client is http.DefaultClient.
+func NewWithClient(client *http.Client, cfg ai.Config, api ai.API, models string) (*Driver, error) {
+	if cfg.Model.ID == "" {
+		return nil, fmt.Errorf("%s: model ID is required", api)
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	models = strings.TrimSuffix(models, "/")
 	return &Driver{
 		client:  client,
-		baseURL: strings.TrimSuffix(base, "/"),
+		api:     api,
+		models:  models,
 		apiKey:  cfg.APIKey,
 		headers: cfg.MergedHeaders(),
 		model:   cfg.Model,
@@ -209,15 +224,22 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	if err != nil {
 		return 0, err
 	}
-	inner := &countTokensInner{Model: "models/" + d.model.ID, Contents: contents}
+	inner := &countTokensInner{Contents: contents}
 	// The system instruction and the tool declarations count against the
-	// window too, and the wrapper is the only form that accepts them.
+	// window too.
 	if req.System != "" {
 		inner.SystemInstruction = &content{Parts: []*part{{Text: req.System}}}
 	}
 	inner.Tools = declarations(req.Tools)
 
-	res, err := d.post(ctx, d.methodURL("countTokens", ""), &countTokensRequest{GenerateContentRequest: inner}, req.Headers)
+	// Vertex takes those fields flat. The Gemini API takes them only inside a
+	// generateContentRequest wrapper, which also has to name the model.
+	body := &countTokensRequest{countTokensInner: inner}
+	if d.api == ai.APIGoogleGenAI {
+		inner.Model = "models/" + d.model.ID
+		body = &countTokensRequest{GenerateContentRequest: inner}
+	}
+	res, err := d.post(ctx, d.methodURL("countTokens", ""), body, req.Headers)
 	if err != nil {
 		return 0, fail.Wrap(err)
 	}
@@ -235,13 +257,18 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 // in supportedGenerationMethods. Experimental and "-latest" aliases are dropped
 // too: they duplicate a concrete model under a name whose meaning can change.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
+	if d.api != ai.APIGoogleGenAI {
+		// Vertex has no listing of the publisher's models; the catalog row is
+		// what there is to show.
+		return nil, &ai.Error{Driver: string(d.api), Kind: ai.KindUnsupported, Message: "Vertex AI does not list Gemini models"}
+	}
 	var out []ai.Model
 	for token := ""; ; {
 		query := "pageSize=1000"
 		if token != "" {
 			query += "&pageToken=" + url.QueryEscape(token)
 		}
-		res, err := d.get(ctx, fmt.Sprintf("%s/%s/models?%s", d.baseURL, apiVersion, query))
+		res, err := d.get(ctx, d.models+"?"+query)
 		if err != nil {
 			return nil, fail.Wrap(err)
 		}
@@ -270,7 +297,7 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 			out = append(out, ai.Model{
 				ID:            id,
 				Name:          name,
-				API:           ai.APIGoogleGenAI,
+				API:           d.api,
 				Vendor:        d.model.Vendor,
 				ContextWindow: int(m.InputTokenLimit),
 				MaxOutput:     int(m.OutputTokenLimit),

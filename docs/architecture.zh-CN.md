@@ -8,7 +8,7 @@
 
 **包是代码的单位，所以一个线格式一个包，一个厂商零个包。**
 
-catalog 里 27 家厂商，由 5 个协议服务：
+catalog 里 28 家厂商，由 6 个协议服务：
 
 | 协议 | 包 | 厂商数 |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ catalog 里 27 家厂商，由 5 个协议服务：
 | Anthropic Messages | `driver/anthropic` | 4 |
 | Anthropic on Vertex AI | `driver/anthropic/vertex` | 1 |
 | Google Gemini | `driver/google` | 1 |
+| Google Gemini on Vertex AI | `driver/google/vertex` | 1 |
 
 绝大多数厂商提供的是一个说别人协议的端点。DeepSeek、Moonshot、Ollama 说 OpenAI Chat Completions；MiniMax、小米 MiMo、火山引擎说 Anthropic Messages。真正区分它们的是一个 base URL、一个环境变量、一套 reasoning 方言和一份模型清单——这四样全是数据。
 
@@ -88,7 +89,7 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 
 所以 **provider** 命名的是"一台你能连上的、配好的主机"，**protocol** 命名的是"它说的那套请求格式"。`ProtocolOptions` 作用于后者——这就是为什么 `anthropic.Options` 也能作用到 MiniMax 和火山引擎：**它们说那个协议，但不是那个厂商**。
 
-## 27 家厂商，5 个协议，5 个 driver 包
+## 28 家厂商，6 个协议，6 个 driver 包
 
 把命题画出来。左列全是数据，只有右列是 Go 代码。
 
@@ -113,6 +114,7 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 
   anthropic-vertex              --> anthropic-vertex        --> driver/anthropic/vertex
   google                        --> google-genai            --> driver/google
+  google-vertex                 --> google-vertex           --> driver/google/vertex
 ```
 
 加第 19 家 OpenAI 兼容厂商，只动左列。
@@ -281,13 +283,13 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 记在这里，因为一份只列成绩的设计文档不算设计文档。
 
-**`APIAnthropicVertex` 不是一个线格式。** 五个 `API` 值里有四个是真正不同的请求形状。第五个是 Anthropic Messages 换了认证（Google ADC）、换了主机、换了模型 ID 形式；那个 driver 把构造完客户端之后的一切原样交回 `driver/anthropic`。它之所以还是一个独立的 `API` 值，是因为注册表按 `API` 查 driver，而它的 Google Cloud auth 依赖很重——**271 个第三方包，对比 `anthropic` 的 43 个**——所以它必须只落进主动要它的构建里。要正经修，得给注册表加第二个维度，代价大于这个瑕疵本身。
+**两个 Vertex 的 `API` 值都不是线格式。** 六个 `API` 值里有四个是真正不同的请求形状。`APIAnthropicVertex` 是 Anthropic Messages 换了认证（Google ADC）、换了主机、换了模型 ID 形式，`APIGoogleVertex` 是对 Gemini 请求体做的同一件事；两个 driver 都把构造完客户端之后的一切原样交回各自的父包。它们之所以还是独立的 `API` 值，是因为注册表按 `API` 查 driver，而 Google Cloud auth 依赖很重——**271 个第三方包，对比 `anthropic` 的 43 个**——所以它必须只落进主动要它的构建里。要正经修，得给注册表加第二个维度，代价大于这个瑕疵本身。
 
 **OpenAI 的 cache-write token 没有被计入。** 端点在 `input_tokens_details.cache_write_tokens` 里报告它们，而当前锁定的 `openai-go` 版本没有暴露这个字段，所以在 GPT-5.6 及以后，那部分 token 被按普通 input 计价——**比真实数字少约四分之一**。厂商条目里写明了这一点。
 
 **`ResolveLevel` 的吸附是静默的。** 在一个只提供 off 和 high 的模型上要 `medium`，会拿到 high，而没有任何东西告诉调用方。方向是有意的——**静默地想得比要求的少，是更让人意外的那种失败**——但这份静默目前调用方观察不到。
 
-**目录里多数条目没有价格。** 五十五行里有三十三行的价目表是零，八行没有上下文窗口。其中一部分是对的——Vertex 由 Google 按项目计费，本地 Ollama 不由任何人计费——剩下的就是一张没人填完的表。对未定价的模型，`Pricing.Cost` 返回零而不是估算值，理由和未知窗口报告零余量是同一个：**猜出来的数字在两个方向上都会静默地错**。所以靠这个计费的调用方，得先确认价目表不是空的，再信那个总额。
+**目录里多数条目没有价格。** 六十二行里有四十行的价目表是零，八行没有上下文窗口。其中一部分是对的——Vertex 由 Google 按项目计费，本地 Ollama 不由任何人计费——剩下的就是一张没人填完的表。对未定价的模型，`Pricing.Cost` 返回零而不是估算值，理由和未知窗口报告零余量是同一个：**猜出来的数字在两个方向上都会静默地错**。所以靠这个计费的调用方，得先确认价目表不是空的，再信那个总额。
 
 ## 测试
 

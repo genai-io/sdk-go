@@ -9,6 +9,20 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Added
+
+- **Gemini through Vertex AI.** `driver/google/vertex` serves the Gemini
+  generateContent body from a Google Cloud project: Application Default
+  Credentials ride the transport, and the model's address names the project
+  and location. The catalog row is `google-vertex`, read from
+  `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` (default `global`) — the
+  variables Google's own Gen AI SDK reads. Vertex lists no models, so
+  `Models` reports `KindUnsupported` and a picker shows the row.
+  `ai.APIGoogleVertex` is the protocol value; like `APIAnthropicVertex` it
+  exists so the credential stack lands only in a build that asks for it.
+- `google.NewWithClient` builds the Gemini driver around a caller's client and
+  model collection, the seam the Vertex package stands on.
+
 ## [0.5.0] - 2026-09-07
 
 Four things an application had to build for itself, all four found by building

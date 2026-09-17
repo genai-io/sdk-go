@@ -13,7 +13,7 @@ request passes through between your call and the bytes on the wire.
 **A package is a unit of code, so there is one per wire format and none per
 vendor.**
 
-27 vendors in the catalog are served by 5 protocols:
+28 vendors in the catalog are served by 6 protocols:
 
 | Protocol | Package | Vendors |
 | --- | --- | --- |
@@ -22,6 +22,7 @@ vendor.**
 | Anthropic Messages | `driver/anthropic` | 4 |
 | Anthropic on Vertex AI | `driver/anthropic/vertex` | 1 |
 | Google Gemini | `driver/google` | 1 |
+| Google Gemini on Vertex AI | `driver/google/vertex` | 1 |
 
 Most vendors ship an endpoint speaking somebody else's protocol. DeepSeek,
 Moonshot and Ollama speak OpenAI Chat Completions; MiniMax, Xiaomi MiMo and
@@ -117,7 +118,7 @@ the request shape it speaks. `ProtocolOptions` scopes to the second, which is
 why `anthropic.Options` reaches MiniMax and Volcengine too: they speak that
 protocol without being that vendor.
 
-## 27 vendors, 5 protocols, 5 driver packages
+## 28 vendors, 6 protocols, 6 driver packages
 
 This is the thesis as a picture. The left column is data; only the right
 column is Go code.
@@ -143,6 +144,7 @@ column is Go code.
 
   anthropic-vertex              --> anthropic-vertex        --> driver/anthropic/vertex
   google                        --> google-genai            --> driver/google
+  google-vertex                 --> google-vertex           --> driver/google/vertex
 ```
 
 Adding a nineteenth OpenAI-compatible vendor moves the left column only.
@@ -397,15 +399,16 @@ And some are only documented, which means only review catches them:
 
 Recorded because a design document that only lists wins is not one.
 
-**`APIAnthropicVertex` is not a wire protocol.** Four of the five `API` values
-are genuinely distinct request shapes. The fifth is the Anthropic Messages
-format with different authentication (Google ADC), a different host and a
-different model-ID form; the driver hands everything downstream of client
-construction back to `driver/anthropic` unchanged. It is a separate `API` value
-because the registry keys on `API` and its Google Cloud auth dependency is
-heavy — 271 third-party packages against `anthropic`'s 43 — so it must land only in a
-build that asks for it. Fixing it properly means a second dimension in the
-registry, which costs more than the wart.
+**The two Vertex `API` values are not wire protocols.** Four of the six `API`
+values are genuinely distinct request shapes. `APIAnthropicVertex` is the
+Anthropic Messages format with different authentication (Google ADC), a
+different host and a different model-ID form, and `APIGoogleVertex` is the same
+move on the Gemini body; each driver hands everything downstream of client
+construction back to its parent package unchanged. They are separate `API`
+values because the registry keys on `API` and the Google Cloud auth dependency
+is heavy — 271 third-party packages against `anthropic`'s 43 — so it must land
+only in a build that asks for it. Fixing it properly means a second dimension
+in the registry, which costs more than the wart.
 
 **OpenAI cache-write tokens are not counted.** The endpoint reports them in
 `input_tokens_details.cache_write_tokens`, which the pinned `openai-go` release
@@ -417,7 +420,7 @@ off and high returns high, and nothing tells the caller. The direction is
 deliberate — quietly reasoning *less* than asked is the more surprising failure
 — but the silence is not something a caller can currently observe.
 
-**Most of the catalog carries no price.** Thirty-three of the fifty-five rows
+**Most of the catalog carries no price.** Forty of the sixty-two rows
 have a zero rate card, and eight have no context window. Some of that is
 correct — Vertex is billed by Google against a project, and a local Ollama is
 billed by nobody — and the rest is a table nobody has finished filling in.

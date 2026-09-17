@@ -17,7 +17,7 @@ import (
 
 // methodURL builds the URL for a model method, e.g. ":countTokens".
 func (d *Driver) methodURL(method, query string) string {
-	u := fmt.Sprintf("%s/%s/models/%s:%s", d.baseURL, apiVersion, d.model.ID, method)
+	u := fmt.Sprintf("%s/%s:%s", d.models, d.model.ID, method)
 	if query != "" {
 		u += "?" + query
 	}

@@ -9,6 +9,11 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-19
+
+Gemini reaches Vertex AI the way Claude already did, and the one seam that
+change needed is listed under Changed with what to write instead.
+
 ### Added
 
 - **Gemini through Vertex AI.** `driver/google/vertex` serves the Gemini
@@ -650,6 +655,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.6.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.6.0
 [0.5.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.5.0
 [0.4.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.2
 [0.4.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.1

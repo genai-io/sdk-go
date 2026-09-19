@@ -51,7 +51,7 @@
 go get github.com/genai-io/sdk-go
 ```
 
-需要 Go 1.25 或更高版本。
+需要 Go 1.26 或更高版本。
 
 ## 客户端 —— `pkg/ai`
 

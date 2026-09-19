@@ -109,16 +109,18 @@ type usageMetadata struct {
 	CachedContentTokenCount int32 `json:"cachedContentTokenCount,omitempty"`
 }
 
-// countTokensRequest carries the whole request rather than bare contents: the
-// system instruction and the tool declarations count against the window too,
-// and the wrapper is the only form that accepts them.
+// countTokensRequest is the Gemini API's wrapper around a count: the system
+// instruction and the tool declarations count against the window too, and the
+// wrapper is the only form that endpoint accepts them in. Vertex takes the
+// inner form flat.
 type countTokensRequest struct {
 	GenerateContentRequest *countTokensInner `json:"generateContentRequest,omitempty"`
 }
 
 type countTokensInner struct {
-	// Model is required inside the wrapper, in "models/{id}" form.
-	Model             string     `json:"model"`
+	// Model is required inside the wrapper, in "models/{id}" form, and has no
+	// place in the flat form.
+	Model             string     `json:"model,omitempty"`
 	Contents          []*content `json:"contents,omitempty"`
 	SystemInstruction *content   `json:"systemInstruction,omitempty"`
 	Tools             []*tool    `json:"tools,omitempty"`

@@ -48,9 +48,10 @@ type Vendor struct {
 
 	// Deployment turns those variables into the value this vendor's driver
 	// expects as ai.Config.ProtocolConfig, and says which one is missing when the
-	// endpoint cannot run without it — a fact about the row, not about auth. Nil
-	// for a vendor that needs no deployment.
-	Deployment func(env func(string) string) (ai.ProtocolConfig, error)
+	// endpoint cannot run without it — a fact about the row, not about auth. It
+	// is handed DeploymentEnv, so a row names each variable once. Nil for a
+	// vendor that needs no deployment.
+	Deployment func(vars map[string]string, env func(string) string) (ai.ProtocolConfig, error)
 
 	// Input lists the content kinds this vendor's models accept, for models
 	// that do not declare their own. Empty means text only.

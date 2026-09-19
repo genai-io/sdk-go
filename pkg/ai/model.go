@@ -27,6 +27,11 @@ const (
 	// where it points, which is why it is a separate protocol only so far as
 	// routing is concerned — the driver reuses the same conversion code.
 	APIAnthropicVertex API = "anthropic-vertex"
+	// APIGoogleVertex is the Gemini generateContent protocol served through
+	// Google Cloud Vertex AI. As with APIAnthropicVertex, the body is the one
+	// APIGoogleGenAI sends; the client authenticates and addresses the model
+	// differently, and the driver reuses the same conversion code.
+	APIGoogleVertex API = "google-vertex"
 )
 
 // anthropicFamily reports whether this protocol carries an Anthropic Messages
@@ -36,8 +41,14 @@ func (a API) anthropicFamily() bool {
 	return a == APIAnthropicMessages || a == APIAnthropicVertex
 }
 
+// googleFamily reports whether this protocol carries a Gemini generateContent
+// body, for the same reason anthropicFamily exists.
+func (a API) googleFamily() bool {
+	return a == APIGoogleGenAI || a == APIGoogleVertex
+}
+
 // VertexConfig is the deployment a Vertex-served model lives in. It is passed
-// as Config.ProtocolConfig to the anthropic/vertex driver.
+// as Config.ProtocolConfig to the anthropic/vertex and google/vertex drivers.
 type VertexConfig struct {
 	// Project is the GCP project ID serving the model.
 	Project string
@@ -48,6 +59,33 @@ type VertexConfig struct {
 
 // ProtocolConfig marks VertexConfig as a driver's construction settings.
 func (VertexConfig) ProtocolConfig() {}
+
+// VertexDefaultRegion is where a model is served when the deployment names no
+// region. Google recommends the global endpoint for availability; a specific
+// region is for data residency.
+const VertexDefaultRegion = "global"
+
+// VertexDeployment reads the deployment out of a Config for a Vertex driver,
+// with the region defaulted. No project is a credential failure named for
+// driver: the deployment is how a Vertex caller says who they are, and both
+// Vertex drivers refuse the same way.
+func VertexDeployment(cfg Config, driver string) (VertexConfig, error) {
+	deployment, err := ProtocolConfigAs[VertexConfig](cfg)
+	if err != nil {
+		return VertexConfig{}, err
+	}
+	if deployment.Project == "" {
+		return VertexConfig{}, &Error{
+			Driver:  driver,
+			Kind:    KindAuth,
+			Message: "no Google Cloud project: set Config.ProtocolConfig to an ai.VertexConfig, or use auth.Config to read it from the environment",
+		}
+	}
+	if deployment.Region == "" {
+		deployment.Region = VertexDefaultRegion
+	}
+	return deployment, nil
+}
 
 // Modality is a kind of content a model accepts as input.
 type Modality string

@@ -122,6 +122,7 @@ var compatRegistry = struct {
 	APIOpenAIChat:        reflect.TypeFor[OpenAIChatCompat](),
 	APIOpenAIResponses:   reflect.TypeFor[OpenAIResponsesCompat](),
 	APIGoogleGenAI:       reflect.TypeFor[GoogleCompat](),
+	APIGoogleVertex:      reflect.TypeFor[GoogleCompat](),
 }}
 
 // RegisterCompat declares the compat type a protocol this package does not

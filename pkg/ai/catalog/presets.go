@@ -190,26 +190,18 @@ func priced(models []ai.Model, prices map[string]ai.Pricing) []ai.Model {
 
 // ─── deployments ───
 
-// The variables a Vertex deployment is named by. They are constants because
-// the row lists them for a caller to read and vertexDeployment reads them for
-// real, and the two saying different things would be undetectable.
-const (
-	vertexProjectEnv = "ANTHROPIC_VERTEX_PROJECT_ID"
-	vertexRegionEnv  = "CLOUD_ML_REGION"
-)
-
-// vertexDeployment reads the project and region a Vertex-served model lives in.
-// The project has no default worth guessing, so a missing one is refused here
-// rather than 400 later. Vertex takes Application Default Credentials, so no
-// credential is among these.
-func vertexDeployment(env func(string) string) (ai.ProtocolConfig, error) {
-	project := strings.TrimSpace(env(vertexProjectEnv))
+// vertexDeployment reads the project and region a Vertex-served model lives in
+// from the row's own variables. The project has no default worth guessing, so
+// a missing one is refused here rather than 400 later. Vertex takes
+// Application Default Credentials, so no credential is among these.
+func vertexDeployment(vars map[string]string, env func(string) string) (ai.ProtocolConfig, error) {
+	project := strings.TrimSpace(env(vars["project"]))
 	if project == "" {
 		return nil, &MissingDeploymentError{
-			EnvVars: []string{vertexProjectEnv},
+			EnvVars: []string{vars["project"]},
 			Note: "Vertex needs a Google Cloud project. Credentials themselves come from " +
 				"Application Default Credentials, not from a variable.",
 		}
 	}
-	return ai.VertexConfig{Project: project, Region: strings.TrimSpace(env(vertexRegionEnv))}, nil
+	return ai.VertexConfig{Project: project, Region: strings.TrimSpace(env(vars["region"]))}, nil
 }

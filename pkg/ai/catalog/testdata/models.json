@@ -1299,6 +1299,253 @@
     }
   },
   {
+    "id": "gemini-3.7-flash",
+    "api": "google-vertex",
+    "name": "Gemini 3.7 Flash",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.6-flash",
+    "api": "google-vertex",
+    "name": "Gemini 3.6 Flash",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.5-flash",
+    "api": "google-vertex",
+    "name": "Gemini 3.5 Flash",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.5-flash-lite",
+    "api": "google-vertex",
+    "name": "Gemini 3.5 Flash-Lite",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.1-flash-lite",
+    "api": "google-vertex",
+    "name": "Gemini 3.1 Flash-Lite",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3.1-pro-preview",
+    "api": "google-vertex",
+    "name": "Gemini 3.1 Pro (preview)",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "preview",
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
+    "id": "gemini-3-flash-preview",
+    "api": "google-vertex",
+    "name": "Gemini 3 Flash (preview)",
+    "vendor": "google-vertex",
+    "context_window": 1048576,
+    "max_output": 65536,
+    "input": [
+      "text",
+      "image"
+    ],
+    "reasoning": [
+      {
+        "effort": "off",
+        "default": true
+      },
+      {
+        "effort": "low",
+        "value": "LOW"
+      },
+      {
+        "effort": "medium",
+        "value": "MEDIUM"
+      },
+      {
+        "effort": "high",
+        "value": "HIGH"
+      }
+    ],
+    "pricing": {},
+    "unsupported": {},
+    "stage": "preview",
+    "compat": {
+      "thinking_level": true
+    }
+  },
+  {
     "id": "deepseek-v4-flash",
     "api": "openai-chat-completions",
     "name": "DeepSeek V4 Flash",

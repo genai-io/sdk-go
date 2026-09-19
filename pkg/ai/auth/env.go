@@ -40,7 +40,7 @@ func Deployment(v catalog.Vendor) (ai.ProtocolConfig, error) {
 	if v.Deployment == nil {
 		return nil, nil
 	}
-	cfg, err := v.Deployment(os.Getenv)
+	cfg, err := v.Deployment(v.DeploymentEnv, os.Getenv)
 	var missing *catalog.MissingDeploymentError
 	if errors.As(err, &missing) {
 		// Reported as a missing credential: from where the caller stands it is

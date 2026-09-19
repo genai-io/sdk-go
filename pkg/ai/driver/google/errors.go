@@ -40,9 +40,6 @@ func (e *statusError) Error() string {
 	return e.message
 }
 
-// fail classifies this protocol's failures.
-var fail = errs.For(Name, details)
-
 // details reads what the endpoint reported. There is no vendor SDK here, so
 // the response travels on the driver's own error type and a 429 that carries
 // Retry-After is honoured rather than falling back to the caller's backoff.

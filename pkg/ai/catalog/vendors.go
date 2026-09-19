@@ -15,6 +15,9 @@ const verified = "2026-08-20"
 // single-vendor endpoints below.
 const verifiedGateways = "2026-08-21"
 
+// verifiedGoogleVertex is the sweep that added Gemini through Vertex AI.
+const verifiedGoogleVertex = "2026-09-17"
+
 // verifiedHyperscalers is the sweep that added the two hyperscaler-hosted
 // OpenAI endpoints below. Neither states limits or prices in the catalog: on
 // Azure the deployment decides them, and on Bedrock the model card does.
@@ -35,6 +38,17 @@ var claudeLine = []ai.Model{
 	{ID: "claude-sonnet-5", Name: "Claude Sonnet 5"},
 	{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6",
 		Compat: claudeAdaptiveCompat, Reasoning: claudeAdaptive46},
+}
+
+// geminiLine is the live Gemini generation as both Google entries serve it.
+var geminiLine = []ai.Model{
+	gemini("gemini-3.7-flash", "Gemini 3.7 Flash"),
+	gemini("gemini-3.6-flash", "Gemini 3.6 Flash"),
+	gemini("gemini-3.5-flash", "Gemini 3.5 Flash"),
+	gemini("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"),
+	gemini("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite"),
+	preview(gemini("gemini-3.1-pro-preview", "Gemini 3.1 Pro (preview)")),
+	preview(gemini("gemini-3-flash-preview", "Gemini 3 Flash (preview)")),
 }
 
 // anthropicModels is claudeLine on the first-party API: the same rows with
@@ -89,8 +103,8 @@ var vendors = []Vendor{
 		// variables below name the deployment, not a credential.
 		KeyEnv: nil,
 		DeploymentEnv: map[string]string{
-			"project": vertexProjectEnv,
-			"region":  vertexRegionEnv,
+			"project": "ANTHROPIC_VERTEX_PROJECT_ID",
+			"region":  "CLOUD_ML_REGION",
 		},
 		Deployment: vertexDeployment,
 		Input:      textImage,
@@ -215,16 +229,32 @@ var vendors = []Vendor{
 		// opt back to a budget through Infer.
 		Compat:    ai.GoogleCompat{ThinkingLevel: true},
 		Reasoning: geminiLevels,
-		Models: []ai.Model{
-			gemini("gemini-3.7-flash", "Gemini 3.7 Flash"),
-			gemini("gemini-3.6-flash", "Gemini 3.6 Flash"),
-			gemini("gemini-3.5-flash", "Gemini 3.5 Flash"),
-			gemini("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"),
-			gemini("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite"),
-			preview(gemini("gemini-3.1-pro-preview", "Gemini 3.1 Pro (preview)")),
-			preview(gemini("gemini-3-flash-preview", "Gemini 3 Flash (preview)")),
+		Models:    geminiLine,
+		Infer:     inferGoogle,
+	},
+	{
+		ID:          "google-vertex",
+		DisplayName: "Google Gemini (Vertex AI)",
+		Order:       35,
+		Verified:    verifiedGoogleVertex,
+		API:         ai.APIGoogleVertex,
+		// Vertex resolves its own endpoint from the deployment region, and
+		// authenticates with Google credentials rather than a key. The two
+		// variables below name the deployment, not a credential; they are the
+		// ones Google's own Gen AI SDK reads.
+		KeyEnv: nil,
+		DeploymentEnv: map[string]string{
+			"project": "GOOGLE_CLOUD_PROJECT",
+			"region":  "GOOGLE_CLOUD_LOCATION",
 		},
-		Infer: inferGoogle,
+		Deployment: vertexDeployment,
+		Input:      textImage,
+		Compat:     ai.GoogleCompat{ThinkingLevel: true},
+		Reasoning:  geminiLevels,
+		Note: "Authenticates with Google Application Default Credentials; set GOOGLE_CLOUD_PROJECT and, optionally, GOOGLE_CLOUD_LOCATION (default global). " +
+			"Vertex does not list its models, so the row below is what a picker shows; Infer sizes any other ID you name.",
+		Models: geminiLine,
+		Infer:  inferGoogle,
 	},
 	{
 		ID:          "deepseek",

@@ -18,9 +18,8 @@ import (
 const Name = string(ai.APIAnthropicVertex)
 
 // DefaultRegion is where a model is served when the deployment names no
-// region. Google recommends the global endpoint for availability; a specific
-// region is for data residency, and carries a price premium.
-const DefaultRegion = "global"
+// region — see ai.VertexDefaultRegion.
+const DefaultRegion = ai.VertexDefaultRegion
 
 func init() { ai.RegisterAPI(ai.APIAnthropicVertex, New) }
 
@@ -28,20 +27,9 @@ func init() { ai.RegisterAPI(ai.APIAnthropicVertex, New) }
 // Config.ProtocolConfig as an ai.VertexConfig; package ai/auth fills one in from the
 // environment.
 func New(cfg ai.Config) (ai.Driver, error) {
-	deployment, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
+	deployment, err := ai.VertexDeployment(cfg, Name)
 	if err != nil {
 		return nil, err
-	}
-	if deployment.Project == "" {
-		return nil, &ai.Error{
-			Driver:  Name,
-			Kind:    ai.KindAuth,
-			Message: "no Google Cloud project: set Config.ProtocolConfig to an ai.VertexConfig, or use auth.Config to read it from the environment",
-		}
-	}
-	region := deployment.Region
-	if region == "" {
-		region = DefaultRegion
 	}
 
 	// WithGoogleAuth resolves Application Default Credentials and installs the
@@ -51,7 +39,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	//
 	// The context is the process's own: the driver-factory seam carries none. A
 	// caller who needs one mints the credential and uses anthropic.NewWithClient.
-	auth, err := googleAuth(context.Background(), region, deployment.Project)
+	auth, err := googleAuth(context.Background(), deployment.Region, deployment.Project)
 	if err != nil {
 		return nil, err
 	}

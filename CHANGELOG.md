@@ -9,6 +9,12 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Changed
+
+- **The module needs Go 1.26 now.** `golang.org/x/oauth2` declares `go 1.26.0`
+  from v0.37.0 on, and a module inherits the highest directive in its graph.
+  CI runs 1.26 alone until the two part again.
+
 ## [0.6.0] - 2026-09-19
 
 Gemini reaches Vertex AI the way Claude already did, and the one seam that

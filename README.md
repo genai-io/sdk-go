@@ -53,7 +53,7 @@ protocols, and an agent runtime that runs the loop around it.
 go get github.com/genai-io/sdk-go
 ```
 
-Requires Go 1.25 or later.
+Requires Go 1.26 or later.
 
 ## The client — `pkg/ai`
 

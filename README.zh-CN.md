@@ -5,7 +5,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/genai-io/sdk-go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-一个大模型的 Go SDK，分两个包：在 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 和 Google Gemini 四种协议之上提供**同一套带类型的 API**，以及一个跑在它外面那圈循环的 agent 运行时。
+一个大模型的 Go SDK，分两个包：在 Anthropic、OpenAI、Google 的六种协议之上提供**同一套带类型的 API**，以及一个跑在它外面那圈循环的 agent 运行时。
 
 **`pkg/ai` —— 一次模型调用**
 
@@ -13,7 +13,7 @@
 - **流式** —— 文本、thinking、工具调用、图片共用一套 start/delta/end 生命周期。
 - **工具调用** —— schema 从你的参数 struct 推导，参数在你的代码运行前先校验。
 - **结构化输出** —— `CompleteAs[T]` 推导 schema、约束生成、解码答案。
-- **带类型的错误** —— 认证、限流、超上下文、不支持,不是要去匹配的子串。
+- **带类型的错误** —— 认证、限流、超上下文、不支持，不是要去匹配的子串。
 - **模型目录** —— 28 家厂商、62 个模型；端点、限额、价格都是数据。
 - **不会顺手读凭证** —— `pkg/ai` 不读任何环境变量、不读任何文件。
 

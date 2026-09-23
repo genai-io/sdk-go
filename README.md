@@ -5,9 +5,9 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/genai-io/sdk-go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-A Go SDK for large language models, in two packages: one typed API over the
-Anthropic Messages, OpenAI Chat Completions, OpenAI Responses and Google Gemini
-protocols, and an agent runtime that runs the loop around it.
+A Go SDK for large language models, in two packages: one typed API over six
+protocols from Anthropic, OpenAI and Google, and an agent runtime that runs the
+loop around it.
 
 **`pkg/ai` — one model call**
 

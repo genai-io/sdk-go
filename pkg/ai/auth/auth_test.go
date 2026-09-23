@@ -276,7 +276,7 @@ func TestAvailableReportsWhatCanActuallyBeReached(t *testing.T) {
 	}
 }
 
-func TestProviderCarriesTheCredentialAndTheCatalog(t *testing.T) {
+func TestProviderCarriesTheCredentialAndTheProtocol(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "sk-deepseek")
 	t.Setenv("DEEPSEEK_BASE_URL", "")
 
@@ -287,11 +287,8 @@ func TestProviderCarriesTheCredentialAndTheCatalog(t *testing.T) {
 	if p.ID() != "deepseek" || p.API() == "" {
 		t.Errorf("provider = %s/%s, want the vendor's identity and protocol", p.ID(), p.API())
 	}
-	if len(p.Models()) == 0 {
-		t.Error("the provider was seeded with no models")
-	}
-	// And an ID the table does not list still arrives resolved, which is what
-	// the resolver the vendor installs is for.
+	// The catalog lists no models, so every ID arrives resolved through the
+	// resolver the vendor installs.
 	m, listed := p.Model("deepseek-v9-pro")
 	if listed {
 		t.Fatal("an unlisted model was reported as listed")

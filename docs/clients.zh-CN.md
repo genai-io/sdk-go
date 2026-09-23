@@ -5,11 +5,11 @@
 ```
    "openai/gpt-4.1"          一个字符串，仅此而已
           │
-          │  catalog.Model      这个模型自身的事实
+          │  catalog.Model      这家厂商的协议事实
           ▼
-       ai.Model               它说哪种协议、接受哪些模态、
-          │                   推理档位梯子、以及它做不了什么——
-          │                   限额和价格由你来填
+       ai.Model               它说哪种协议、发到哪里、有哪些怪癖——
+          │                   限额、价格、模态和推理档位
+          │                   由你来填
           │
           │  auth.Config       凭证，以及发到哪里
           ▼
@@ -120,7 +120,7 @@ client, err := ai.New(ai.Config{
 })
 ```
 
-`catalog.Model` 是**单独的那一次查表**——端点、推理方言和该说哪种协议，**不联网、不需要凭证**。它不写上下文窗口、最大输出和价格：这些变得比协议快，由应用用自己的数据填到 `ContextWindow`、`MaxOutput`、`Pricing` 上。目录里压根没有的模型，自己填一个 `ai.Model` 就行。
+`catalog.Model` 是**单独的那一次查表**——给一个 `厂商/模型` 引用，查出端点、协议和怪癖，**不联网、不需要凭证**。目录只列厂商、不列模型：`ContextWindow`、`MaxOutput`、`Pricing`、`Input`、`Reasoning` 由应用用自己的数据填。`Reasoning` 只写模型提供哪几档，每一档在线上的写法由 SDK 按协议推出来，`Model.WireEfforts` 说明协议能区分哪几档。
 
 ## 停在 `ai.NewDriver`
 

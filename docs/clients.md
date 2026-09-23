@@ -6,11 +6,11 @@ you already are, and each step adds one nameable thing:
 ```
    "openai/gpt-4.1"          a string, and nothing else
           │
-          │  catalog.Model      the model's own facts
+          │  catalog.Model      the vendor's protocol facts
           ▼
-       ai.Model               which protocol it speaks, the modalities it
-          │                   accepts, its reasoning ladder, what it cannot
-          │                   do — limits and prices are yours to add
+       ai.Model               which protocol it speaks, where, and its
+          │                   quirks — limits, prices, modalities and
+          │                   reasoning efforts are yours to add
           │
           │  auth.Config       the credential, and where to send it
           ▼
@@ -137,11 +137,12 @@ client, err := ai.New(ai.Config{
 })
 ```
 
-`catalog.Model` is the lookup on its own — endpoint, reasoning dialect and the
-protocol to speak, with no network call and no credential. It states no
-context window, output cap or price: those change faster than a protocol, so
-set `ContextWindow`, `MaxOutput` and `Pricing` on the model from your own data.
-Fill in an `ai.Model` yourself for a model the catalog has never heard of.
+`catalog.Model` is the lookup on its own — endpoint, protocol and quirks for a
+`vendor/model` reference, with no network call and no credential. The catalog
+lists vendors, not models: set `ContextWindow`, `MaxOutput`, `Pricing`, `Input`
+and `Reasoning` on the model from your own data. `Reasoning` names only the
+efforts a model offers; the SDK derives each one's wire value from the
+protocol, and `Model.WireEfforts` says which efforts it can tell apart.
 
 ## Stopping at `ai.NewDriver`
 

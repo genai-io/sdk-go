@@ -59,7 +59,18 @@ func main() {
 }
 
 func run(ctx context.Context, model, system string, effort ai.Effort, prompt string) error {
-	client, err := auth.Client(model)
+	cfg, err := auth.Config(model)
+	if err != nil {
+		return err
+	}
+	// The catalog knows the protocol, not the model: asked for an effort,
+	// say the model offers every one its protocol can express.
+	if effort != ai.EffortDefault {
+		for _, e := range cfg.Model.WireEfforts() {
+			cfg.Model.Reasoning = append(cfg.Model.Reasoning, ai.ReasoningLevel{Effort: e})
+		}
+	}
+	client, err := ai.New(cfg)
 	if err != nil {
 		return err
 	}
@@ -122,11 +133,7 @@ func explain(err error) error {
 func listVendors() {
 	available := auth.Available()
 	for _, v := range available {
-		models := ""
-		if known := v.ModelList(); len(known) > 0 {
-			models = " — e.g. " + known[0].String()
-		}
-		fmt.Printf("%-12s %-20s %s%s\n", v.ID, v.DisplayName, v.API, models)
+		fmt.Printf("%-12s %-20s %s\n", v.ID, v.DisplayName, v.API)
 	}
 	if len(available) == 0 {
 		fmt.Println("no credentials found; set one of:")

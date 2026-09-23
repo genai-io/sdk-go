@@ -27,15 +27,15 @@ vendor.**
 Most vendors ship an endpoint speaking somebody else's protocol. DeepSeek,
 Moonshot and Ollama speak OpenAI Chat Completions; MiniMax, Xiaomi MiMo and
 Volcengine speak Anthropic Messages. What actually distinguishes them is a base
-URL, an environment variable, a reasoning dialect and a list of models — four
-things that are all data.
+URL, an environment variable and a reasoning dialect — three things that are
+all data.
 
 So **a vendor is a row in `catalog/vendors.go`, not a package.** Adding an
 OpenAI-compatible endpoint is an entry in a table. Only a new wire format needs
 Go code.
 
 The test of whether this holds: no driver contains a vendor name. Every request
-builder branches on `Compat` fields and `ReasoningLevel` data instead.
+builder branches on `Compat` fields and the resolved `ReasoningLevel` instead.
 
 ## The layers
 
@@ -226,10 +226,13 @@ exists everywhere, and every vendor spells it differently — Anthropic wants
 `thinking.budget_tokens` or `output_config.effort`, Gemini wants
 `thinkingLevel`, DashScope wants `enable_thinking` plus `thinking_budget`. So
 it is `ai.WithEffort(ai.EffortHigh)`, and each `Model` carries a
-`[]ReasoningLevel` ladder mapping the rung onto what its endpoint wants.
+`[]ReasoningLevel` ladder naming the efforts it offers.
 
-The ladder is data, not code: no driver contains an effort table. A model may
-also declare a rung this package has never heard of; asking for it by exact
+The spelling is the protocol's, so it is derived once rather than stated per
+model: `ResolveLevel` fills a rung that states no `Value` or `Budget` from the
+model's `API` and `Compat`, and no driver contains an effort table. A rung that
+does state its value — a live listing's, say — is sent as stated, and a model
+may declare a rung this package has never heard of; asking for it by exact
 name sends it. A name that is neither portable nor in that model's ladder is
 refused, and the error names what the model does offer.
 
@@ -420,13 +423,16 @@ off and high returns high, and nothing tells the caller. The direction is
 deliberate — quietly reasoning *less* than asked is the more surprising failure
 — but the silence is not something a caller can currently observe.
 
-**The catalog states no prices and no token limits.** A rate card or a
-context window changes far more often than a protocol, and an SDK release is
-the wrong cadence for it. The catalog keeps what the wire needs — endpoint,
-protocol, reasoning dialect, quirks — and an application sets `ContextWindow`,
-`MaxOutput` and `Pricing` on `ai.Model` from its own data; `Pricing.Cost` does
-the arithmetic. Left unset, a window reports no headroom and a cost comes out
-zero rather than a guess, and the Anthropic driver falls back to its own
+**The catalog lists vendors, not models.** Which models a vendor serves, their
+context windows, output caps, prices, modalities and the reasoning efforts they
+offer change far more often than a protocol, and an SDK release is the wrong
+cadence for them. The catalog keeps what the wire needs — endpoint, credential
+variables, protocol, quirks — and an application sets the rest on `ai.Model`
+from its own data. `Reasoning` names only the efforts a model offers:
+`ResolveLevel` fills each rung's wire value from the protocol and `Compat`, so
+the dialect lives in one place, and `Model.WireEfforts` says which efforts that
+dialect can tell apart. Left unset, a window reports no headroom, a cost comes
+out zero rather than a guess, and the Anthropic driver falls back to its own
 `max_tokens` default.
 
 ## Testing

@@ -5,24 +5,12 @@ import (
 	"strings"
 )
 
-// UnknownModelError reports a bare model ID no vendor lists. Qualify it with a
-// vendor ("deepseek/some-new-model") to use a model the catalog has not caught
-// up with.
+// UnknownModelError reports a model reference that names no vendor. The
+// catalog lists vendors, not models, so a reference is "vendor/model".
 type UnknownModelError struct{ Ref string }
 
 func (e *UnknownModelError) Error() string {
-	return fmt.Sprintf("catalog: no vendor lists model %q; qualify it as \"vendor/%s\"", e.Ref, e.Ref)
-}
-
-// AmbiguousModelError reports a bare model ID served by more than one vendor.
-type AmbiguousModelError struct {
-	Ref        string
-	Candidates []string
-}
-
-func (e *AmbiguousModelError) Error() string {
-	return fmt.Sprintf("catalog: model %q is served by several vendors (%s); qualify it",
-		e.Ref, strings.Join(e.Candidates, ", "))
+	return fmt.Sprintf("catalog: %q names no vendor; write it as \"vendor/%s\"", e.Ref, e.Ref)
 }
 
 // MissingDeploymentError reports a deployment-scoped setting a vendor cannot

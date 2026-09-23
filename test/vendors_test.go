@@ -315,7 +315,14 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 		ref    string
 		effort ai.Effort
 		want   map[string]string // field the endpoint must receive
+		absent []string          // fields it must not
 	}{
+		// Saying nothing is not saying off: unset sends no field, and
+		// DeepSeek reasons by default, so the caller is billed for it.
+		"deepseek unset sends nothing": {
+			ref: "deepseek/deepseek-v4-pro", effort: ai.EffortDefault,
+			absent: []string{"thinking", "reasoning_effort"},
+		},
 		"deepseek off is an explicit disable": {
 			ref: "deepseek/deepseek-v4-pro", effort: ai.EffortOff,
 			want: map[string]string{"thinking": `{"type":"disabled"}`},
@@ -326,7 +333,11 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 		},
 		"qwen wants a flag and a budget": {
 			ref: "alibaba/qwen3.7-plus", effort: ai.EffortMedium,
-			want: map[string]string{"enable_thinking": "true"},
+			want: map[string]string{"enable_thinking": "true", "thinking_budget": "32000"},
+		},
+		"kimi takes a switch": {
+			ref: "moonshot/kimi-k3", effort: ai.EffortHigh,
+			want: map[string]string{"thinking": `{"type":"enabled"}`},
 		},
 	}
 
@@ -335,6 +346,11 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 			model, err := catalog.Model(tc.ref)
 			if err != nil {
 				t.Fatalf("catalog.Model: %v", err)
+			}
+			// The ladder names efforts only; the wire value comes from the
+			// vendor's protocol.
+			for _, e := range model.WireEfforts() {
+				model.Reasoning = append(model.Reasoning, ai.ReasoningLevel{Effort: e})
 			}
 			var body map[string]any
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +367,12 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 			}
 			_, _ = client.Complete(context.Background(),
 				[]ai.Message{ai.UserMessage("hi")}, ai.WithEffort(tc.effort))
+
+			for _, field := range tc.absent {
+				if got, present := body[field]; present {
+					t.Errorf("%s = %v on the wire, want it absent", field, got)
+				}
+			}
 
 			for field, want := range tc.want {
 				got, present := body[field]
@@ -415,39 +437,6 @@ func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
 				t.Errorf("reasoning_content = %q, want the model's own thinking", got)
 			}
 		})
-	}
-}
-
-// And the trap itself: on DeepSeek, saying nothing is not the same as saying
-// off. A caller who leaves Effort unset is reasoning, and paying for it.
-func TestUnsetEffortIsNotOffOnAModelThatReasonsByDefault(t *testing.T) {
-	model, err := catalog.Model("deepseek/deepseek-v4-pro")
-	if err != nil {
-		t.Fatalf("catalog.Model: %v", err)
-	}
-	def, ok := model.DefaultLevel()
-	if !ok {
-		t.Fatal("DeepSeek states a default rung; without one this trap is invisible")
-	}
-	if def.Effort == ai.EffortOff {
-		t.Skip("DeepSeek now defaults to off — update the example that warns about this")
-	}
-	if !model.Reasons() {
-		t.Error("a model with a default rung must report that it reasons")
-	}
-}
-
-// Rate cards and token limits are the application's data: a row that carried
-// one would be a second, slower-moving copy of a figure the vendor changes at
-// will.
-func TestNoRowStatesAPriceOrALimit(t *testing.T) {
-	for _, m := range catalog.Models() {
-		if m.Pricing.Known() {
-			t.Errorf("%s states a rate card; prices belong to the application", m)
-		}
-		if m.ContextWindow != 0 || m.MaxOutput != 0 {
-			t.Errorf("%s states limits %d/%d; limits belong to the application", m, m.ContextWindow, m.MaxOutput)
-		}
 	}
 }
 
@@ -541,17 +530,16 @@ func TestReturnedModelsDoNotAliasWhatTheyCameFrom(t *testing.T) {
 	}
 
 	// The same guarantee from the catalog, whose tables are package-level.
-	m, err := catalog.Model("deepseek/deepseek-v4-pro")
+	m, err := catalog.Model("copilot/gpt-5.5")
 	if err != nil {
 		t.Fatalf("catalog.Model: %v", err)
 	}
-	rungs := len(m.Reasoning)
-	m.Reasoning = append(m.Reasoning, ai.ReasoningLevel{Effort: ai.EffortMax, Value: "tampered"})
-	again, err := catalog.Model("deepseek/deepseek-v4-pro")
+	m.Headers["Editor-Version"] = "tampered"
+	again, err := catalog.Model("copilot/gpt-5.5")
 	if err != nil {
 		t.Fatalf("catalog.Model: %v", err)
 	}
-	if len(again.Reasoning) != rungs {
-		t.Errorf("the catalog ladder grew to %d rungs; a caller edited the shared table", len(again.Reasoning))
+	if again.Headers["Editor-Version"] == "tampered" {
+		t.Error("editing a resolved model's headers changed the shared table")
 	}
 }

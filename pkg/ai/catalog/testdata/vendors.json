@@ -1,0 +1,408 @@
+[
+  {
+    "id": "anthropic",
+    "display_name": "Anthropic",
+    "order": 10,
+    "api": "anthropic-messages",
+    "base_url_env": "ANTHROPIC_BASE_URL",
+    "key_env": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    },
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "anthropic-vertex",
+    "display_name": "Anthropic (Vertex AI)",
+    "order": 15,
+    "api": "anthropic-vertex",
+    "deployment_env": {
+      "project": "ANTHROPIC_VERTEX_PROJECT_ID",
+      "region": "CLOUD_ML_REGION"
+    },
+    "compat": {
+      "force_adaptive_thinking": true,
+      "no_temperature": true
+    },
+    "verified": "2026-08-21",
+    "note": "Authenticates with Google Application Default Credentials; set ANTHROPIC_VERTEX_PROJECT_ID and, optionally, CLOUD_ML_REGION."
+  },
+  {
+    "id": "openai",
+    "display_name": "OpenAI",
+    "order": 20,
+    "api": "openai-responses",
+    "base_url_env": "OPENAI_BASE_URL",
+    "key_env": [
+      "OPENAI_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-20",
+    "note": "This SDK cannot yet read the endpoint's cache-write token count; those tokens are reported as ordinary input."
+  },
+  {
+    "id": "azure-openai",
+    "display_name": "OpenAI (Azure)",
+    "order": 22,
+    "api": "openai-responses",
+    "base_url_env": "AZURE_OPENAI_ENDPOINT",
+    "base_url_suffix": "/openai/v1",
+    "requires_base_url": true,
+    "key_env": [
+      "AZURE_OPENAI_API_KEY"
+    ],
+    "compat": {
+      "no_long_cache_retention": true
+    },
+    "verified": "2026-08-21",
+    "note": "Set AZURE_OPENAI_ENDPOINT to the resource URL (https://YOUR-RESOURCE.openai.azure.com); the /openai/v1 suffix is added for you. A model ID here is a deployment name chosen by whoever created the resource, not an OpenAI model ID. Which API versions a resource serves depends on its region."
+  },
+  {
+    "id": "bedrock-openai",
+    "display_name": "OpenAI (Amazon Bedrock)",
+    "order": 25,
+    "api": "openai-chat-completions",
+    "base_url_env": "AWS_BEDROCK_BASE_URL",
+    "base_url_suffix": "/openai/v1",
+    "requires_base_url": true,
+    "key_env": [
+      "AWS_BEARER_TOKEN_BEDROCK"
+    ],
+    "compat": {
+      "thinking": "effort"
+    },
+    "verified": "2026-08-21",
+    "note": "Set AWS_BEDROCK_BASE_URL to https://bedrock-runtime.REGION.amazonaws.com and AWS_BEARER_TOKEN_BEDROCK to a Bedrock API key; the /openai/v1 suffix is added for you. This endpoint speaks Chat Completions only — Bedrock publishes no /responses — so the server-side tools and reasoning-item reuse of the openai entry are not reachable through it."
+  },
+  {
+    "id": "google",
+    "display_name": "Google Gemini",
+    "order": 30,
+    "api": "google-genai",
+    "base_url_env": "GEMINI_BASE_URL",
+    "key_env": [
+      "GOOGLE_API_KEY",
+      "GEMINI_API_KEY"
+    ],
+    "compat": {
+      "thinking_level": true
+    },
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "google-vertex",
+    "display_name": "Google Gemini (Vertex AI)",
+    "order": 35,
+    "api": "google-vertex",
+    "deployment_env": {
+      "project": "GOOGLE_CLOUD_PROJECT",
+      "region": "GOOGLE_CLOUD_LOCATION"
+    },
+    "compat": {
+      "thinking_level": true
+    },
+    "verified": "2026-09-17",
+    "note": "Authenticates with Google Application Default Credentials; set GOOGLE_CLOUD_PROJECT and, optionally, GOOGLE_CLOUD_LOCATION (default global)."
+  },
+  {
+    "id": "deepseek",
+    "display_name": "DeepSeek",
+    "order": 40,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.deepseek.com",
+    "base_url_env": "DEEPSEEK_BASE_URL",
+    "key_env": [
+      "DEEPSEEK_API_KEY"
+    ],
+    "compat": {
+      "thinking": "effort_or_disable",
+      "reasoning_content": true
+    },
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "sensenova",
+    "display_name": "SenseNova",
+    "order": 50,
+    "api": "openai-chat-completions",
+    "base_url": "https://token.sensenova.cn/v1",
+    "base_url_env": "SENSENOVA_BASE_URL",
+    "key_env": [
+      "SENSENOVA_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "minimax",
+    "display_name": "MiniMax",
+    "order": 60,
+    "api": "anthropic-messages",
+    "base_url": "https://api.minimaxi.com/anthropic",
+    "base_url_env": "MINIMAX_BASE_URL",
+    "key_env": [
+      "MINIMAX_API_KEY"
+    ],
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "moonshot",
+    "display_name": "Moonshot (Kimi)",
+    "order": 70,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.moonshot.cn/v1",
+    "base_url_env": "MOONSHOT_BASE_URL",
+    "key_env": [
+      "MOONSHOT_API_KEY"
+    ],
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    },
+    "verified": "2026-08-20",
+    "note": "The mainland endpoint is api.moonshot.cn; point MOONSHOT_BASE_URL at api.moonshot.ai for the international one."
+  },
+  {
+    "id": "alibaba",
+    "display_name": "Alibaba (Qwen)",
+    "order": 80,
+    "api": "openai-chat-completions",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "base_url_env": "DASHSCOPE_BASE_URL",
+    "key_env": [
+      "DASHSCOPE_API_KEY"
+    ],
+    "compat": {
+      "thinking": "enable_thinking",
+      "reasoning_content": true
+    },
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "bigmodel",
+    "display_name": "Z.ai (GLM)",
+    "order": 90,
+    "api": "openai-chat-completions",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "base_url_env": "BIGMODEL_BASE_URL",
+    "key_env": [
+      "BIGMODEL_API_KEY"
+    ],
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    },
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "ollama",
+    "display_name": "Ollama (local)",
+    "order": 100,
+    "api": "openai-chat-completions",
+    "base_url": "http://localhost:11434/v1",
+    "base_url_env": "OLLAMA_BASE_URL",
+    "base_url_suffix": "/v1",
+    "compat": {},
+    "verified": "2026-08-20",
+    "note": "A local server, so there is no credential to set."
+  },
+  {
+    "id": "mimo",
+    "display_name": "Xiaomi MiMo",
+    "order": 110,
+    "api": "anthropic-messages",
+    "base_url": "https://api.xiaomimimo.com/anthropic",
+    "base_url_env": "MIMO_BASE_URL",
+    "key_env": [
+      "MIMO_API_KEY"
+    ],
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "volcengine",
+    "display_name": "Volcengine Ark",
+    "order": 120,
+    "api": "anthropic-messages",
+    "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+    "base_url_env": "VOLCENGINE_BASE_URL",
+    "key_env": [
+      "VOLCENGINE_API_KEY"
+    ],
+    "compat": {
+      "bearer_auth": true
+    },
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "agnesai",
+    "display_name": "Agnes-AI",
+    "order": 130,
+    "api": "openai-chat-completions",
+    "base_url": "https://apihub.agnes-ai.com/v1",
+    "base_url_env": "AGNESAI_BASE_URL",
+    "key_env": [
+      "AGNESAI_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-20"
+  },
+  {
+    "id": "copilot",
+    "display_name": "GitHub Copilot",
+    "order": 140,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.individual.githubcopilot.com",
+    "compat": {},
+    "headers": {
+      "Copilot-Integration-Id": "vscode-chat",
+      "Editor-Plugin-Version": "copilot-chat/0.35.0",
+      "Editor-Version": "vscode/1.107.0"
+    },
+    "verified": "2026-08-21",
+    "note": "Copilot authenticates a person, not a service: there is no API key. Sign in with auth.Login(ctx, \"copilot\", ...), which runs GitHub's device-code grant and stores the result. The token it issues lasts about half an hour and is renewed for you."
+  },
+  {
+    "id": "openai-codex",
+    "display_name": "ChatGPT (Codex)",
+    "order": 145,
+    "api": "openai-responses",
+    "base_url": "https://chatgpt.com/backend-api/codex",
+    "compat": {
+      "stateless": true
+    },
+    "verified": "2026-08-21",
+    "note": "A ChatGPT subscription rather than an API key. Sign in with auth.Login(ctx, \"openai-codex\", ...), which runs the PKCE browser grant. The endpoint and client identifier come from OpenAI's Codex CLI, not from published API documentation, and are not covered by the API's compatibility promises."
+  },
+  {
+    "id": "openrouter",
+    "display_name": "OpenRouter",
+    "order": 150,
+    "api": "openai-chat-completions",
+    "base_url": "https://openrouter.ai/api/v1",
+    "base_url_env": "OPENROUTER_BASE_URL",
+    "key_env": [
+      "OPENROUTER_API_KEY"
+    ],
+    "compat": {
+      "thinking": "reasoning_object"
+    },
+    "verified": "2026-08-21",
+    "note": "A gateway over many upstreams; it normalizes reasoning onto reasoning:{effort}."
+  },
+  {
+    "id": "xai",
+    "display_name": "xAI (Grok)",
+    "order": 160,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.x.ai/v1",
+    "base_url_env": "XAI_BASE_URL",
+    "key_env": [
+      "XAI_API_KEY"
+    ],
+    "compat": {
+      "thinking": "effort"
+    },
+    "verified": "2026-08-21"
+  },
+  {
+    "id": "zai",
+    "display_name": "Z.ai (international)",
+    "order": 170,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.z.ai/api/paas/v4",
+    "base_url_env": "ZAI_BASE_URL",
+    "key_env": [
+      "ZAI_API_KEY"
+    ],
+    "compat": {
+      "thinking": "thinking_type",
+      "reasoning_content": true
+    },
+    "verified": "2026-08-21",
+    "note": "Z.ai's international endpoint. A Coding Plan subscription uses a different path — set ZAI_BASE_URL to https://api.z.ai/api/coding/paas/v4."
+  },
+  {
+    "id": "groq",
+    "display_name": "Groq",
+    "order": 180,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.groq.com/openai/v1",
+    "base_url_env": "GROQ_BASE_URL",
+    "key_env": [
+      "GROQ_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-21",
+    "note": "No reasoning switch is stated; set Compat on a model you know reasons."
+  },
+  {
+    "id": "cerebras",
+    "display_name": "Cerebras",
+    "order": 190,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.cerebras.ai/v1",
+    "base_url_env": "CEREBRAS_BASE_URL",
+    "key_env": [
+      "CEREBRAS_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-21",
+    "note": "No reasoning switch is stated; set Compat on a model you know reasons."
+  },
+  {
+    "id": "together",
+    "display_name": "Together AI",
+    "order": 200,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.together.ai/v1",
+    "base_url_env": "TOGETHER_BASE_URL",
+    "key_env": [
+      "TOGETHER_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-21"
+  },
+  {
+    "id": "fireworks",
+    "display_name": "Fireworks AI",
+    "order": 210,
+    "api": "openai-chat-completions",
+    "base_url": "https://api.fireworks.ai/inference/v1",
+    "base_url_env": "FIREWORKS_BASE_URL",
+    "key_env": [
+      "FIREWORKS_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-21"
+  },
+  {
+    "id": "nvidia",
+    "display_name": "NVIDIA NIM",
+    "order": 220,
+    "api": "openai-chat-completions",
+    "base_url": "https://integrate.api.nvidia.com/v1",
+    "base_url_env": "NVIDIA_BASE_URL",
+    "key_env": [
+      "NVIDIA_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-21"
+  },
+  {
+    "id": "huggingface",
+    "display_name": "Hugging Face",
+    "order": 230,
+    "api": "openai-chat-completions",
+    "base_url": "https://router.huggingface.co/v1",
+    "base_url_env": "HF_BASE_URL",
+    "key_env": [
+      "HF_TOKEN",
+      "HUGGINGFACE_API_KEY"
+    ],
+    "compat": {},
+    "verified": "2026-08-21"
+  }
+]

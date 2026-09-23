@@ -45,9 +45,8 @@ func compatName(c any) string {
 }
 
 // TestCatalogInvariants checks the properties the hand-written table is written
-// on and nothing enforces: a duplicated Order shuffles a picker, a mistyped
-// Compat is read as the zero value and ignored, a ladder with no dialect never
-// reaches the wire.
+// on and nothing enforces: a duplicated Order shuffles a picker, and a mistyped
+// Compat is read as the zero value and ignored.
 func TestCatalogInvariants(t *testing.T) {
 	seenID := map[string]string{}
 	seenOrder := map[int]string{}
@@ -58,8 +57,6 @@ func TestCatalogInvariants(t *testing.T) {
 			checkVendorProtocol(t, v)
 			checkVendorCredential(t, v)
 			checkVendorEndpoint(t, v)
-			checkVendorReasoning(t, v)
-			checkVendorModels(t, v)
 
 			if _, err := time.Parse("2006-01-02", v.Verified); err != nil {
 				t.Errorf("Verified = %q, want a YYYY-MM-DD date: %v", v.Verified, err)
@@ -103,11 +100,6 @@ func checkVendorProtocol(t *testing.T, v Vendor) {
 	if got := compatName(v.Compat); got != "" && got != want {
 		t.Errorf("Compat is %s but the endpoint speaks %s, which reads %s; "+
 			"the mismatch is silently ignored rather than reported", got, v.API, want)
-	}
-	for _, m := range v.Models {
-		if got := compatName(m.Compat); got != "" && got != want {
-			t.Errorf("model %s carries %s but the endpoint speaks %s, which reads %s", m.ID, got, v.API, want)
-		}
 	}
 }
 
@@ -156,81 +148,6 @@ func checkVendorEndpoint(t *testing.T, v Vendor) {
 	}
 }
 
-func checkVendorReasoning(t *testing.T, v Vendor) {
-	t.Helper()
-	checkLadder(t, "vendor default", v.Reasoning)
-	for _, m := range v.Models {
-		checkLadder(t, "model "+m.ID, m.Reasoning)
-	}
-
-	// A ladder is only a vocabulary; the dialect is what puts a rung on the wire.
-	// On Chat Completions that is Compat.Thinking, whose zero value means "no
-	// reasoning switch" — so a ladder without one is dropped, silently.
-	if v.API != ai.APIOpenAIChat {
-		return
-	}
-	compat := ai.CompatOf[ai.OpenAIChatCompat](ai.Model{Compat: v.Compat})
-	for _, ladder := range append([][]ai.ReasoningLevel{v.Reasoning}, laddersOf(v.Models)...) {
-		if len(ladder) > 0 && compat.Thinking == ai.ThinkingNone {
-			t.Error("declares a reasoning ladder but states no Compat.Thinking, " +
-				"so every rung is dropped before the request is sent")
-			return
-		}
-	}
-}
-
-func laddersOf(models []ai.Model) [][]ai.ReasoningLevel {
-	out := make([][]ai.ReasoningLevel, 0, len(models))
-	for _, m := range models {
-		out = append(out, m.Reasoning)
-	}
-	return out
-}
-
-func checkLadder(t *testing.T, what string, ladder []ai.ReasoningLevel) {
-	t.Helper()
-	defaults := 0
-	seen := map[ai.Effort]bool{}
-	for _, rung := range ladder {
-		if rung.Default {
-			defaults++
-		}
-		if seen[rung.Effort] {
-			t.Errorf("%s: repeats the %q rung; the second is unreachable", what, rung.Effort)
-		}
-		seen[rung.Effort] = true
-	}
-	if defaults > 1 {
-		t.Errorf("%s: %d rungs are marked Default; only the first is ever used, "+
-			"so the others say something that is not true", what, defaults)
-	}
-}
-
-func checkVendorModels(t *testing.T, v Vendor) {
-	t.Helper()
-	seen := map[string]bool{}
-	for _, m := range v.Models {
-		if m.ID == "" {
-			t.Error("a model row has no ID")
-			continue
-		}
-		key := strings.ToLower(m.ID)
-		if seen[key] {
-			// Lookup is case-insensitive and takes the first match, so the
-			// second row is dead weight that still shows up in a picker.
-			t.Errorf("model %q is listed twice; only the first is reachable", m.ID)
-		}
-		seen[key] = true
-		if m.API != "" && m.API != v.API {
-			t.Errorf("model %q states API %q, which its vendor overwrites", m.ID, m.API)
-		}
-		if m.Stage == ai.StageRetired && m.Replacement == "" {
-			t.Errorf("model %q is retired but names no replacement, which is the "+
-				"only reason to keep listing it", m.ID)
-		}
-	}
-}
-
 // TestAliasesPointAtRows keeps the redirection honest: an alias for a row that
 // no longer exists resolves to nothing and is worse than no alias at all,
 // because it reads as though the old spelling still works.
@@ -256,12 +173,13 @@ func TestAModelReferenceResolves(t *testing.T) {
 		wantVendor string
 		wantErr    bool
 	}{
-		"qualified":            {ref: "minimax/MiniMax-M3", wantVendor: "minimax"},
-		"qualified, any case":  {ref: "MiniMax/MiniMax-M3", wantVendor: "minimax"},
-		"the misspelt vendor":  {ref: "minmax/MiniMax-M3", wantVendor: "minimax"},
-		"unlisted, qualified":  {ref: "minimax/MiniMax-M9", wantVendor: "minimax"},
-		"bare and unambiguous": {ref: "deepseek-v4-pro", wantVendor: "deepseek"},
-		"bare and unknown":     {ref: "no-such-model", wantErr: true},
+		"qualified":           {ref: "minimax/MiniMax-M3", wantVendor: "minimax"},
+		"qualified, any case": {ref: "MiniMax/MiniMax-M3", wantVendor: "minimax"},
+		"the misspelt vendor": {ref: "minmax/MiniMax-M3", wantVendor: "minimax"},
+		"unlisted, qualified": {ref: "minimax/MiniMax-M9", wantVendor: "minimax"},
+		// The catalog lists no models, so nothing can be inferred from one.
+		"bare":                 {ref: "deepseek-v4-pro", wantErr: true},
+		"unknown vendor":       {ref: "nobody/some-model", wantErr: true},
 		"empty":                {ref: "  ", wantErr: true},
 		"vendor with no model": {ref: "deepseek/", wantErr: true},
 	}
@@ -282,18 +200,6 @@ func TestAModelReferenceResolves(t *testing.T) {
 				t.Errorf("Vendor = %q, want %q", m.Vendor, tc.wantVendor)
 			}
 		})
-	}
-}
-
-// TestABareModelNameSkipsVendorsNeedingDeployment pins the rule that keeps one
-// alternate hosting vendor from making every model it serves ambiguous.
-func TestABareModelNameSkipsVendorsNeedingDeployment(t *testing.T) {
-	m, err := Model("claude-opus-5")
-	if err != nil {
-		t.Fatalf("Model: %v", err)
-	}
-	if m.Vendor != "anthropic" {
-		t.Errorf("Vendor = %q, want the first-party API rather than a deployment-scoped one", m.Vendor)
 	}
 }
 
@@ -328,137 +234,39 @@ func TestStaleReportsUnverifiedEntries(t *testing.T) {
 	}
 }
 
-// TestDecoratedModelsDoNotAliasTheTable is the reason decorate clones twice: a
-// caller that edits what it was handed must not edit the package-level table
-// every other caller reads.
+// TestDecoratedModelsDoNotAliasTheTable: a caller that edits what it was
+// handed must not edit the package-level table every other caller reads.
 func TestDecoratedModelsDoNotAliasTheTable(t *testing.T) {
-	first, err := Model("anthropic/claude-opus-5")
+	first, err := Model("copilot/gpt-5.5")
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.Reasoning[0].Value = "tampered"
-	first.Input[0] = "tampered"
+	first.Headers["Editor-Version"] = "tampered"
 
-	second, err := Model("anthropic/claude-opus-5")
+	second, err := Model("copilot/gpt-5.5")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Reasoning[0].Value == "tampered" || second.Input[0] == "tampered" {
+	if second.Headers["Editor-Version"] == "tampered" {
 		t.Error("editing a resolved model changed the table it came from")
 	}
 }
 
-// TestTheClaudeLineIsServedFromOnePlace pins what sharing the rows bought: the
-// two entries cannot drift apart in what they list, only in what they charge.
-func TestTheClaudeLineIsServedFromOnePlace(t *testing.T) {
-	first, ok := Find("anthropic")
-	if !ok {
-		t.Fatal("no anthropic vendor")
-	}
-	vertex, ok := Find("anthropic-vertex")
-	if !ok {
-		t.Fatal("no anthropic-vertex vendor")
-	}
-
-	live := map[string]bool{}
-	for _, m := range first.Models {
-		if m.Stage.Available() {
-			live[m.ID] = true
-		}
-	}
-	if len(live) != len(vertex.Models) {
-		t.Errorf("the first-party API lists %d live models and Vertex %d", len(live), len(vertex.Models))
-	}
-	for _, m := range vertex.Models {
-		if !live[m.ID] {
-			t.Errorf("Vertex lists %q, which the first-party API does not", m.ID)
-		}
-	}
-}
-
-func TestInferOpenAI(t *testing.T) {
-
-	reasoning := map[string]struct {
-		id   string
-		want []ai.ReasoningLevel
-	}{
-		"a reasoning generation gets the ladder": {id: "gpt-5.5", want: openAIEfforts},
-		"gpt-6":                                  {id: "gpt-6-terra", want: openAIEfforts},
-		"o3":                                     {id: "o3-mini", want: openAIEfforts},
-		// The generation is in the middle of the ID, which a prefix never sees.
-		"a fine-tune of a gpt-5": {id: "ft:gpt-5.4-2026-01-01:acme::abc123", want: openAIEfforts},
-		// A point release nobody has published must not be read as the
-		// original GPT-4.
-		"an unpublished gpt-4 point release":           {id: "gpt-4.5-preview", want: nil},
-		"a generation that does not reason says so":    {id: "gpt-4o", want: noReasoning},
-		"an unrecognised ID is left saying nothing":    {id: "some-new-thing", want: nil},
-		"a stated ladder is never replaced by a guess": {id: "gpt-4o", want: nil},
-	}
-	for name, tc := range reasoning {
-		t.Run(name, func(t *testing.T) {
-			in := ai.Model{ID: tc.id}
-			if tc.want == nil && strings.HasPrefix(tc.id, "gpt-4o") {
-				// The stated-ladder case: hand it a ladder and expect it back.
-				in.Reasoning = openAIEfforts
-				got := inferOpenAI(in)
-				if len(got.Reasoning) != len(openAIEfforts) {
-					t.Errorf("Reasoning was replaced: %v", got.Reasoning)
-				}
-				return
-			}
-			got := inferOpenAI(in).Reasoning
-			if tc.want == nil {
-				if got != nil {
-					t.Errorf("Reasoning = %v, want nil: an unrecognised ID knows nothing about "+
-						"reasoning, which is not the same as knowing there is none", got)
-				}
-				return
-			}
-			if len(got) != len(tc.want) {
-				t.Errorf("Reasoning = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestInferGoogle(t *testing.T) {
-
-	// 2.5 predates the thinking level and still takes a budget, which is a
-	// different request field, not a different number.
-	old := inferGoogle(ai.Model{ID: "gemini-2.5-flash"})
-	if _, ok := old.Compat.(ai.GoogleCompat); !ok {
-		t.Errorf("Compat = %#v, want a GoogleCompat with no thinking level", old.Compat)
-	}
-	if ai.CompatOf[ai.GoogleCompat](old).ThinkingLevel {
-		t.Error("gemini-2.5 was given the thinking level, which it does not take")
-	}
-	if len(old.Reasoning) != len(budgetLadder) {
-		t.Errorf("Reasoning = %v, want the budget ladder", old.Reasoning)
-	}
-	// A Gemini 3 row states its own dialect on the vendor, so Infer leaves it.
-	if got := inferGoogle(ai.Model{ID: "gemini-3.9-pro"}); got.Compat != nil || got.Reasoning != nil {
-		t.Errorf("gemini-3 was given %v/%v, which the vendor already states", got.Compat, got.Reasoning)
-	}
-}
-
 // TestAVendorProviderKeepsWhatTheCatalogKnows pins that a provider built from a
-// vendor hands back live-listed models already carrying what the catalog knows.
+// vendor hands back a model already carrying the vendor's protocol facts.
 func TestAVendorProviderKeepsWhatTheCatalogKnows(t *testing.T) {
-	v, ok := Find("openai")
+	v, ok := Find("deepseek")
 	if !ok {
-		t.Fatal("no openai vendor")
+		t.Fatal("no deepseek vendor")
 	}
-	p := v.Provider(provider.Config{})
-
-	// An ID the table does not list, whose ladder the vendor's Infer still knows.
-	got, listed := p.Model("gpt-5.9-nova")
+	got, listed := v.Provider(provider.Config{}).Model("deepseek-v9")
 	if listed {
 		t.Fatal("the model was reported as listed")
 	}
-	if len(got.Reasoning) == 0 {
-		t.Error("no reasoning ladder: a GPT-5 opened through a provider could not be asked to think")
+	if got.Vendor != "deepseek" || got.API != v.API || got.BaseURL != v.BaseURL {
+		t.Errorf("model = %s/%s at %q, want the vendor's identity, protocol and host", got.Vendor, got.API, got.BaseURL)
 	}
-	if got.Vendor != "openai" || got.API != v.API {
-		t.Errorf("model = %s/%s, want the vendor's identity and protocol", got.Vendor, got.API)
+	if ai.CompatOf[ai.OpenAIChatCompat](got).Thinking != ai.ThinkingEffortOrDisable {
+		t.Errorf("Compat = %#v, want the vendor's", got.Compat)
 	}
 }

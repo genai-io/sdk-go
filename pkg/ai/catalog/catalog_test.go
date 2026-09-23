@@ -373,58 +373,23 @@ func TestTheClaudeLineIsServedFromOnePlace(t *testing.T) {
 		if !live[m.ID] {
 			t.Errorf("Vertex lists %q, which the first-party API does not", m.ID)
 		}
-		if m.Pricing.Known() {
-			t.Errorf("Vertex model %q carries a rate card; Vertex bills through a Google contract", m.ID)
-		}
 	}
-}
-
-func TestInferAnthropic(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"an unlisted Claude gets the generation's shape": {
-			in: ai.Model{ID: "claude-opus-6"}, window: 1_000_000, output: 128_000},
-		"a snapshot ID too": {
-			in: ai.Model{ID: "claude-sonnet-5@20260101"}, window: 1_000_000, output: 128_000},
-		"a stated figure is never overwritten": {
-			in: ai.Model{ID: "claude-opus-6", ContextWindow: 42}, window: 42, output: 128_000},
-		"something that is not a Claude is left alone": {
-			in: ai.Model{ID: "llama4"}, window: 0, output: 0},
-	}
-	runInfer(t, inferAnthropic, tests)
 }
 
 func TestInferOpenAI(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"gpt-5": {in: ai.Model{ID: "gpt-5.5"}, window: 1_050_000, output: 128_000},
-		"gpt-6": {in: ai.Model{ID: "gpt-6-terra"}, window: 1_050_000, output: 128_000},
-		"a fine-tune of a gpt-5": {
-			// The generation is in the middle of the ID, which a prefix never
-			// sees; the tuned model has the base model's shape.
-			in: ai.Model{ID: "ft:gpt-5.4-2026-01-01:acme::abc123"}, window: 1_050_000, output: 128_000},
-		"gpt-4.1":       {in: ai.Model{ID: "gpt-4.1-mini"}, window: 1_047_576, output: 32_768},
-		"gpt-4o":        {in: ai.Model{ID: "gpt-4o-mini"}, window: 128_000, output: 16_384},
-		"gpt-4 turbo":   {in: ai.Model{ID: "gpt-4-turbo-2024-04-09"}, window: 128_000, output: 4_096},
-		"gpt-4":         {in: ai.Model{ID: "gpt-4-0613"}, window: 8_192, output: 8_192},
-		"gpt-3.5 turbo": {in: ai.Model{ID: "gpt-3.5-turbo-0125"}, window: 16_385, output: 4_096},
-		"o3":            {in: ai.Model{ID: "o3-mini"}, window: 200_000, output: 100_000},
-		// A point release nobody has published must not be sized at the original
-		// GPT-4's 8k, which is wrong by two orders.
-		"an unpublished gpt-4 point release": {in: ai.Model{ID: "gpt-4.5-preview"}},
-		"an ID from another vendor entirely": {in: ai.Model{ID: "openai.gpt-oss-120b-1:0"}},
-	}
-	runInfer(t, inferOpenAI, tests)
 
 	reasoning := map[string]struct {
 		id   string
 		want []ai.ReasoningLevel
 	}{
-		"a reasoning generation gets the ladder":       {id: "gpt-5.5", want: openAIEfforts},
+		"a reasoning generation gets the ladder": {id: "gpt-5.5", want: openAIEfforts},
+		"gpt-6":                                  {id: "gpt-6-terra", want: openAIEfforts},
+		"o3":                                     {id: "o3-mini", want: openAIEfforts},
+		// The generation is in the middle of the ID, which a prefix never sees.
+		"a fine-tune of a gpt-5": {id: "ft:gpt-5.4-2026-01-01:acme::abc123", want: openAIEfforts},
+		// A point release nobody has published must not be read as the
+		// original GPT-4.
+		"an unpublished gpt-4 point release":           {id: "gpt-4.5-preview", want: nil},
 		"a generation that does not reason says so":    {id: "gpt-4o", want: noReasoning},
 		"an unrecognised ID is left saying nothing":    {id: "some-new-thing", want: nil},
 		"a stated ladder is never replaced by a guess": {id: "gpt-4o", want: nil},
@@ -457,16 +422,6 @@ func TestInferOpenAI(t *testing.T) {
 }
 
 func TestInferGoogle(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"gemini 3":                  {in: ai.Model{ID: "gemini-3.9-pro"}, window: 1_048_576, output: 65_536},
-		"gemini 2.5":                {in: ai.Model{ID: "gemini-2.5-pro"}, window: 1_048_576, output: 65_536},
-		"a generation nobody sized": {in: ai.Model{ID: "gemini-1.0-pro"}},
-		"something else entirely":   {in: ai.Model{ID: "text-bison"}},
-	}
-	runInfer(t, inferGoogle, tests)
 
 	// 2.5 predates the thinking level and still takes a budget, which is a
 	// different request field, not a different number.
@@ -486,105 +441,6 @@ func TestInferGoogle(t *testing.T) {
 	}
 }
 
-func TestInferMoonshot(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"a generation":   {in: ai.Model{ID: "kimi-k3-turbo"}, window: 1_048_576},
-		"the one before": {in: ai.Model{ID: "kimi-k2-0905"}, window: 262_144},
-		// The suffix is a whole token: "8k" lives inside "128k", so a substring
-		// test sizes a 128k model at 8k.
-		"a 128k suffix":             {in: ai.Model{ID: "moonshot-v1-128k"}, window: 131_072, output: 8_192},
-		"a 32k suffix":              {in: ai.Model{ID: "moonshot-v1-32k"}, window: 32_768, output: 8_192},
-		"an 8k suffix":              {in: ai.Model{ID: "moonshot-v1-8k"}, window: 8_192, output: 3_000},
-		"a size nobody has checked": {in: ai.Model{ID: "moonshot-v1-512k"}},
-		"no size at all":            {in: ai.Model{ID: "moonshot-v1"}},
-	}
-	runInfer(t, inferMoonshot, tests)
-}
-
-func TestInferMiniMax(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"m3": {in: ai.Model{ID: "MiniMax-M3"}, window: 1_000_000, output: 8_192},
-		"m2": {in: ai.Model{ID: "MiniMax-M2.1"}, window: 204_800, output: 8_192},
-		// The M2 and M3 windows differ by a factor of five, so a generation
-		// nobody has checked reports nothing rather than a neighbour's figure.
-		"a generation nobody has checked": {in: ai.Model{ID: "MiniMax-M9"}},
-	}
-	runInfer(t, inferMiniMax, tests)
-}
-
-func TestInferMiMo(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"pro":   {in: ai.Model{ID: "mimo-v2.5-pro"}, window: 1_048_576, output: 131_072},
-		"flash": {in: ai.Model{ID: "mimo-v2-flash"}, window: 262_144, output: 65_536},
-		"omni":  {in: ai.Model{ID: "mimo-v2-omni"}, window: 262_144, output: 65_536},
-		// MiMo's own listing returns the vendor-qualified name; both have to
-		// size the same or the same model has two shapes.
-		"vendor-qualified": {in: ai.Model{ID: "xiaomi/mimo-v2.5-pro"}, window: 1_048_576, output: 131_072},
-		"another line":     {in: ai.Model{ID: "mimo-v1-pro"}},
-	}
-	runInfer(t, inferMiMo, tests)
-}
-
-func TestInferBigModel(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"glm-5":                        {in: ai.Model{ID: "glm-5-air"}, window: 200_000, output: 128_000},
-		"glm-4.7":                      {in: ai.Model{ID: "glm-4.7-flashx"}, window: 200_000, output: 128_000},
-		"glm-4.6":                      {in: ai.Model{ID: "glm-4.6"}, window: 200_000, output: 128_000},
-		"a generation not on the docs": {in: ai.Model{ID: "glm-4.5"}},
-	}
-	runInfer(t, inferBigModel, tests)
-}
-
-func TestInferVolcengine(t *testing.T) {
-	tests := map[string]struct {
-		in             ai.Model
-		window, output int
-	}{
-		"the seed generation": {in: ai.Model{ID: "doubao-seed-1-6"}, window: 1_024_000, output: 256_000},
-		"a 256k suffix":       {in: ai.Model{ID: "doubao-pro-256k"}, window: 256_000, output: 8_000},
-		"a 128k suffix":       {in: ai.Model{ID: "doubao-pro-128k"}, window: 128_000, output: 8_000},
-		"a 32k suffix":        {in: ai.Model{ID: "doubao-pro-32k"}, window: 32_000, output: 4_000},
-		"no suffix":           {in: ai.Model{ID: "doubao-pro"}},
-	}
-	runInfer(t, inferVolcengine, tests)
-}
-
-// runInfer drives one Infer function over a table of IDs. An expectation of
-// zero means the function must report unknown rather than guess: a window is
-// acted on silently, so a wrong one fails in both directions.
-func runInfer(t *testing.T, infer func(ai.Model) ai.Model, tests map[string]struct {
-	in             ai.Model
-	window, output int
-}) {
-	t.Helper()
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := infer(tc.in)
-			if got.ContextWindow != tc.window {
-				t.Errorf("ContextWindow = %d, want %d", got.ContextWindow, tc.window)
-			}
-			if got.MaxOutput != tc.output {
-				t.Errorf("MaxOutput = %d, want %d", got.MaxOutput, tc.output)
-			}
-			if got.ID != tc.in.ID {
-				t.Errorf("ID = %q, want it untouched", got.ID)
-			}
-		})
-	}
-}
-
 // TestAVendorProviderKeepsWhatTheCatalogKnows pins that a provider built from a
 // vendor hands back live-listed models already carrying what the catalog knows.
 func TestAVendorProviderKeepsWhatTheCatalogKnows(t *testing.T) {
@@ -594,14 +450,10 @@ func TestAVendorProviderKeepsWhatTheCatalogKnows(t *testing.T) {
 	}
 	p := v.Provider(provider.Config{})
 
-	// An ID the table does not list, which the vendor's Infer can still size.
+	// An ID the table does not list, whose ladder the vendor's Infer still knows.
 	got, listed := p.Model("gpt-5.9-nova")
 	if listed {
 		t.Fatal("the model was reported as listed")
-	}
-	if got.ContextWindow == 0 || got.MaxOutput == 0 {
-		t.Errorf("limits = %d/%d, want the generation's; the provider dropped the vendor's Infer",
-			got.ContextWindow, got.MaxOutput)
 	}
 	if len(got.Reasoning) == 0 {
 		t.Error("no reasoning ladder: a GPT-5 opened through a provider could not be asked to think")

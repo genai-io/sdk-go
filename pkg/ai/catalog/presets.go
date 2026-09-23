@@ -124,31 +124,14 @@ var (
 	textImage = []ai.Modality{ai.ModalityText, ai.ModalityImage}
 )
 
-// usd and cny build a rate card from per-million-token prices.
-func usd(input, output, cacheWrite, cacheRead float64) ai.Pricing {
-	return ai.Pricing{Currency: ai.USD, Input: input, Output: output, CacheWrite: cacheWrite, CacheRead: cacheRead}
-}
-
-func cny(input, output, cacheWrite, cacheRead float64) ai.Pricing {
-	return ai.Pricing{Currency: ai.CNY, Input: input, Output: output, CacheWrite: cacheWrite, CacheRead: cacheRead}
-}
-
-// gpt5 builds an OpenAI reasoning-model entry. The whole GPT-5 family shares
-// one window and output cap, and inferOpenAI already knows what they are —
-// restating them here is how a row and an inference drift apart.
-func gpt5(id, name string, pricing ai.Pricing) ai.Model {
-	return inferOpenAI(ai.Model{
-		ID: id, Name: name,
-		Reasoning: openAIEfforts,
-		Pricing:   pricing,
-	})
+// gpt5 builds an OpenAI reasoning-model entry.
+func gpt5(id, name string) ai.Model {
+	return ai.Model{ID: id, Name: name, Reasoning: openAIEfforts}
 }
 
 // gpt56 is gpt5 with the extra top rung the 5.6 family accepts.
-func gpt56(id, name string, pricing ai.Pricing) ai.Model {
-	m := gpt5(id, name, pricing)
-	m.Reasoning = openAIEffortsMax
-	return m
+func gpt56(id, name string) ai.Model {
+	return ai.Model{ID: id, Name: name, Reasoning: openAIEffortsMax}
 }
 
 // retired marks a model the vendor no longer serves, naming what replaces it.
@@ -169,23 +152,9 @@ func preview(m ai.Model) ai.Model {
 	return m
 }
 
-// gemini builds a Gemini 3 entry. The family shares one window and output cap,
-// which inferGoogle states already. Google publishes no per-model rate card in
-// the API docs, so no pricing is given rather than a guessed one.
+// gemini builds a Gemini 3 entry; the vendor defaults carry its dialect.
 func gemini(id, name string) ai.Model {
-	return inferGoogle(ai.Model{ID: id, Name: name})
-}
-
-// priced attaches a rate card, by model ID, to a line of models two vendors
-// share. Price is the only thing they differ in: the same Claude costs one
-// thing from Anthropic and another through a Google contract.
-func priced(models []ai.Model, prices map[string]ai.Pricing) []ai.Model {
-	out := make([]ai.Model, len(models))
-	for i, m := range models {
-		m.Pricing = prices[m.ID]
-		out[i] = m
-	}
-	return out
+	return ai.Model{ID: id, Name: name}
 }
 
 // ─── deployments ───

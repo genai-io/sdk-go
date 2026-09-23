@@ -60,8 +60,8 @@ type Config struct {
 	// and endpoint already configured here.
 	Fetch func(ctx context.Context, p *Provider) ([]ai.Model, error)
 
-	// Resolve fills in what is known about a model from its ID alone — a context
-	// window encoded in the name, the family's reasoning ladder — which a host's
+	// Resolve fills in what is known about a model from its ID alone — the
+	// family's reasoning ladder, its protocol dialect — which a host's
 	// listing rarely carries; catalog installs one here. It must fill rather than
 	// replace: the host wins on any figure it gave.
 	Resolve func(ai.Model) ai.Model

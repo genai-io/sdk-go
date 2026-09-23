@@ -8,9 +8,9 @@ you already are, and each step adds one nameable thing:
           │
           │  catalog.Model      the model's own facts
           ▼
-       ai.Model               which protocol it speaks, its context window and
-          │                   max output, the modalities it accepts, its
-          │                   reasoning ladder, its prices, what it cannot do
+       ai.Model               which protocol it speaks, the modalities it
+          │                   accepts, its reasoning ladder, what it cannot
+          │                   do — limits and prices are yours to add
           │
           │  auth.Config       the credential, and where to send it
           ▼
@@ -137,9 +137,11 @@ client, err := ai.New(ai.Config{
 })
 ```
 
-`catalog.Model` is the lookup on its own — endpoint, limits, pricing and the
-protocol to speak, with no network call and no credential. Fill in an
-`ai.Model` yourself for a model the catalog has never heard of.
+`catalog.Model` is the lookup on its own — endpoint, reasoning dialect and the
+protocol to speak, with no network call and no credential. It states no
+context window, output cap or price: those change faster than a protocol, so
+set `ContextWindow`, `MaxOutput` and `Pricing` on the model from your own data.
+Fill in an `ai.Model` yourself for a model the catalog has never heard of.
 
 ## Stopping at `ai.NewDriver`
 

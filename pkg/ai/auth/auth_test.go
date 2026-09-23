@@ -149,8 +149,8 @@ func TestConfigResolvesCredentialAndEndpoint(t *testing.T) {
 	if cfg.BaseURL != "https://api.deepseek.com" {
 		t.Errorf("BaseURL = %q, want the vendor's own host", cfg.BaseURL)
 	}
-	if cfg.Model.ContextWindow == 0 {
-		t.Error("the model arrived without its limits")
+	if cfg.Model.API != ai.APIOpenAIChat {
+		t.Error("the model arrived without its protocol")
 	}
 }
 

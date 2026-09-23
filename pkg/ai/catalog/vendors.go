@@ -1,10 +1,16 @@
 package catalog
 
 import (
+	"slices"
+
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 // Adding an OpenAI-compatible endpoint is an entry here and nothing else.
+//
+// A row states protocol facts: the endpoint, the protocol, the reasoning
+// dialect, the quirks. It states no price and no token limit — those change far
+// more often than a protocol, so they are the application's to set on ai.Model.
 
 // verified is the date this file's figures were last checked against the
 // vendors' own documentation. Every entry carries its own Verified field so
@@ -19,15 +25,11 @@ const verifiedGateways = "2026-08-21"
 const verifiedGoogleVertex = "2026-09-17"
 
 // verifiedHyperscalers is the sweep that added the two hyperscaler-hosted
-// OpenAI endpoints below. Neither states limits or prices in the catalog: on
-// Azure the deployment decides them, and on Bedrock the model card does.
+// OpenAI endpoints below.
 const verifiedHyperscalers = "2026-08-21"
 
 // claudeLine is the live Claude generation as both entries below serve it: the
-// same IDs, the same ladders, the same limits.
-//
-// The rows state no window: inferAnthropic fills the generation's shape, and a
-// row restating it is a second place for the figure to be wrong.
+// same IDs, the same ladders.
 var claudeLine = []ai.Model{
 	{ID: "claude-fable-5", Name: "Claude Fable 5", Reasoning: claudeAlwaysOn},
 	{ID: "claude-opus-5", Name: "Claude Opus 5"},
@@ -51,18 +53,9 @@ var geminiLine = []ai.Model{
 	preview(gemini("gemini-3-flash-preview", "Gemini 3 Flash (preview)")),
 }
 
-// anthropicModels is claudeLine on the first-party API: the same rows with
-// Anthropic's own rate card, plus the generations only this endpoint ever
-// served.
-var anthropicModels = append(priced(claudeLine, map[string]ai.Pricing{
-	"claude-fable-5":    usd(10, 50, 12.50, 1.00),
-	"claude-opus-5":     usd(5, 25, 6.25, 0.50),
-	"claude-opus-4-8":   usd(5, 25, 6.25, 0.50),
-	"claude-opus-4-7":   usd(5, 25, 6.25, 0.50),
-	"claude-opus-4-6":   usd(5, 25, 6.25, 0.50),
-	"claude-sonnet-5":   usd(2, 10, 2.50, 0.20),
-	"claude-sonnet-4-6": usd(3, 15, 3.75, 0.30),
-}),
+// anthropicModels is claudeLine on the first-party API, plus the generations
+// only this endpoint ever served.
+var anthropicModels = append(slices.Clone(claudeLine),
 	// Retired on the first-party API. They stay listed so a caller pointing at
 	// one is told what to move to; filter them out with Stage.Available.
 	retired("claude-opus-4-1-20250805", "Claude Opus 4.1", "claude-opus-5"),
@@ -90,7 +83,6 @@ var vendors = []Vendor{
 		Compat:    claudeAdaptiveNoTemp,
 		Reasoning: claudeAdaptive,
 		Models:    anthropicModels,
-		Infer:     inferAnthropic,
 	},
 	{
 		ID:          "anthropic-vertex",
@@ -111,11 +103,10 @@ var vendors = []Vendor{
 		Compat:     claudeAdaptiveNoTemp,
 		Reasoning:  claudeAdaptive,
 		Note: "Authenticates with Google Application Default Credentials; set ANTHROPIC_VERTEX_PROJECT_ID and, optionally, CLOUD_ML_REGION. " +
-			"Vertex still serves earlier generations under @-versioned snapshot IDs; they are not listed, and Infer sizes one if you name it.",
+			"Vertex still serves earlier generations under @-versioned snapshot IDs; they are not listed.",
 		// Claude 4.6 and later use dateless IDs on Vertex too, so this is the
-		// first-party line — unpriced, as Vertex bills through Google.
+		// first-party line.
 		Models: claudeLine,
-		Infer:  inferAnthropic,
 	},
 	{
 		ID:          "openai",
@@ -127,24 +118,20 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"OPENAI_API_KEY"},
 		Input:       textImage,
 		Compat:      ai.OpenAIResponsesCompat{},
-		// Only the 5.6 family is billed for cache writes, at 1.25x input; on
-		// every earlier model a write is free and the rate below is zero.
-		// Those writes are not yet counted: the endpoint reports them in
+		// The endpoint reports cache writes in
 		// input_tokens_details.cache_write_tokens, which the pinned openai-go
-		// release does not expose, so they arrive folded into Input and Cost
-		// prices them at 1x. It under-reports a 5.6 cache write by a quarter.
-		Note: "Cache writes are billed on GPT-5.6 and later only. This SDK cannot yet read the endpoint's " +
-			"cache-write token count, so those tokens are priced as ordinary input — a quarter under the real figure.",
+		// release does not expose, so they arrive folded into Usage.Input.
+		Note: "This SDK cannot yet read the endpoint's cache-write token count; those tokens are reported as ordinary input.",
 		Models: []ai.Model{
-			gpt56("gpt-5.6-sol", "GPT-5.6 Sol", usd(5, 30, 6.25, 0.50)),
-			gpt56("gpt-5.6-terra", "GPT-5.6 Terra", usd(2, 12, 2.50, 0.20)),
-			gpt56("gpt-5.6-luna", "GPT-5.6 Luna", usd(0.20, 1.20, 0.25, 0.02)),
-			gpt5("gpt-5.5", "GPT-5.5", usd(5, 30, 0, 0.50)),
-			gpt5("gpt-5.4", "GPT-5.4", usd(2.50, 15, 0, 0.25)),
-			{ID: "gpt-4.1", Name: "GPT-4.1", ContextWindow: 1_047_576, MaxOutput: 32_768,
-				Reasoning: noReasoning, Pricing: usd(2, 8, 0, 0.50)},
-			{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128_000, MaxOutput: 16_384,
-				Reasoning: noReasoning, Pricing: usd(2.50, 10, 0, 1.25)},
+			gpt56("gpt-5.6-sol", "GPT-5.6 Sol"),
+			gpt56("gpt-5.6-terra", "GPT-5.6 Terra"),
+			gpt56("gpt-5.6-luna", "GPT-5.6 Luna"),
+			gpt5("gpt-5.5", "GPT-5.5"),
+			gpt5("gpt-5.4", "GPT-5.4"),
+			{ID: "gpt-4.1", Name: "GPT-4.1",
+				Reasoning: noReasoning},
+			{ID: "gpt-4o", Name: "GPT-4o",
+				Reasoning: noReasoning},
 		},
 		// Reasoning is per model family, not per vendor: gpt-4o does not
 		// reason and gpt-5 does, so Infer decides rather than a default.
@@ -174,8 +161,8 @@ var vendors = []Vendor{
 		Compat: ai.OpenAIResponsesCompat{NoLongCacheRetention: true},
 		Note: "Set AZURE_OPENAI_ENDPOINT to the resource URL (https://YOUR-RESOURCE.openai.azure.com); " +
 			"the /openai/v1 suffix is added for you. A model ID here is a deployment name chosen by " +
-			"whoever created the resource, not an OpenAI model ID, so the catalog lists none and states " +
-			"no limits — Infer recognizes a deployment left named after its model and fills them in then. " +
+			"whoever created the resource, not an OpenAI model ID, so the catalog lists none; " +
+			"Infer recognizes a deployment left named after its model and picks its reasoning ladder. " +
 			"Which models and API versions a resource serves depends on its region.",
 		Infer: inferOpenAI,
 	},
@@ -206,12 +193,10 @@ var vendors = []Vendor{
 		Note: "Set AWS_BEDROCK_BASE_URL to https://bedrock-runtime.REGION.amazonaws.com and " +
 			"AWS_BEARER_TOKEN_BEDROCK to a Bedrock API key; the /openai/v1 suffix is added for you. " +
 			"This endpoint speaks Chat Completions only — Bedrock publishes no /responses — so the " +
-			"server-side tools and reasoning-item reuse of the openai entry are not reachable through it. " +
-			"Output caps and prices are per model card and per region, which no static table tracks, so " +
-			"none are stated.",
+			"server-side tools and reasoning-item reuse of the openai entry are not reachable through it.",
 		Models: []ai.Model{
-			{ID: "openai.gpt-oss-120b-1:0", Name: "GPT-OSS 120B", ContextWindow: 128_000},
-			{ID: "openai.gpt-oss-20b-1:0", Name: "GPT-OSS 20B", ContextWindow: 128_000},
+			{ID: "openai.gpt-oss-120b-1:0", Name: "GPT-OSS 120B"},
+			{ID: "openai.gpt-oss-20b-1:0", Name: "GPT-OSS 20B"},
 		},
 	},
 	{
@@ -252,7 +237,7 @@ var vendors = []Vendor{
 		Compat:     ai.GoogleCompat{ThinkingLevel: true},
 		Reasoning:  geminiLevels,
 		Note: "Authenticates with Google Application Default Credentials; set GOOGLE_CLOUD_PROJECT and, optionally, GOOGLE_CLOUD_LOCATION (default global). " +
-			"Vertex does not list its models, so the row below is what a picker shows; Infer sizes any other ID you name.",
+			"Vertex does not list its models, so the row below is what a picker shows.",
 		Models: geminiLine,
 		Infer:  inferGoogle,
 	},
@@ -277,16 +262,9 @@ var vendors = []Vendor{
 			// thinking turn.
 			ReasoningContent: true,
 		},
-		Note: "Prices are the standard (peak) USD rate; DeepSeek bills 50% of it off-peak " +
-			"(outside 09:00-12:00 and 14:00-18:00 Beijing time), which Pricing cannot express. " +
-			"The Chinese-language docs state the same card in CNY. Cache writes are billed at the ordinary input rate — a cache miss is the write — so the figure below matches Input and the cost comes out right even though Chat Completions reports no cache-write token count.",
 		Models: []ai.Model{
-			// CacheWrite mirrors Input: a cache miss is the write, and
-			// DeepSeek bills no separate write.
-			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", ContextWindow: 1_000_000, MaxOutput: 384_000,
-				Pricing: usd(0.44, 1.32, 0.44, 0.014)},
-			{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", ContextWindow: 1_000_000, MaxOutput: 384_000,
-				Pricing: usd(1.32, 3.96, 1.32, 0.044)},
+			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash"},
+			{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro"},
 		},
 	},
 	{
@@ -304,10 +282,10 @@ var vendors = []Vendor{
 		// stream_options.include_usage and returns real counts.
 		Input:  textImage,
 		Compat: ai.OpenAIChatCompat{},
-		Note:   "Model IDs are confirmed; SenseNova publishes no per-model token limits, so the windows below are carried over and unverified.",
+		Note:   "Model IDs are confirmed.",
 		Models: []ai.Model{
-			{ID: "sensenova-6.7-flash-lite", Name: "SenseNova 6.7 Flash Lite", ContextWindow: 256_000, MaxOutput: 65_536},
-			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash (via SenseNova)", ContextWindow: 1_000_000, MaxOutput: 384_000},
+			{ID: "sensenova-6.7-flash-lite", Name: "SenseNova 6.7 Flash Lite"},
+			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash (via SenseNova)"},
 		},
 	},
 	{
@@ -321,24 +299,11 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"MINIMAX_API_KEY"},
 		Input:       textImage,
 		Reasoning:   budgetLadder,
-		Note: "M2.7 context windows are carried over and unverified; MiniMax publishes prices but not per-model limits. " +
-			"The M-series card is a standing 50% discount off list (\"永久五折\"), and M3 bills double above 512k input tokens.",
 		Models: []ai.Model{
-			{ID: "MiniMax-M3", Name: "MiniMax M3", ContextWindow: 1_000_000,
-				Pricing: ai.Pricing{
-					Currency: ai.CNY, Input: 2.10, Output: 8.40, CacheRead: 0.42,
-					// MiniMax bills double above 512k input tokens.
-					Tiers: []ai.PricingTier{{
-						AboveInputTokens: 512_000,
-						Input:            4.20, Output: 16.80, CacheRead: 0.84,
-					}},
-				}},
-			{ID: "MiniMax-M2.7", Name: "MiniMax M2.7", ContextWindow: 204_800, MaxOutput: 8_192,
-				Pricing: cny(2.1, 8.4, 2.625, 0.42)},
-			{ID: "MiniMax-M2.7-highspeed", Name: "MiniMax M2.7 Highspeed", ContextWindow: 204_800, MaxOutput: 8_192,
-				Pricing: cny(4.2, 16.8, 2.625, 0.42)},
+			{ID: "MiniMax-M3", Name: "MiniMax M3"},
+			{ID: "MiniMax-M2.7", Name: "MiniMax M2.7"},
+			{ID: "MiniMax-M2.7-highspeed", Name: "MiniMax M2.7 Highspeed"},
 		},
-		Infer: inferMiniMax,
 	},
 	{
 		ID:          "moonshot",
@@ -357,13 +322,10 @@ var vendors = []Vendor{
 			// messages lack reasoning_content, even when it is empty.
 			ReasoningContent: true,
 		},
-		Note: "Prices are the mainland CNY card served by api.moonshot.cn; the international endpoint " +
-			"(api.moonshot.ai, MOONSHOT_BASE_URL) publishes the same rates in USD. Cache writes are free; " +
-			"a cache hit costs a tenth of ordinary input.",
+		Note: "The mainland endpoint is api.moonshot.cn; point MOONSHOT_BASE_URL at api.moonshot.ai for the international one.",
 		Models: []ai.Model{
-			{ID: "kimi-k3", Name: "Kimi K3", ContextWindow: 1_048_576, Pricing: cny(20, 100, 0, 2)},
+			{ID: "kimi-k3", Name: "Kimi K3"},
 		},
-		Infer: inferMoonshot,
 	},
 	{
 		ID:          "alibaba",
@@ -382,7 +344,7 @@ var vendors = []Vendor{
 			// message, as DeepSeek does.
 			ReasoningContent: true,
 		},
-		Note: "Model IDs are confirmed; Model Studio publishes limits and prices per model behind its console rather than in the docs, so no windows are stated here.",
+		Note: "Model IDs are confirmed.",
 		Models: []ai.Model{
 			{ID: "qwen3.8-max", Name: "Qwen3.8 Max"},
 			{ID: "qwen3.7-plus", Name: "Qwen3.7 Plus"},
@@ -402,11 +364,10 @@ var vendors = []Vendor{
 		Reasoning:   thinkingSwitch,
 		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingType, ReasoningContent: true},
 		Models: []ai.Model{
-			{ID: "glm-5", Name: "GLM-5", ContextWindow: 200_000, MaxOutput: 128_000},
-			{ID: "glm-4.7", Name: "GLM-4.7", ContextWindow: 200_000, MaxOutput: 128_000},
-			{ID: "glm-4.7-flashx", Name: "GLM-4.7-FlashX", ContextWindow: 200_000, MaxOutput: 128_000},
+			{ID: "glm-5", Name: "GLM-5"},
+			{ID: "glm-4.7", Name: "GLM-4.7"},
+			{ID: "glm-4.7-flashx", Name: "GLM-4.7-FlashX"},
 		},
-		Infer: inferBigModel,
 	},
 	{
 		ID:          "ollama",
@@ -421,14 +382,13 @@ var vendors = []Vendor{
 		BaseURLSuffix: "/v1",
 		Input:         textImage,
 		Compat:        ai.OpenAIChatCompat{},
-		Note: "A local server, so there is no credential to set. Windows depend on the pulled model file " +
-			"and the server's num_ctx, not on a published catalog; the entries below are common defaults. " +
-			"The live listing is authoritative.",
+		Note: "A local server, so there is no credential to set. The entries below are common pulls; " +
+			"the live listing is authoritative.",
 		Models: []ai.Model{
-			{ID: "llama4", Name: "Llama 4", ContextWindow: 131_072, MaxOutput: 16_384},
-			{ID: "qwq", Name: "QwQ", ContextWindow: 131_072, MaxOutput: 16_384},
-			{ID: "gemma3", Name: "Gemma 3", ContextWindow: 131_072, MaxOutput: 16_384},
-			{ID: "mistral", Name: "Mistral", ContextWindow: 131_072, MaxOutput: 16_384},
+			{ID: "llama4", Name: "Llama 4"},
+			{ID: "qwq", Name: "QwQ"},
+			{ID: "gemma3", Name: "Gemma 3"},
+			{ID: "mistral", Name: "Mistral"},
 		},
 	},
 	{
@@ -442,15 +402,10 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"MIMO_API_KEY"},
 		Input:       textImage,
 		Reasoning:   budgetLadder,
-		Note: "Prices are MiMo's own published card, which states USD only — mimo.mi.com/docs/pricing. " +
-			"A cache hit costs a fraction of a percent of a miss; cache writes are not charged.",
 		Models: []ai.Model{
-			{ID: "mimo-v2.5-pro", Name: "MiMo V2.5 Pro", ContextWindow: 1_048_576,
-				Pricing: usd(0.435, 0.87, 0, 0.0036)},
-			{ID: "mimo-v2.5", Name: "MiMo V2.5", ContextWindow: 1_048_576,
-				Pricing: usd(0.14, 0.28, 0, 0.0028)},
+			{ID: "mimo-v2.5-pro", Name: "MiMo V2.5 Pro"},
+			{ID: "mimo-v2.5", Name: "MiMo V2.5"},
 		},
-		Infer: inferMiMo,
 	},
 	{
 		ID:          "volcengine",
@@ -465,8 +420,7 @@ var vendors = []Vendor{
 		Compat:    ai.AnthropicCompat{BearerAuth: true},
 		Input:     textImage,
 		Reasoning: budgetLadder,
-		Note:      "Ark serves models through per-account endpoints, so there is no fixed catalog; windows are inferred from the model ID.",
-		Infer:     inferVolcengine,
+		Note:      "Ark serves models through per-account endpoints, so there is no fixed catalog.",
 	},
 	{
 		ID:          "agnesai",
@@ -479,7 +433,7 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"AGNESAI_API_KEY"},
 		Input:       textImage,
 		Compat:      ai.OpenAIChatCompat{},
-		Note:        "An aggregator: the models it serves and their windows come from its live listing, not from a fixed catalog.",
+		Note:        "An aggregator: the models it serves come from its live listing, not from a fixed catalog.",
 	},
 	// ── OpenAI-compatible gateways and single-vendor endpoints ──
 	{
@@ -494,7 +448,7 @@ var vendors = []Vendor{
 		Input:       textImage,
 		Reasoning:   effortLadder,
 		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingReasoningObject},
-		Note:        "A gateway over many upstreams. It normalizes reasoning onto reasoning:{effort}, so the ladder is vendor-wide; windows and prices are per-model and come from the live listing.",
+		Note:        "A gateway over many upstreams. It normalizes reasoning onto reasoning:{effort}, so the ladder is vendor-wide; the models come from the live listing.",
 	},
 	{
 		ID:          "xai",
@@ -522,7 +476,6 @@ var vendors = []Vendor{
 		Reasoning:   thinkingSwitch,
 		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingType, ReasoningContent: true},
 		Note:        "The same GLM models as the bigmodel vendor, on Z.ai's international endpoint. A Coding Plan subscription uses a different path — set ZAI_BASE_URL to https://api.z.ai/api/coding/paas/v4.",
-		Infer:       inferBigModel,
 	},
 	{
 		ID:          "groq",
@@ -561,7 +514,7 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"TOGETHER_API_KEY"},
 		Input:       textImage,
 		Compat:      ai.OpenAIChatCompat{},
-		Note:        "A host for many open models; reasoning, windows and prices are per-model and come from the live listing.",
+		Note:        "A host for many open models; reasoning is per-model and the models come from the live listing.",
 	},
 	{
 		ID:          "fireworks",
@@ -574,7 +527,7 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"FIREWORKS_API_KEY"},
 		Input:       textImage,
 		Compat:      ai.OpenAIChatCompat{},
-		Note:        "A host for many open models; reasoning, windows and prices are per-model and come from the live listing.",
+		Note:        "A host for many open models; reasoning is per-model and the models come from the live listing.",
 	},
 	{
 		ID:          "nvidia",
@@ -587,7 +540,7 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"NVIDIA_API_KEY"},
 		Input:       textImage,
 		Compat:      ai.OpenAIChatCompat{},
-		Note:        "A host for many open models; reasoning, windows and prices are per-model and come from the live listing.",
+		Note:        "A host for many open models; reasoning is per-model and the models come from the live listing.",
 	},
 	{
 		ID:          "huggingface",
@@ -600,7 +553,7 @@ var vendors = []Vendor{
 		KeyEnv:      []string{"HF_TOKEN", "HUGGINGFACE_API_KEY"},
 		Input:       textImage,
 		Compat:      ai.OpenAIChatCompat{},
-		Note:        "A router over many inference providers; reasoning, windows and prices are per-model and come from the live listing.",
+		Note:        "A router over many inference providers; reasoning is per-model and the models come from the live listing.",
 	},
 	{
 		ID:          "copilot",

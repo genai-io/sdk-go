@@ -1,4 +1,7 @@
-// Package catalog is the vendor and model directory, as data.
+// Package catalog is the vendor and model directory, as data: each vendor's
+// endpoint, protocol, reasoning dialect and quirks. It states no prices and no
+// token limits — those change faster than a protocol, so an application
+// supplies them on ai.Model.
 //
 //	model, err := catalog.Model("deepseek/deepseek-v4-pro")
 //	model, err := catalog.Model("claude-opus-4-6")  // unambiguous, vendor inferred
@@ -7,7 +10,7 @@
 //
 //	vendors.go   the table — one entry per vendor, and the file to edit
 //	presets.go   the ladders, dialects and shorthands an entry is written in
-//	infer.go     filling in what the table does not state for a model
+//	infer.go     the ladder or dialect of a model the table does not list
 //	vendor.go    what an entry means, and what a model inherits from it
 //	catalog.go   looking a vendor or a model reference up
 //	errors.go    what an unresolvable reference reports

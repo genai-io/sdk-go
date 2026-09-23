@@ -89,11 +89,10 @@ func run(ref, question string) error {
 			fmt.Printf(" · %d out\033[0m\n", resp.Usage.Output)
 
 			// Run this twice: the second run should report cache reads rather
-			// than a second write, and cost less for the same prompt.
-			if p := client.Model().Pricing; p.Known() {
-				c := p.Cost(resp.Usage)
-				fmt.Printf("\033[2m%.5f %s\033[0m\n", c.Total, c.Currency)
-			}
+			// than a second write, and cost less for the same prompt. The
+			// catalog states no prices; this card is the caller's own.
+			c := ai.Pricing{Currency: ai.USD, Input: 5, Output: 25, CacheWrite: 6.25, CacheRead: 0.50}.Cost(resp.Usage)
+			fmt.Printf("\033[2m%.5f %s\033[0m\n", c.Total, c.Currency)
 		}
 	}
 	return nil

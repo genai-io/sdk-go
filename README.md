@@ -16,7 +16,7 @@ loop around it.
 - **Tool calling** — schema derived from your argument struct, arguments checked before your code runs.
 - **Structured outputs** — `CompleteAs[T]` derives the schema, constrains generation and decodes.
 - **Typed errors** — auth, rate limit, context exceeded and unsupported, not substrings to match.
-- **A model catalog** — 28 vendors, 62 models; endpoints, limits and pricing as data.
+- **A model catalog** — 28 vendors, 62 models; endpoints, protocols and reasoning dialects as data. Limits and prices are the application's to supply.
 - **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
 
 **`pkg/agent` — the loop around it**

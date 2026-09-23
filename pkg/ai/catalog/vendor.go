@@ -76,10 +76,9 @@ type Vendor struct {
 	// unlisted ID against the vendor's defaults.
 	Models []ai.Model
 
-	// Infer fills in what the Models table does not state for an ID — usually
-	// limits, sometimes reasoning support. Several vendors encode the context
-	// window in the model ID itself ("kimi-...-128k", "glm-5.2-...") and
-	// publish nothing through their API, which no static table keeps up with.
+	// Infer fills in the protocol behavior the Models table does not state for
+	// an ID — which reasoning ladder or dialect a model generation takes. It
+	// never sets a limit or a price: those are the application's to supply.
 	Infer func(ai.Model) ai.Model
 
 	// Verified is when this entry was last checked against the vendor's own
@@ -131,7 +130,7 @@ func (v Vendor) Model(id string) ai.Model {
 // Resolve fills in what this vendor knows about a model, overwriting nothing
 // the model already states. It is Model for a model rather than an ID, which is
 // what a live listing needs: a host reports an ID and a name and almost never a
-// window, a ladder or a protocol quirk.
+// ladder or a protocol quirk.
 func (v Vendor) Resolve(m ai.Model) ai.Model { return v.decorate(m) }
 
 // ModelList returns the vendor's known models, fully decorated.
@@ -181,8 +180,8 @@ func (v Vendor) decorate(m ai.Model) ai.Model {
 	// either the caller's model or the package-level vendor defaults just
 	// inherited. Infer is allowed to edit its argument, never those.
 	m = m.Clone()
-	// A retired model is a signpost, not an offer: leaving its limits at zero
-	// keeps it from looking usable in a picker that only reads the numbers.
+	// A retired model is a signpost, not an offer, so Infer does not dress it
+	// up as a usable one.
 	if v.Infer != nil && m.Stage.Available() {
 		m = v.Infer(m)
 	}

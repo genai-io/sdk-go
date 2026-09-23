@@ -95,10 +95,6 @@ func run(ctx context.Context, model, system string, effort ai.Effort, prompt str
 			}
 			fmt.Printf("\n\n— %s · %d in / %d out",
 				event.Response.Model, event.Response.Usage.TotalInput(), event.Response.Usage.Output)
-			if p := client.Model().Pricing; p.Known() {
-				cost := p.Cost(event.Response.Usage)
-				fmt.Printf(" · %.4f %s", cost.Total, cost.Currency)
-			}
 			fmt.Println()
 		}
 	}

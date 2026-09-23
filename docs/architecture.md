@@ -412,22 +412,22 @@ in the registry, which costs more than the wart.
 
 **OpenAI cache-write tokens are not counted.** The endpoint reports them in
 `input_tokens_details.cache_write_tokens`, which the pinned `openai-go` release
-does not expose, so on GPT-5.6 and later those tokens are priced as ordinary
-input — about a quarter under the real figure. The vendor entry says so.
+does not expose, so they arrive folded into `Usage.Input`. The vendor entry
+says so.
 
 **`ResolveLevel` snaps silently.** Asking for `medium` on a model offering only
 off and high returns high, and nothing tells the caller. The direction is
 deliberate — quietly reasoning *less* than asked is the more surprising failure
 — but the silence is not something a caller can currently observe.
 
-**Most of the catalog carries no price.** Forty of the sixty-two rows
-have a zero rate card, and eight have no context window. Some of that is
-correct — Vertex is billed by Google against a project, and a local Ollama is
-billed by nobody — and the rest is a table nobody has finished filling in.
-`Pricing.Cost` on an unpriced model returns zero rather than an estimate, for
-the same reason an unknown window reports no headroom: a guessed figure fails
-silently in both directions. So a caller that bills on this must check the rate
-card is not empty before trusting the total.
+**The catalog states no prices and no token limits.** A rate card or a
+context window changes far more often than a protocol, and an SDK release is
+the wrong cadence for it. The catalog keeps what the wire needs — endpoint,
+protocol, reasoning dialect, quirks — and an application sets `ContextWindow`,
+`MaxOutput` and `Pricing` on `ai.Model` from its own data; `Pricing.Cost` does
+the arithmetic. Left unset, a window reports no headroom and a cost comes out
+zero rather than a guess, and the Anthropic driver falls back to its own
+`max_tokens` default.
 
 ## Testing
 

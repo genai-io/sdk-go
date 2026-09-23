@@ -11,6 +11,16 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
+- **The catalog no longer states prices or token limits.** No row carries
+  `Pricing`, `ContextWindow` or `MaxOutput`, and the `Infer` functions that
+  sized a model from its ID are gone; `Infer` now only picks a reasoning ladder
+  or dialect (OpenAI generations, Gemini 2.5). A rate card or a window changes
+  faster than a protocol, so it is the application's data: set
+  `ContextWindow`, `MaxOutput` and `Pricing` on the `ai.Model` from your own
+  source and `Pricing.Cost` still does the arithmetic. A live listing that
+  reports a window or a price is still merged in by `provider.MergeListing`.
+  Left unset, `Headroom` reports unknown and the Anthropic driver sends its own
+  `max_tokens` default.
 - **The module needs Go 1.26 now.** `golang.org/x/oauth2` declares `go 1.26.0`
   from v0.37.0 on, and a module inherits the highest directive in its graph.
   CI runs 1.26 alone until the two part again.

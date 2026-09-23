@@ -64,21 +64,11 @@ func run(ref, question string) error {
 		if t := resp.Thinking(); t != "" {
 			fmt.Printf("  \033[2mit thought first: %d characters\033[0m\n", len(t))
 		}
-		fmt.Printf("  \033[2m%d in / %d out%s\033[0m\n",
-			resp.Usage.TotalInput(), resp.Usage.Output, price(model, resp.Usage))
+		fmt.Printf("  \033[2m%d in / %d out\033[0m\n", resp.Usage.TotalInput(), resp.Usage.Output)
 	}
 
-	// The catalog records what a rate card cannot express.
 	if v, ok := catalog.Find(model.Vendor); ok && v.Note != "" {
 		fmt.Printf("\n\033[2mnote: %s\033[0m\n", v.Note)
 	}
 	return nil
-}
-
-func price(m ai.Model, u ai.Usage) string {
-	if !m.Pricing.Known() {
-		return ""
-	}
-	c := m.Pricing.Cost(u)
-	return fmt.Sprintf(" · %.5f %s", c.Total, c.Currency)
 }

@@ -39,14 +39,8 @@ func run(ref, question string) error {
 		return err
 	}
 	fmt.Printf("\033[2m%s · %s · %s\033[0m\n", m.Vendor, m.API, m.BaseURL)
-	if m.ContextWindow == 0 {
-		// A zero window means "nobody published one". The catalog says so
-		// rather than inventing a number, and a caller must treat it as
-		// "cannot size this prompt" instead of assuming something safe.
-		if v, ok := catalog.Find(m.Vendor); ok && v.Note != "" {
-			fmt.Printf("\033[2mwindow unknown: %s\033[0m\n", v.Note)
-		}
-	}
+	// The catalog states no window: limits are the caller's to set on the
+	// model, and a zero one means "cannot size this prompt".
 
 	client, err := auth.Client(ref)
 	if err != nil {

@@ -118,16 +118,6 @@ func TestReachingEachVendor(t *testing.T) {
 			if model.BaseURL != tc.host {
 				t.Errorf("endpoint = %q, want %q", model.BaseURL, tc.host)
 			}
-			// A window of zero means "unknown", which is honest only when the
-			// entry says why — the vendor publishes nothing. Silently zero is
-			// a caller who cannot size a prompt and is not told so.
-			if model.ContextWindow == 0 {
-				v, _ := catalog.Find(model.Vendor)
-				if v.Note == "" {
-					t.Errorf("%s states no context window and no reason; a caller cannot size a prompt "+
-						"against it and nothing says that is deliberate", tc.ref)
-				}
-			}
 
 			// Credential resolution reads exactly the variable the vendor
 			// documents, and nothing else.
@@ -376,53 +366,6 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 	}
 }
 
-// A window a vendor never publishes is still knowable from the generation in
-// the model ID, which is the only place several of them put it. Reporting zero
-// instead is not a small failure for a caller: it is what "cannot size this
-// conversation" means, and everything built on the window goes quiet.
-func TestAGenerationInTheIDIsEnoughToSizeAModel(t *testing.T) {
-	tests := map[string]struct {
-		ref    string
-		window int
-		output int
-	}{
-		// Neither line is a row; both are what the endpoints still serve.
-		"minimax m2":           {"minimax/MiniMax-M2.1", 204_800, 8_192},
-		"minimax m2 highspeed": {"minimax/MiniMax-M2.5-highspeed", 204_800, 8_192},
-		"mimo v2 pro":          {"mimo/mimo-v2-pro", 1_048_576, 131_072},
-		"mimo v2 flash":        {"mimo/mimo-v2-flash", 262_144, 65_536},
-		// The same MiMo model under the name its own listing returns.
-		"mimo vendor-qualified": {"mimo/xiaomi/mimo-v2.5-pro", 1_048_576, 131_072},
-		"an openai generation":  {"openai/o3-mini", 200_000, 100_000},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			model, err := catalog.Model(tc.ref)
-			if err != nil {
-				t.Fatalf("catalog.Model: %v", err)
-			}
-			if model.ContextWindow != tc.window {
-				t.Errorf("ContextWindow = %d, want %d", model.ContextWindow, tc.window)
-			}
-			if model.MaxOutput != tc.output {
-				t.Errorf("MaxOutput = %d, want %d", model.MaxOutput, tc.output)
-			}
-		})
-	}
-
-	// And a generation nobody has checked reports nothing rather than
-	// borrowing the figure of whichever line it sorts next to.
-	unknown, err := catalog.Model("minimax/MiniMax-M9")
-	if err != nil {
-		t.Fatalf("catalog.Model: %v", err)
-	}
-	if unknown.ContextWindow != 0 {
-		t.Errorf("an unrecognised generation was sized at %d; a guessed window "+
-			"is acted on silently and is wrong in both directions", unknown.ContextWindow)
-	}
-}
-
 // A model that reasons has to be able to have that turn replayed, or the
 // conversation ends the first time it thinks: the turn can be read, appended to
 // history, and then never sent back. Which endpoints take their own reasoning
@@ -494,60 +437,16 @@ func TestUnsetEffortIsNotOffOnAModelThatReasonsByDefault(t *testing.T) {
 	}
 }
 
-// Pricing.Cost is an estimate from a published card, and some cards are
-// conditional in ways the card cannot express — DeepSeek bills half price for
-// seventeen hours of every day. A caller who shows that figure as authoritative
-// is wrong most of the time, so the entry has to say so.
-func TestAConditionalRateCardSaysSo(t *testing.T) {
-	model, err := catalog.Model("deepseek/deepseek-v4-pro")
-	if err != nil {
-		t.Fatalf("catalog.Model: %v", err)
-	}
-	if !model.Pricing.Known() {
-		t.Fatal("DeepSeek publishes a card; without one this test guards nothing")
-	}
-	v, ok := catalog.Find(model.Vendor)
-	if !ok {
-		t.Fatalf("no catalog vendor %q", model.Vendor)
-	}
-	if !strings.Contains(strings.ToLower(v.Note), "off-peak") {
-		t.Errorf("DeepSeek's card is half price off-peak and the entry does not say so:\n  %q", v.Note)
-	}
-
-	// And the currency is carried, so a figure is never shown bare. Several
-	// vendors publish in CNY, and summing those with USD produces a number
-	// that looks authoritative and means nothing.
-	if model.Pricing.Currency == "" {
-		t.Error("a known rate card with no currency cannot be displayed or summed safely")
-	}
-}
-
-// Every vendor that states a rate states its currency with it.
-func TestEveryRateCardCarriesItsCurrency(t *testing.T) {
-	for _, v := range catalog.All() {
-		for _, m := range v.ModelList() {
-			if m.Pricing.Known() && m.Pricing.Currency == "" {
-				t.Errorf("%s states rates with no currency", m)
-			}
+// Rate cards and token limits are the application's data: a row that carried
+// one would be a second, slower-moving copy of a figure the vendor changes at
+// will.
+func TestNoRowStatesAPriceOrALimit(t *testing.T) {
+	for _, m := range catalog.Models() {
+		if m.Pricing.Known() {
+			t.Errorf("%s states a rate card; prices belong to the application", m)
 		}
-	}
-}
-
-// A cache-write rate can only ever bill if the protocol behind it reports
-// cache-write tokens, and only the Anthropic Messages driver does. Anywhere
-// else the rate sits in the table unable to apply, which is a figure the SDK
-// would quietly under-report — so the entry has to say so out loud.
-func TestACacheWriteRateCanBeBilledOrSaysWhyNot(t *testing.T) {
-	for _, v := range catalog.All() {
-		for _, m := range v.ModelList() {
-			if m.Pricing.CacheWrite == 0 || m.API == ai.APIAnthropicMessages {
-				continue
-			}
-			if !strings.Contains(strings.ToLower(v.Note), "cache write") {
-				t.Errorf("%s prices cache writes at %g but %s cannot report them, "+
-					"and the vendor note does not say so:\n  %q",
-					m, m.Pricing.CacheWrite, m.API, v.Note)
-			}
+		if m.ContextWindow != 0 || m.MaxOutput != 0 {
+			t.Errorf("%s states limits %d/%d; limits belong to the application", m, m.ContextWindow, m.MaxOutput)
 		}
 	}
 }

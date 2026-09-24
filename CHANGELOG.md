@@ -11,6 +11,22 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
+- **The catalog lists vendors, not models.** A row states how to reach a
+  vendor and speak its protocol — endpoint, credential variables, protocol,
+  `Compat`, headers — and nothing about any model. `Vendor.Models`, `Input`,
+  `Reasoning`, `Infer` and `ModelList`, `catalog.Models`, and
+  `AmbiguousModelError` are gone; `catalog.Model` takes only `"vendor/model"`
+  (a bare ID is an `UnknownModelError`), and `Vendor.Provider` no longer seeds
+  a model list. Which models exist, their `ContextWindow`, `MaxOutput`,
+  `Pricing`, `Input` and `Reasoning` are the application's to set on
+  `ai.Model`; a live listing's figures are still merged by
+  `provider.MergeListing`. Left unset, `Headroom` reports unknown and the
+  Anthropic driver sends its own `max_tokens` default.
+- **A ladder names efforts; the SDK spells them.** `ResolveLevel` fills a rung
+  that states neither `Value` nor `Budget` from the model's `API` and `Compat`
+  — a level string, a budget or a switch — so an application lists only which
+  efforts a model offers. A stated value is still sent as stated. The new
+  `Model.WireEfforts` returns the efforts a model's protocol can tell apart.
 - **The module needs Go 1.26 now.** `golang.org/x/oauth2` declares `go 1.26.0`
   from v0.37.0 on, and a module inherits the highest directive in its graph.
   CI runs 1.26 alone until the two part again.

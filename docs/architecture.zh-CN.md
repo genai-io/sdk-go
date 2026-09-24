@@ -19,11 +19,11 @@ catalog 里 28 家厂商，由 6 个协议服务：
 | Google Gemini | `driver/google` | 1 |
 | Google Gemini on Vertex AI | `driver/google/vertex` | 1 |
 
-绝大多数厂商提供的是一个说别人协议的端点。DeepSeek、Moonshot、Ollama 说 OpenAI Chat Completions；MiniMax、小米 MiMo、火山引擎说 Anthropic Messages。真正区分它们的是一个 base URL、一个环境变量、一套 reasoning 方言和一份模型清单——这四样全是数据。
+绝大多数厂商提供的是一个说别人协议的端点。DeepSeek、Moonshot、Ollama 说 OpenAI Chat Completions；MiniMax、小米 MiMo、火山引擎说 Anthropic Messages。真正区分它们的是一个 base URL、一个环境变量和一套 reasoning 方言——这三样全是数据。
 
 所以**一个厂商是 `catalog/vendors.go` 里的一行，不是一个包**。加一个 OpenAI 兼容的端点是往表里加一条记录；只有新的线格式才需要写 Go 代码。
 
-这条命题是否成立，有个可验证的判据：**没有任何 driver 里出现厂商名**。每个请求构造器分支依据的都是 `Compat` 字段和 `ReasoningLevel` 数据。
+这条命题是否成立，有个可验证的判据：**没有任何 driver 里出现厂商名**。每个请求构造器分支依据的都是 `Compat` 字段和解析出来的 `ReasoningLevel`。
 
 ## 分层
 
@@ -162,9 +162,9 @@ client.Complete(ctx, messages, ai.WithSystem(s), ai.WithEffort(ai.EffortHigh))
 | 每个协议都能表达，只是拼写不同 | 一个 `With*` 选项，由 driver 翻译 |
 | 只有一个协议有 | 那个 driver 的 `ProtocolOptions` 值，原样透传 |
 
-reasoning 档位是第一类最清楚的例子。"该想多久"这个概念到处都有，而每家拼写都不同——Anthropic 要 `thinking.budget_tokens` 或 `output_config.effort`，Gemini 要 `thinkingLevel`，DashScope 要 `enable_thinking` 加 `thinking_budget`。所以它是 `ai.WithEffort(ai.EffortHigh)`，每个 `Model` 自带一份 `[]ReasoningLevel` 梯子，把档位映射到它的端点想要的东西。
+reasoning 档位是第一类最清楚的例子。"该想多久"这个概念到处都有，而每家拼写都不同——Anthropic 要 `thinking.budget_tokens` 或 `output_config.effort`，Gemini 要 `thinkingLevel`，DashScope 要 `enable_thinking` 加 `thinking_budget`。所以它是 `ai.WithEffort(ai.EffortHigh)`，每个 `Model` 自带一份 `[]ReasoningLevel` 梯子，写明它提供哪几档。
 
-**梯子是数据，不是代码**：没有任何 driver 里有 effort 映射表。一个模型还可以声明本包从没听说过的档位，按名字精确匹配就会原样发出去。一个既不在便携词表里、也不在该模型梯子里的名字会被拒绝，而且错误信息里会列出这个模型实际提供哪些档。
+**拼写属于协议，所以推一次就够，不必每个模型各写一遍**：`ResolveLevel` 会按模型的 `API` 和 `Compat` 给没写 `Value`、`Budget` 的档位补上线上的值，没有任何 driver 里有 effort 映射表。写明了值的档位（比如实时列表给的）原样发出。一个模型还可以声明本包从没听说过的档位，按名字精确匹配就会原样发出去。一个既不在便携词表里、也不在该模型梯子里的名字会被拒绝，而且错误信息里会列出这个模型实际提供哪些档。
 
 `thinking.display` 是第二类。别的协议没有这个概念，所以它是 `anthropic.Options.ThinkingDisplay`，不经翻译直接送出。
 
@@ -285,11 +285,11 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **两个 Vertex 的 `API` 值都不是线格式。** 六个 `API` 值里有四个是真正不同的请求形状。`APIAnthropicVertex` 是 Anthropic Messages 换了认证（Google ADC）、换了主机、换了模型 ID 形式，`APIGoogleVertex` 是对 Gemini 请求体做的同一件事；两个 driver 都把构造完客户端之后的一切原样交回各自的父包。它们之所以还是独立的 `API` 值，是因为注册表按 `API` 查 driver，而 Google Cloud auth 依赖很重——**271 个第三方包，对比 `anthropic` 的 43 个**——所以它必须只落进主动要它的构建里。要正经修，得给注册表加第二个维度，代价大于这个瑕疵本身。
 
-**OpenAI 的 cache-write token 没有被计入。** 端点在 `input_tokens_details.cache_write_tokens` 里报告它们，而当前锁定的 `openai-go` 版本没有暴露这个字段，所以在 GPT-5.6 及以后，那部分 token 被按普通 input 计价——**比真实数字少约四分之一**。厂商条目里写明了这一点。
+**OpenAI 的 cache-write token 没有被计入。** 端点在 `input_tokens_details.cache_write_tokens` 里报告它们，而当前锁定的 `openai-go` 版本没有暴露这个字段，所以那部分 token 被并进了 `Usage.Input`。厂商条目里写明了这一点。
 
 **`ResolveLevel` 的吸附是静默的。** 在一个只提供 off 和 high 的模型上要 `medium`，会拿到 high，而没有任何东西告诉调用方。方向是有意的——**静默地想得比要求的少，是更让人意外的那种失败**——但这份静默目前调用方观察不到。
 
-**目录里多数条目没有价格。** 六十二行里有四十行的价目表是零，八行没有上下文窗口。其中一部分是对的——Vertex 由 Google 按项目计费，本地 Ollama 不由任何人计费——剩下的就是一张没人填完的表。对未定价的模型，`Pricing.Cost` 返回零而不是估算值，理由和未知窗口报告零余量是同一个：**猜出来的数字在两个方向上都会静默地错**。所以靠这个计费的调用方，得先确认价目表不是空的，再信那个总额。
+**目录只列厂商，不列模型。** 一家厂商有哪些模型、它们的上下文窗口、最大输出、价格、模态和提供哪些推理档位，变得比协议快得多，跟着 SDK 发版是错的节奏。目录只保留线路需要的东西——端点、凭证变量、协议、各家怪癖——其余由应用用自己的数据填到 `ai.Model` 上。`Reasoning` 只写模型提供哪几档：`ResolveLevel` 按协议和 `Compat` 给每一档补上线上的值，方言只在一个地方，`Model.WireEfforts` 说明这套方言能区分哪几档。不填时，窗口报告零余量、费用算出零而不是猜一个数，Anthropic driver 退回它自己的 `max_tokens` 默认值。
 
 ## 测试
 

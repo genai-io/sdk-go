@@ -16,7 +16,7 @@ loop around it.
 - **Tool calling** — schema derived from your argument struct, arguments checked before your code runs.
 - **Structured outputs** — `CompleteAs[T]` derives the schema, constrains generation and decodes.
 - **Typed errors** — auth, rate limit, context exceeded and unsupported, not substrings to match.
-- **A model catalog** — 28 vendors, 62 models; endpoints, limits and pricing as data.
+- **A vendor catalog** — 28 vendors: how to reach each one and speak its protocol, as data. Which models exist, their limits, prices, modalities and reasoning efforts are the application's to supply; the SDK spells each effort the way the protocol wants.
 - **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
 
 **`pkg/agent` — the loop around it**
@@ -113,7 +113,7 @@ ref := "anthropic/claude-opus-5" // or google/gemini-3.5-flash,
 client, err := auth.Client(ref)
 ```
 
-`catalog.Models()` lists every `vendor/model` reference, without a network call.
+`catalog.All()` lists every vendor, without a network call; the models a vendor serves come from its live listing or from your own data.
 
 Runnable examples are in [`examples/`](examples) — one per vendor, plus
 [`tools/`](examples/tools) and [`structured/`](examples/structured).
@@ -292,9 +292,10 @@ Passing an option is what marks a setting explicit, so `WithTemperature(0)` is
 deterministic sampling and omitting it inherits. Resolution runs model
 defaults, then client defaults, then call overrides.
 
-`WithEffort` is a normalized rung. Each model carries its own ladder onto
-whatever its endpoint wants — a token budget, a level string, an enable flag —
-and snaps to the nearest rung it offers.
+`WithEffort` is a normalized rung. A model's `Reasoning` names the efforts it
+offers; the SDK spells each one the way the endpoint's protocol wants — a token
+budget, a level string, an enable flag — and snaps to the nearest one offered.
+`Model.WireEfforts` lists what the protocol can tell apart.
 
 ### Messages and content
 

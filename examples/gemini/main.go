@@ -30,7 +30,17 @@ func main() {
 }
 
 func run(ref, imagePath string) error {
-	client, err := auth.Client(ref)
+	cfg, err := auth.Config(ref)
+	if err != nil {
+		return err
+	}
+	// The catalog knows the protocol, not the model: say which efforts it
+	// offers, and the SDK spells each one the way the protocol wants.
+	for _, e := range cfg.Model.WireEfforts() {
+		cfg.Model.Reasoning = append(cfg.Model.Reasoning, ai.ReasoningLevel{Effort: e})
+	}
+	cfg.Model.Input = []ai.Modality{ai.ModalityText, ai.ModalityImage}
+	client, err := ai.New(cfg)
 	if err != nil {
 		return err
 	}

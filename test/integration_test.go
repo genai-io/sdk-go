@@ -390,8 +390,8 @@ func TestCatalogResolvesAReference(t *testing.T) {
 	if m.API != ai.APIOpenAIChat {
 		t.Errorf("API = %q; DeepSeek speaks Chat Completions, which is why it needs no driver of its own", m.API)
 	}
-	if m.Vendor != "deepseek" || m.BaseURL == "" || m.ContextWindow == 0 {
-		t.Errorf("model = %+v, want the vendor's endpoint and limits filled in", m)
+	if m.Vendor != "deepseek" || m.BaseURL == "" {
+		t.Errorf("model = %+v, want the vendor's endpoint filled in", m)
 	}
 
 	if _, err := catalog.Model("no-such-model"); err == nil {

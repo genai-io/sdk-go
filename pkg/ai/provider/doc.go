@@ -6,7 +6,7 @@
 // on it, which is what a model picker needs and what a Client cannot give you.
 //
 // That list has two sources and neither is enough alone. The catalog knows
-// pricing, context windows, reasoning ladders and protocol quirks; the host
+// reasoning ladders and protocol quirks; the host
 // knows which models exist today and little else. Provider merges them, with
 // the host authoritative about what exists and about any figure it reported
 // and the catalog filling the rest — because a model stripped of its quirks

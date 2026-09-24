@@ -14,7 +14,7 @@
 - **工具调用** —— schema 从你的参数 struct 推导，参数在你的代码运行前先校验。
 - **结构化输出** —— `CompleteAs[T]` 推导 schema、约束生成、解码答案。
 - **带类型的错误** —— 认证、限流、超上下文、不支持，不是要去匹配的子串。
-- **模型目录** —— 28 家厂商、62 个模型；端点、限额、价格都是数据。
+- **厂商目录** —— 28 家厂商：怎么连上每一家、说它的协议，都是数据。有哪些模型、它们的限额、价格、模态和推理档位由应用提供；SDK 按协议把每一档拼成线上的写法。
 - **不会顺手读凭证** —— `pkg/ai` 不读任何环境变量、不读任何文件。
 
 **`pkg/agent` —— 外面那圈循环**
@@ -103,7 +103,7 @@ ref := "anthropic/claude-opus-5" // 或 google/gemini-3.5-flash、
 client, err := auth.Client(ref)
 ```
 
-`catalog.Models()` **不联网**就能列出全部 `厂商/模型` 引用。
+`catalog.All()` **不联网**就能列出全部厂商；某家有哪些模型，来自它的实时列表或你自己的数据。
 
 可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`tools/`](examples/tools)、[`structured/`](examples/structured) 和四个 agent 例子。
 
@@ -250,7 +250,7 @@ response, err := client.Complete(ctx, messages,
 
 **传了 option 本身就是"显式"的标记**，所以 `WithTemperature(0)` 是确定性采样，不传才是继承。解析顺序：模型默认 → 客户端默认 → 调用处覆盖。
 
-`WithEffort` 是**归一化的档位**。每个模型自带一张梯子，映射到它端点想要的东西——token 预算、级别字符串、开关标志——没有那一档就**贴到最近的一档**。
+`WithEffort` 是**归一化的档位**。模型的 `Reasoning` 只写它提供哪几档；SDK 按端点的协议把每一档拼成它想要的东西——token 预算、级别字符串、开关标志——没有那一档就**贴到最近的一档**。`Model.WireEfforts` 列出协议能区分的档位。
 
 ### 消息与内容
 

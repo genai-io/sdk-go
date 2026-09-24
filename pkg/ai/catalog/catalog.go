@@ -1,13 +1,15 @@
-// Package catalog is the vendor and model directory, as data.
+// Package catalog is the vendor directory, as data: how to reach each vendor
+// and speak its protocol — endpoint, credential variables, protocol and
+// quirks. Which models a vendor serves, their limits, prices, modalities and
+// the reasoning efforts they offer are the application's data; the SDK
+// derives the wire value of an effort from the protocol.
 //
 //	model, err := catalog.Model("deepseek/deepseek-v4-pro")
-//	model, err := catalog.Model("claude-opus-4-6")  // unambiguous, vendor inferred
 //
 // # Where things live
 //
 //	vendors.go   the table — one entry per vendor, and the file to edit
-//	presets.go   the ladders, dialects and shorthands an entry is written in
-//	infer.go     filling in what the table does not state for a model
+//	presets.go   the dialects and deployments an entry is written in
 //	vendor.go    what an entry means, and what a model inherits from it
 //	catalog.go   looking a vendor or a model reference up
 //	errors.go    what an unresolvable reference reports
@@ -73,64 +75,24 @@ func row(id string) (Vendor, bool) {
 	return Vendor{}, false
 }
 
-// Model resolves a model reference.
+// Model resolves a "vendor/model" reference to a model carrying that
+// vendor's protocol facts. The catalog lists no models, so a bare ID is an
+// UnknownModelError.
 func Model(ref string) (ai.Model, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ai.Model{}, fmt.Errorf("catalog: empty model reference")
 	}
-
-	if vendorID, id, ok := strings.Cut(ref, "/"); ok {
-		if v, found := Find(vendorID); found {
-			if id == "" {
-				return ai.Model{}, fmt.Errorf("catalog: reference %q names vendor %q with no model", ref, vendorID)
-			}
-			return v.Model(id), nil
-		}
-	}
-
-	var matches []ai.Model
-	var direct []ai.Model
-	for _, v := range All() {
-		for _, m := range v.Models {
-			if !strings.EqualFold(m.ID, ref) {
-				continue
-			}
-			matches = append(matches, v.decorate(m))
-			if !v.NeedsDeployment() {
-				direct = append(direct, v.decorate(m))
-			}
-		}
-	}
-	// A vendor that needs deployment configuration — a cloud project, a region
-	// — is never what a bare model name means. Someone typing
-	// "claude-opus-5" wants the first-party API; reaching it through Vertex or
-	// a private cloud deployment is a deliberate choice, and naming the vendor
-	// is how that choice is made. Without this rule, adding one alternate
-	// hosting vendor would make every model it serves ambiguous.
-	if len(direct) > 0 {
-		matches = direct
-	}
-	switch len(matches) {
-	case 1:
-		return matches[0], nil
-	case 0:
+	vendorID, id, ok := strings.Cut(ref, "/")
+	if !ok {
 		return ai.Model{}, &UnknownModelError{Ref: ref}
-	default:
-		refs := make([]string, len(matches))
-		for i, m := range matches {
-			refs[i] = m.String()
-		}
-		return ai.Model{}, &AmbiguousModelError{Ref: ref, Candidates: refs}
 	}
-}
-
-// Models returns every known model across all vendors, in vendor display
-// order, retired ones included. Filter with ai.Available for a picker.
-func Models() []ai.Model {
-	var out []ai.Model
-	for _, v := range All() {
-		out = append(out, v.ModelList()...)
+	v, found := Find(vendorID)
+	if !found {
+		return ai.Model{}, &UnknownModelError{Ref: ref}
 	}
-	return out
+	if id == "" {
+		return ai.Model{}, fmt.Errorf("catalog: reference %q names vendor %q with no model", ref, vendorID)
+	}
+	return v.Model(id), nil
 }

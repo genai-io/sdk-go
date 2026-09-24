@@ -39,23 +39,24 @@ func run(ref, question string) error {
 		return err
 	}
 	fmt.Printf("\033[2m%s · %s · %s\033[0m\n", m.Vendor, m.API, m.BaseURL)
-	if m.ContextWindow == 0 {
-		// A zero window means "nobody published one". The catalog says so
-		// rather than inventing a number, and a caller must treat it as
-		// "cannot size this prompt" instead of assuming something safe.
-		if v, ok := catalog.Find(m.Vendor); ok && v.Note != "" {
-			fmt.Printf("\033[2mwindow unknown: %s\033[0m\n", v.Note)
-		}
+	cfg, err := auth.Config(ref)
+	if err != nil {
+		return err
 	}
-
-	client, err := auth.Client(ref)
+	// The catalog knows the protocol, not the model: say which efforts it
+	// offers, and the SDK spells each one the way the protocol wants.
+	for _, e := range cfg.Model.WireEfforts() {
+		cfg.Model.Reasoning = append(cfg.Model.Reasoning, ai.ReasoningLevel{Effort: e})
+	}
+	client, err := ai.New(cfg)
 	if err != nil {
 		return err
 	}
 
 	// Qwen's reasoning switch is neither OpenAI's reasoning_effort nor
 	// Anthropic's budget: DashScope wants enable_thinking plus a token budget.
-	// The catalog records that dialect, so this stays the normalized rung.
+	// The catalog records that dialect, so this stays the normalized rung and
+	// the SDK turns it into the budget.
 	resp, err := client.Complete(context.Background(), []ai.Message{ai.UserMessage(question)},
 		ai.WithSystem("你是一个简洁的 Go 专家。"),
 		ai.WithEffort(ai.EffortMedium))

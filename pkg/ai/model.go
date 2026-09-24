@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 )
 
 // API is a wire protocol — the request/response shape an endpoint speaks.
@@ -224,8 +225,19 @@ func (m Model) DefaultLevel() (ReasoningLevel, bool) {
 	return ReasoningLevel{}, false
 }
 
-// ResolveLevel picks the rung to send for a requested effort.
+// ResolveLevel picks the rung to send for a requested effort. A rung that
+// states neither Value nor Budget gets the one its protocol and Compat use for
+// that effort, so a ladder need only name the efforts a model offers.
 func (m Model) ResolveLevel(want Effort) (ReasoningLevel, bool) {
+	level, ok := m.pickLevel(want)
+	if ok && level.Value == "" && level.Budget == 0 {
+		level.Value, level.Budget = m.wireValue(level.Effort)
+	}
+	return level, ok
+}
+
+// pickLevel is ResolveLevel's choice of rung, before the wire value is filled.
+func (m Model) pickLevel(want Effort) (ReasoningLevel, bool) {
 	if !m.Reasons() {
 		return ReasoningLevel{}, false
 	}
@@ -396,4 +408,114 @@ func cloneModels(models []Model) []Model {
 		out[i] = cloneModel(model)
 	}
 	return out
+}
+
+// dialect is how a model's protocol and Compat carry reasoning on the wire.
+type dialect int
+
+const (
+	dialectNone     dialect = iota // no reasoning field at all
+	dialectLevel                   // a named level; off is omitted or "none"
+	dialectBudget                  // a token budget; off is zero
+	dialectSwitch                  // on or off, nothing between
+	dialectGeminiLv                // Gemini 3's thinkingLevel: LOW, MEDIUM, HIGH
+)
+
+// dialect reads the reasoning dialect from the model's protocol and Compat.
+func (m Model) dialect() dialect {
+	switch {
+	case m.API.anthropicFamily():
+		if CompatOf[AnthropicCompat](m).ForceAdaptiveThinking {
+			return dialectLevel
+		}
+		return dialectBudget
+	case m.API == APIOpenAIResponses:
+		return dialectLevel
+	case m.API == APIOpenAIChat:
+		switch CompatOf[OpenAIChatCompat](m).Thinking {
+		case ThinkingEffort, ThinkingEffortOrDisable, ThinkingReasoningObject:
+			return dialectLevel
+		case ThinkingType:
+			return dialectSwitch
+		case ThinkingEnableFlag:
+			return dialectBudget
+		}
+		return dialectNone
+	case m.API.googleFamily():
+		if CompatOf[GoogleCompat](m).ThinkingLevel {
+			return dialectGeminiLv
+		}
+		return dialectBudget
+	}
+	return dialectNone
+}
+
+// WireEfforts returns the efforts this model's protocol and Compat can tell
+// apart on the wire, least to most; nil when it carries no reasoning at all.
+func (m Model) WireEfforts() []Effort {
+	switch m.dialect() {
+	case dialectLevel:
+		return []Effort{EffortOff, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+	case dialectBudget, dialectGeminiLv:
+		return []Effort{EffortOff, EffortLow, EffortMedium, EffortHigh}
+	case dialectSwitch:
+		return []Effort{EffortOff, EffortHigh}
+	}
+	return nil
+}
+
+// wireValue is what this model's dialect sends for an effort.
+func (m Model) wireValue(e Effort) (value string, budget int) {
+	on := e != EffortOff
+	switch m.dialect() {
+	case dialectLevel:
+		if on && m.API.anthropicFamily() {
+			// output_config.effort has no minimal rung.
+			return string(clampEffort(e, EffortLow, EffortMax)), 0
+		}
+		if on {
+			return string(e), 0
+		}
+		if m.API == APIOpenAIResponses {
+			return "none", 0
+		}
+	case dialectBudget:
+		if on {
+			return "", budgetFor(e)
+		}
+	case dialectSwitch:
+		if on {
+			return "enabled", 0
+		}
+	case dialectGeminiLv:
+		if on {
+			return strings.ToUpper(string(clampEffort(e, EffortLow, EffortHigh))), 0
+		}
+	}
+	return "", 0
+}
+
+// budgetFor is the token budget a budget dialect sends for an effort.
+func budgetFor(e Effort) int {
+	switch clampEffort(e, EffortLow, EffortHigh) {
+	case EffortLow:
+		return 5_000
+	case EffortMedium:
+		return 32_000
+	}
+	return 128_000
+}
+
+// clampEffort pulls an effort into [lo, hi] by rank; an unranked one is hi.
+func clampEffort(e, lo, hi Effort) Effort {
+	r, ok := effortRank(e)
+	loR, _ := effortRank(lo)
+	hiR, _ := effortRank(hi)
+	switch {
+	case !ok || r > hiR:
+		return hi
+	case r < loR:
+		return lo
+	}
+	return e
 }

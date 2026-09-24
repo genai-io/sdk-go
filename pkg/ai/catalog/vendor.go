@@ -53,14 +53,6 @@ type Vendor struct {
 	// vendor that needs no deployment.
 	Deployment func(vars map[string]string, env func(string) string) (ai.ProtocolConfig, error)
 
-	// Input lists the content kinds this vendor's models accept, for models
-	// that do not declare their own. Empty means text only.
-	Input []ai.Modality
-
-	// Reasoning is the ladder for models that do not declare their own,
-	// ordered least to most effort.
-	Reasoning []ai.ReasoningLevel
-
 	// Compat is the protocol behavior copied onto every model that does not
 	// declare its own — one of ai.AnthropicCompat, ai.OpenAIChatCompat,
 	// ai.OpenAIResponsesCompat or ai.GoogleCompat, by value.
@@ -72,16 +64,6 @@ type Vendor struct {
 	// Headers are sent with every request to this vendor.
 	Headers map[string]string
 
-	// Models is the known catalog. It is not exhaustive: Model resolves an
-	// unlisted ID against the vendor's defaults.
-	Models []ai.Model
-
-	// Infer fills in what the Models table does not state for an ID — usually
-	// limits, sometimes reasoning support. Several vendors encode the context
-	// window in the model ID itself ("kimi-...-128k", "glm-5.2-...") and
-	// publish nothing through their API, which no static table keeps up with.
-	Infer func(ai.Model) ai.Model
-
 	// Verified is when this entry was last checked against the vendor's own
 	// published documentation, as YYYY-MM-DD.
 	Verified string
@@ -92,11 +74,6 @@ type Vendor struct {
 	Note string
 }
 
-// noReasoning marks a catalog entry as a model that does not reason, which is
-// different from one that simply does not say — an omitted Reasoning inherits
-// the vendor default. Unexported: an exported slice is one every caller shares.
-var noReasoning = []ai.ReasoningLevel{}
-
 // NeedsDeployment reports whether this vendor requires deployment-scoped
 // configuration — a cloud project, a region — beyond a credential.
 func (v Vendor) NeedsDeployment() bool { return len(v.DeploymentEnv) > 0 }
@@ -105,48 +82,26 @@ func (v Vendor) clone() Vendor {
 	out := v
 	out.KeyEnv = slices.Clone(v.KeyEnv)
 	out.DeploymentEnv = maps.Clone(v.DeploymentEnv)
-	out.Input = slices.Clone(v.Input)
-	out.Reasoning = slices.Clone(v.Reasoning)
 	out.Headers = maps.Clone(v.Headers)
 	// Compat needs no clone: every compat is a struct held in an interface, so
 	// the field copy above is already a copy of the value.
 	out.SamplingParams = maps.Clone(v.SamplingParams)
-	out.Models = make([]ai.Model, len(v.Models))
-	for i, model := range v.Models {
-		out.Models[i] = model.Clone()
-	}
 	return out
 }
 
-// Model resolves a model ID against this vendor, whether or not it is listed.
-func (v Vendor) Model(id string) ai.Model {
-	for _, m := range v.Models {
-		if strings.EqualFold(m.ID, id) {
-			return v.decorate(m)
-		}
-	}
-	return v.decorate(ai.Model{ID: id})
-}
+// Model decorates a model ID with this vendor's protocol facts. It knows
+// nothing about the model itself: limits, prices, modalities and reasoning
+// efforts are the caller's to set.
+func (v Vendor) Model(id string) ai.Model { return v.decorate(ai.Model{ID: id}) }
 
-// Resolve fills in what this vendor knows about a model, overwriting nothing
-// the model already states. It is Model for a model rather than an ID, which is
-// what a live listing needs: a host reports an ID and a name and almost never a
-// window, a ladder or a protocol quirk.
+// Resolve stamps a model with this vendor's protocol facts, overwriting
+// nothing the model already states. A live listing is what needs it: a host
+// reports an ID and a name and never a protocol quirk.
 func (v Vendor) Resolve(m ai.Model) ai.Model { return v.decorate(m) }
 
-// ModelList returns the vendor's known models, fully decorated.
-func (v Vendor) ModelList() []ai.Model {
-	out := make([]ai.Model, len(v.Models))
-	for i, m := range v.Models {
-		out[i] = v.decorate(m)
-	}
-	return out
-}
-
-// decorate fills in everything a catalog entry inherits from its vendor. An
-// entry only spells out what differs from the vendor's defaults, so a table of
-// thirty models stays readable.
+// decorate fills in what a model inherits from its vendor's protocol.
 func (v Vendor) decorate(m ai.Model) ai.Model {
+	m = m.Clone()
 	m.Vendor = v.ID
 	m.API = v.API
 	if m.BaseURL == "" {
@@ -155,38 +110,19 @@ func (v Vendor) decorate(m ai.Model) ai.Model {
 	if m.Name == "" {
 		m.Name = m.ID
 	}
-	if m.Input == nil {
-		m.Input = v.Input
-	}
-	// A nil ladder means "not stated, inherit"; an explicitly empty one
-	// (noReasoning) means "this model does not reason", which a vendor default
-	// must not overwrite.
-	if m.Reasoning == nil {
-		m.Reasoning = v.Reasoning
-	}
 	if m.Compat == nil {
 		m.Compat = v.Compat
 	}
 	if m.SamplingParams == nil {
-		m.SamplingParams = v.SamplingParams
+		m.SamplingParams = maps.Clone(v.SamplingParams)
 	}
 	if m.Headers == nil {
-		m.Headers = v.Headers
+		m.Headers = maps.Clone(v.Headers)
 	}
 	if m.Pricing.Known() && m.Pricing.Currency == "" {
 		m.Pricing.Currency = ai.USD
 	}
-	// One clone, here: everything above is a whole-field assignment, so this
-	// is the first point at which m can share a slice or map with anyone —
-	// either the caller's model or the package-level vendor defaults just
-	// inherited. Infer is allowed to edit its argument, never those.
-	m = m.Clone()
-	// A retired model is a signpost, not an offer: leaving its limits at zero
-	// keeps it from looking usable in a picker that only reads the numbers.
-	if v.Infer != nil && m.Stage.Available() {
-		m = v.Infer(m)
-	}
-	return m.Clone()
+	return m
 }
 
 // ResolveBaseURL applies an override to a vendor's endpoint.
@@ -202,8 +138,8 @@ func (v Vendor) ResolveBaseURL(override string) string {
 	return override
 }
 
-// Provider builds a live provider for this vendor, seeded with its catalog
-// models as the static baseline.
+// Provider builds a live provider for this vendor. Its models come from
+// cfg.Models and the endpoint's own listing.
 func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	cfg.ID = v.ID
 	if cfg.Name == "" {
@@ -212,9 +148,6 @@ func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	cfg.API = v.API
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = v.BaseURL
-	}
-	if cfg.Models == nil {
-		cfg.Models = v.ModelList()
 	}
 	if cfg.Headers == nil {
 		cfg.Headers = v.Headers

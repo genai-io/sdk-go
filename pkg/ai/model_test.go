@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -183,5 +184,88 @@ func TestTheAnthropicFamilyIsBothOfItsProtocols(t *testing.T) {
 		if got := api.anthropicFamily(); got != want {
 			t.Errorf("%q.anthropicFamily() = %v, want %v", api, got, want)
 		}
+	}
+}
+
+// A ladder names efforts only; the wire value is the protocol's to know.
+func TestAnEffortIsSpelledTheWayItsProtocolSpellsIt(t *testing.T) {
+	type want struct {
+		value  string
+		budget int
+	}
+	tests := map[string]struct {
+		model Model
+		cases map[Effort]want
+		wire  []Effort
+	}{
+		"anthropic adaptive": {
+			Model{API: APIAnthropicMessages, Compat: AnthropicCompat{ForceAdaptiveThinking: true}},
+			map[Effort]want{EffortOff: {}, EffortMinimal: {value: "low"}, EffortMedium: {value: "medium"}, EffortMax: {value: "max"}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+		},
+		"anthropic budget": {
+			Model{API: APIAnthropicVertex},
+			map[Effort]want{EffortOff: {}, EffortLow: {budget: 5_000}, EffortMedium: {budget: 32_000}, EffortMax: {budget: 128_000}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh},
+		},
+		"openai responses": {
+			Model{API: APIOpenAIResponses},
+			map[Effort]want{EffortOff: {value: "none"}, EffortHigh: {value: "high"}, EffortXHigh: {value: "xhigh"}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+		},
+		"chat effort or disable": {
+			Model{API: APIOpenAIChat, Compat: OpenAIChatCompat{Thinking: ThinkingEffortOrDisable}},
+			map[Effort]want{EffortOff: {}, EffortHigh: {value: "high"}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+		},
+		"chat thinking type": {
+			Model{API: APIOpenAIChat, Compat: OpenAIChatCompat{Thinking: ThinkingType}},
+			map[Effort]want{EffortOff: {}, EffortHigh: {value: "enabled"}},
+			[]Effort{EffortOff, EffortHigh},
+		},
+		"chat enable flag": {
+			Model{API: APIOpenAIChat, Compat: OpenAIChatCompat{Thinking: ThinkingEnableFlag}},
+			map[Effort]want{EffortOff: {}, EffortMedium: {budget: 32_000}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh},
+		},
+		"chat without a switch": {
+			Model{API: APIOpenAIChat},
+			map[Effort]want{EffortHigh: {}},
+			nil,
+		},
+		"gemini level": {
+			Model{API: APIGoogleGenAI, Compat: GoogleCompat{ThinkingLevel: true}},
+			map[Effort]want{EffortOff: {}, EffortLow: {value: "LOW"}, EffortMax: {value: "HIGH"}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh},
+		},
+		"gemini budget": {
+			Model{API: APIGoogleVertex},
+			map[Effort]want{EffortOff: {}, EffortHigh: {budget: 128_000}},
+			[]Effort{EffortOff, EffortLow, EffortMedium, EffortHigh},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.model.WireEfforts(); !slices.Equal(got, tc.wire) {
+				t.Errorf("WireEfforts = %v, want %v", got, tc.wire)
+			}
+			for effort, w := range tc.cases {
+				m := tc.model
+				m.Reasoning = []ReasoningLevel{{Effort: effort}}
+				got, ok := m.ResolveLevel(effort)
+				if !ok {
+					t.Fatalf("%s: no rung", effort)
+				}
+				if got.Value != w.value || got.Budget != w.budget {
+					t.Errorf("%s = %q/%d, want %q/%d", effort, got.Value, got.Budget, w.value, w.budget)
+				}
+			}
+		})
+	}
+
+	// A value the ladder states is sent as stated.
+	m := Model{API: APIOpenAIResponses, Reasoning: []ReasoningLevel{{Effort: EffortHigh, Value: "custom"}}}
+	if got, _ := m.ResolveLevel(EffortHigh); got.Value != "custom" {
+		t.Errorf("stated value = %q, want it kept", got.Value)
 	}
 }

@@ -9,6 +9,12 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-24
+
+The catalog keeps protocol facts only: which models a vendor serves, their
+limits, prices, input kinds and reasoning efforts are the application's to
+supply, and the SDK derives the wire value of an effort from the protocol.
+
 ### Changed
 
 - **The catalog lists vendors, not models.** A row states how to reach a
@@ -677,6 +683,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.7.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.0
 [0.6.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.6.0
 [0.5.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.5.0
 [0.4.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.4.2

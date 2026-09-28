@@ -9,6 +9,13 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A gateway's context window was dropped from the OpenAI Chat model
+  listing.** Only OpenRouter's `context_length` was read; LiteLLM and VS Code
+  LM gateways (e.g. GitHub Copilot API Gateway) report `max_input_tokens`,
+  which left the window unknown. Both are now read.
+
 ## [0.7.0] - 2026-09-24
 
 The catalog keeps protocol facts only: which models a vendor serves, their

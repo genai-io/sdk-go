@@ -167,8 +167,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 // Models lists what the endpoint serves. Most OpenAI-compatible endpoints
 // return the bare shape — id, object, owned_by — with no limits; where one
-// includes context_length it is read out of the raw JSON, since the typed SDK
-// struct has no field for a non-standard extension.
+// includes a window it is read out of the raw JSON, since the typed SDK struct
+// has no field for a non-standard extension. OpenRouter spells it
+// context_length; LiteLLM and VS Code LM gateways, max_input_tokens.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	// One request is the whole listing: the SDK's page type for /models reports
 	// no next page ever, because the endpoint does not paginate.
@@ -181,10 +182,16 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		model := ai.Model{ID: m.ID, Name: m.ID, API: ai.APIOpenAIChat, Vendor: d.model.Vendor}
 		if raw := m.RawJSON(); raw != "" {
 			var extra struct {
-				ContextLength int `json:"context_length"`
+				ContextLength  int `json:"context_length"`
+				MaxInputTokens int `json:"max_input_tokens"`
 			}
-			if json.Unmarshal([]byte(raw), &extra) == nil && extra.ContextLength > 0 {
-				model.ContextWindow = extra.ContextLength
+			if json.Unmarshal([]byte(raw), &extra) == nil {
+				switch {
+				case extra.ContextLength > 0:
+					model.ContextWindow = extra.ContextLength
+				case extra.MaxInputTokens > 0:
+					model.ContextWindow = extra.MaxInputTokens
+				}
 			}
 		}
 		out = append(out, model)

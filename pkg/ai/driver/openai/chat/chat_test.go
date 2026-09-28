@@ -272,3 +272,26 @@ func TestAnAmbientCredentialIsNeverUsed(t *testing.T) {
 		}
 	}
 }
+
+// A listing's window is read under either spelling gateways use, and a bare
+// entry stays unknown rather than guessed.
+func TestModelsReadTheWindowUnderEitherSpelling(t *testing.T) {
+	s := replies(t, http.StatusOK, nil, `{"object":"list","data":[
+		{"id":"openrouter","object":"model","context_length":200000},
+		{"id":"gateway","object":"model","max_input_tokens":128000},
+		{"id":"bare","object":"model"}]}`)
+
+	models, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*Driver).Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	want := map[string]int{"openrouter": 200000, "gateway": 128000, "bare": 0}
+	for _, m := range models {
+		if m.ContextWindow != want[m.ID] {
+			t.Errorf("%s: ContextWindow = %d, want %d", m.ID, m.ContextWindow, want[m.ID])
+		}
+	}
+	if len(models) != len(want) {
+		t.Fatalf("got %d models, want %d", len(models), len(want))
+	}
+}

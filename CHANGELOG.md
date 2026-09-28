@@ -9,6 +9,8 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-28
+
 ### Fixed
 
 - **A gateway's context window was dropped from the OpenAI Chat model
@@ -690,6 +692,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.7.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.1
 [0.7.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.0
 [0.6.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.6.0
 [0.5.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.5.0

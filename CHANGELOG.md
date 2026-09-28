@@ -9,6 +9,16 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-28
+
+### Changed
+
+- **Anthropic caches the conversation, not just tools and system.** A second
+  cache breakpoint on the newest block lets each step read the conversation
+  so far at the cache-read rate and pay in full only for what it adds.
+  Reported cache tokens therefore no longer equal the tool definitions plus
+  the system prompt.
+
 ## [0.7.1] - 2026-09-28
 
 ### Fixed
@@ -692,6 +702,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.7.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.2
 [0.7.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.1
 [0.7.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.0
 [0.6.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.6.0

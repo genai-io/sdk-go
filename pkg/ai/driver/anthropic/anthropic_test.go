@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -394,5 +395,56 @@ func TestTheDefaultHostIsTheVendorsOwn(t *testing.T) {
 	}
 	if want := "https://api.anthropic.com/v1/messages"; asked != want {
 		t.Errorf("request went to %q, want %q", asked, want)
+	}
+}
+
+// Two breakpoints: the system block, shared by every conversation that starts
+// the same way, and the newest block, so each step reads the conversation so
+// far from cache instead of paying for all of it again.
+func TestTheConversationIsCachedUpToItsNewestBlock(t *testing.T) {
+	type block struct {
+		CacheControl *struct{ Type string } `json:"cache_control"`
+	}
+	type sent struct {
+		System   []block
+		Messages []struct{ Content []block }
+	}
+	for _, tc := range []struct {
+		name      string
+		retention ai.CacheRetention
+		wants     bool
+	}{
+		{name: "default", wants: true},
+		{name: "none", retention: ai.CacheNone, wants: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := sse(t, done...)
+			req := &ai.Request{
+				System: "sys",
+				Messages: []ai.Message{
+					ai.UserMessage("hi"),
+					{Role: ai.RoleAssistant, Content: ai.TextContent("ok")},
+					ai.UserMessage("go on"),
+				},
+				CacheRetention: tc.retention,
+			}
+			if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), req); err != nil {
+				t.Fatalf("stream: %v", err)
+			}
+			_, body, _ := s.seen()
+			var got sent
+			if err := json.Unmarshal([]byte(body), &got); err != nil {
+				t.Fatalf("body: %v", err)
+			}
+			marked := func(b block) bool { return b.CacheControl != nil }
+			last := got.Messages[len(got.Messages)-1].Content
+			if marked(got.System[0]) != tc.wants || marked(last[len(last)-1]) != tc.wants {
+				t.Errorf("breakpoints on system/newest block = %v/%v, want %v; body was %s",
+					marked(got.System[0]), marked(last[len(last)-1]), tc.wants, body)
+			}
+			if marked(got.Messages[0].Content[0]) {
+				t.Errorf("an older block carries a breakpoint; body was %s", body)
+			}
+		})
 	}
 }

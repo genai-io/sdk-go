@@ -105,6 +105,19 @@ func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewPa
 		}
 	}
 	msgs = mergeConsecutive(msgs)
+	// A second breakpoint on the newest block caches the conversation: the
+	// next step reads everything up to here and pays in full only for what it
+	// adds. The system breakpoint below keeps tools and system cached across
+	// conversations.
+	if cc := d.cacheControl(req.CacheRetention); cc != nil && len(msgs) > 0 {
+		last := msgs[len(msgs)-1].Content
+		for i := len(last) - 1; i >= 0; i-- {
+			if p := last[i].GetCacheControl(); p != nil {
+				*p = *cc
+				break
+			}
+		}
+	}
 
 	maxTokens := int64(req.MaxTokens)
 	if maxTokens <= 0 {
@@ -148,11 +161,10 @@ func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewPa
 	}
 	if req.System != "" {
 		block := sdk.TextBlockParam{Text: req.System}
-		// One cache breakpoint at the end of the system block. Anthropic
-		// renders a request as tools → system → messages, so the cached prefix
-		// is exactly the tool definitions plus the system prompt — which makes
-		// the reported cache tokens an exact measurement of those two. Moving
-		// or adding a breakpoint invalidates that reading.
+		// A breakpoint at the end of the system block. Anthropic renders a
+		// request as tools → system → messages, so this entry is the tool
+		// definitions plus the system prompt, shared by every conversation
+		// that starts the same way.
 		if cc := d.cacheControl(req.CacheRetention); cc != nil {
 			block.CacheControl = *cc
 		}

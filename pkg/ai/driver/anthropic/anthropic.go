@@ -160,8 +160,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		stream := d.client.Messages.NewStreaming(ctx, *params, requestOptions(req, native)...)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
-		var toolID, toolName string
-		var toolInput strings.Builder
+		// Tool input is kept per content-block index: a compatible endpoint
+		// may interleave two calls' fragments, which Anthropic itself never does.
+		tools := map[int64]*toolBlock{}
 
 		for stream.Next() {
 			event := stream.Current()
@@ -188,9 +189,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				block := event.AsContentBlockStart()
 				switch block.ContentBlock.Type {
 				case "tool_use":
-					toolID = block.ContentBlock.ID
-					toolName = block.ContentBlock.Name
-					toolInput.Reset()
+					tools[block.Index] = &toolBlock{id: block.ContentBlock.ID, name: block.ContentBlock.Name}
 				case "redacted_thinking":
 					// Thinking the safety classifier withheld: unreadable, but
 					// the API rejects a tool-use turn whose history drops it.
@@ -212,7 +211,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				case "signature_delta":
 					out.Block = ai.ThinkingBlock("", delta.Delta.Signature)
 				case "input_json_delta":
-					toolInput.WriteString(delta.Delta.PartialJSON)
+					if tool := tools[delta.Index]; tool != nil {
+						tool.input.WriteString(delta.Delta.PartialJSON)
+					}
 					continue
 				default:
 					continue
@@ -222,7 +223,10 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				}
 
 			case "content_block_stop":
-				if toolID == "" || toolName == "" {
+				index := event.AsContentBlockStop().Index
+				tool := tools[index]
+				delete(tools, index)
+				if tool == nil || tool.id == "" || tool.name == "" {
 					// A text or thinking block ended. Anthropic is one of the
 					// few protocols that says so, which is what lets two
 					// adjacent blocks of the same kind be told apart.
@@ -231,9 +235,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					}
 					continue
 				}
-				call := ai.ToolCall{ID: toolID, Name: toolName, Input: toolInput.String()}
-				toolID, toolName = "", ""
-				toolInput.Reset()
+				call := ai.ToolCall{ID: tool.id, Name: tool.name, Input: tool.input.String()}
 				if !yield(ai.Delta{Block: ai.ToolCallBlock(call)}, nil) {
 					return
 				}
@@ -261,6 +263,12 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			yield(ai.Delta{}, d.fail.WrapStream(err))
 		}
 	}
+}
+
+// toolBlock is one tool_use block whose input is still streaming.
+type toolBlock struct {
+	id, name string
+	input    strings.Builder
 }
 
 // mapStopReason translates Anthropic's stop reasons.

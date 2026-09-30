@@ -273,3 +273,55 @@ func TestTheDefaultHostIsTheVendorsOwn(t *testing.T) {
 		t.Errorf("request went to %q, want %q", asked, want)
 	}
 }
+
+func toolCalls(deltas []ai.Delta) []ai.ToolCall {
+	var calls []ai.ToolCall
+	for _, d := range deltas {
+		if d.Block.Type == ai.BlockToolCall {
+			calls = append(calls, *d.Block.ToolCall)
+		}
+	}
+	return calls
+}
+
+const completed = `{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","status":"completed"}}`
+
+// A call's arguments stream against its output-item ID and arrive whole.
+func TestAToolCallIsAssembledFromItsArgumentStream(t *testing.T) {
+	s := sse(t,
+		`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"file_path\":"}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"a.py\"}"}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":"{\"file_path\":\"a.py\"}"}}`,
+		completed,
+	)
+	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	calls := toolCalls(deltas)
+	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Input != `{"file_path":"a.py"}` {
+		t.Fatalf("calls = %+v, want one Read of a.py", calls)
+	}
+}
+
+// An endpoint may name the same output item differently on each event (a
+// proxy that re-encodes item IDs). The call is still one call: keyed by
+// call_id, with the finished item's arguments — not a second, empty copy of it
+// that runs too.
+func TestACallWhoseItemIDChangesBetweenEventsIsStillOneCall(t *testing.T) {
+	s := sse(t,
+		`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_added","call_id":"call_1","name":"Read","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_delta","delta":"{\"file_path\":\"a.py\"}"}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_done","call_id":"call_1","name":"Read","arguments":"{\"file_path\":\"a.py\"}"}}`,
+		completed,
+	)
+	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	calls := toolCalls(deltas)
+	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Input != `{"file_path":"a.py"}` {
+		t.Fatalf("calls = %+v, want one Read of a.py", calls)
+	}
+}

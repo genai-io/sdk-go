@@ -67,9 +67,12 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		stream := d.client.Responses.NewStreaming(ctx, params, oai.RequestOptions(req)...)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
-		// Responses identifies a function call by output-item ID while its
-		// arguments stream, so calls are collected and emitted at the end.
+		// A call is keyed by its call_id, the one name every event agrees on:
+		// argument deltas carry only an output-item ID, which some endpoints
+		// re-encode per event, so items map to calls and the finished item's
+		// arguments are taken whole. Calls not finished are emitted at the end.
 		calls := make(map[string]*ai.ToolCall)
+		items := make(map[string]string)
 		order := make(map[string]int)
 		emitted := make(map[string]bool)
 		// A refusal is finished off by an ordinary response.completed, whose
@@ -123,12 +126,14 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					continue
 				}
 				fn := item.Item.AsFunctionCall()
-				calls[fn.ID] = &ai.ToolCall{ID: fn.CallID, Name: fn.Name}
-				order[fn.ID] = len(order)
+				key := callKey(fn)
+				calls[key] = &ai.ToolCall{ID: fn.CallID, Name: fn.Name}
+				items[fn.ID] = key
+				order[key] = len(order)
 
 			case "response.function_call_arguments.delta":
 				delta := event.AsResponseFunctionCallArgumentsDelta()
-				if call, ok := calls[delta.ItemID]; ok {
+				if call, ok := calls[items[delta.ItemID]]; ok {
 					call.Input += delta.Delta
 				}
 
@@ -146,11 +151,15 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					}
 				case "function_call":
 					fn := item.AsFunctionCall()
-					call := calls[fn.ID]
+					key := callKey(fn)
+					call := calls[key]
 					if call == nil {
-						call = &ai.ToolCall{ID: fn.CallID, Name: fn.Name, Input: fn.Arguments}
+						call = &ai.ToolCall{ID: fn.CallID, Name: fn.Name}
 					}
-					emitted[fn.ID] = true
+					if fn.Arguments != "" {
+						call.Input = fn.Arguments
+					}
+					emitted[key] = true
 					if !yield(ai.Delta{Block: ai.ToolCallBlock(*call)}, nil) {
 						return
 					}
@@ -295,6 +304,15 @@ func isTextModel(id string) bool {
 
 // extractReasoningItem keeps only replayable state. Without encrypted content
 // an item cannot restore anything on a stateless backend.
+// callKey names a function call across its events: its call_id, or the item
+// ID for an endpoint that leaves call_id out.
+func callKey(fn wire.ResponseFunctionToolCall) string {
+	if fn.CallID != "" {
+		return fn.CallID
+	}
+	return fn.ID
+}
+
 func extractReasoningItem(item wire.ResponseOutputItemUnion) (ai.ReasoningItem, bool) {
 	r := item.AsReasoning()
 	if r.EncryptedContent == "" {

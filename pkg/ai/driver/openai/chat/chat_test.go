@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/catalog"
+	"github.com/genai-io/sdk-go/pkg/ai/provider"
 )
 
 // stub is a Chat Completions endpoint that replays a scripted stream and
@@ -293,5 +295,45 @@ func TestModelsReadTheWindowUnderEitherSpelling(t *testing.T) {
 	}
 	if len(models) != len(want) {
 		t.Fatalf("got %d models, want %d", len(models), len(want))
+	}
+}
+
+// Copilot serves its newest GPT models over Responses only. The listing says
+// so, and neither the vendor's decoration nor a merge over a Chat baseline may
+// put them back on Chat, which refuses them.
+func TestModelsRouteResponsesOnlyEntriesToResponses(t *testing.T) {
+	s := replies(t, http.StatusOK, nil, `{"object":"list","data":[
+		{"id":"gpt-6-luna","object":"model","supported_endpoints":["/responses"]},
+		{"id":"gpt-5","object":"model","supported_endpoints":["/chat/completions","/responses"]},
+		{"id":"claude","object":"model","supported_endpoints":["/chat/completions"]},
+		{"id":"bare","object":"model"}]}`)
+
+	listed, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*Driver).Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	copilot, ok := catalog.Find("copilot")
+	if !ok {
+		t.Fatal("no copilot vendor")
+	}
+	want := map[string]ai.API{
+		"gpt-6-luna": ai.APIOpenAIResponses,
+		"gpt-5":      ai.APIOpenAIChat,
+		"claude":     ai.APIOpenAIChat,
+		"bare":       ai.APIOpenAIChat,
+	}
+	msgs := []ai.Message{ai.UserMessage("hi")}
+	for _, live := range listed {
+		for path, m := range map[string]ai.Model{
+			"decorated": copilot.Resolve(live),
+			"merged":    provider.MergeListing(copilot.Model(live.ID), live),
+		} {
+			if m.API != want[m.ID] {
+				t.Errorf("%s %s: API = %s, want %s", path, m.ID, m.API, want[m.ID])
+			}
+			if err := m.Validate(msgs); err != nil {
+				t.Errorf("%s %s: %v", path, m.ID, err)
+			}
+		}
 	}
 }

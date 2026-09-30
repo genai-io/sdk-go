@@ -229,7 +229,21 @@ func MergeListing(base, live ai.Model) ai.Model {
 	if live.Pricing.Known() {
 		out.Pricing = live.Pricing
 	}
+	if api := ListedAPI(out.API, live.API); api != out.API {
+		out.API, out.Compat = api, live.Compat
+	}
 	return out
+}
+
+// ListedAPI is the protocol a listed model speaks: the provider's own, unless
+// a Chat endpoint lists the model as Responses-only, as GitHub Copilot does
+// its newest GPT models. Any other protocol a listing names is the driver's
+// default, not the host's word, and the provider's wins.
+func ListedAPI(provider, listed ai.API) ai.API {
+	if provider == ai.APIOpenAIChat && listed == ai.APIOpenAIResponses {
+		return listed
+	}
+	return provider
 }
 
 // cloneAll snapshots a model list wherever one crosses in or out of an

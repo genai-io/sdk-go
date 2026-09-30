@@ -448,3 +448,97 @@ func TestTheConversationIsCachedUpToItsNewestBlock(t *testing.T) {
 		})
 	}
 }
+
+func toolCalls(deltas []ai.Delta) []ai.ToolCall {
+	var calls []ai.ToolCall
+	for _, d := range deltas {
+		if d.Block.Type == ai.BlockToolCall {
+			calls = append(calls, *d.Block.ToolCall)
+		}
+	}
+	return calls
+}
+
+// toolStream wraps content-block events in the message that carries them.
+func toolStream(t *testing.T, blocks ...event) []ai.ToolCall {
+	t.Helper()
+	events := append([]event{done[0]}, blocks...)
+	s := sse(t, append(events, done[1])...)
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	return toolCalls(deltas)
+}
+
+func toolStart(index int, id, name string) event {
+	return event{"content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":%q,"name":%q,"input":{}}}`, index, id, name)}
+}
+
+func toolInput(index int, partial string) event {
+	return event{"content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%q}}`, index, partial)}
+}
+
+func blockStop(index int) event {
+	return event{"content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, index)}
+}
+
+// A call's input streams in fragments and arrives whole.
+func TestAToolCallIsAssembledFromItsInputFragments(t *testing.T) {
+	calls := toolStream(t,
+		toolStart(0, "toolu_1", "Read"),
+		toolInput(0, `{"file_`),
+		toolInput(0, `path":`),
+		toolInput(0, `"a.py"}`),
+		blockStop(0),
+	)
+	if len(calls) != 1 || calls[0].ID != "toolu_1" || calls[0].Name != "Read" || calls[0].Input != `{"file_path":"a.py"}` {
+		t.Fatalf("calls = %+v, want one Read of a.py", calls)
+	}
+}
+
+func TestTwoToolCallsInARowArriveAsTwoCallsInOrder(t *testing.T) {
+	calls := toolStream(t,
+		toolStart(0, "toolu_1", "Read"),
+		toolInput(0, `{"file_path":"a.py"}`),
+		blockStop(0),
+		toolStart(1, "toolu_2", "Read"),
+		toolInput(1, `{"file_path":"b.py"}`),
+		blockStop(1),
+	)
+	if len(calls) != 2 || calls[0].ID != "toolu_1" || calls[0].Input != `{"file_path":"a.py"}` ||
+		calls[1].ID != "toolu_2" || calls[1].Input != `{"file_path":"b.py"}` {
+		t.Fatalf("calls = %+v, want a.py then b.py", calls)
+	}
+}
+
+// A compatible endpoint may interleave two calls' input fragments. Each
+// fragment belongs to the block its index names, not the one opened last.
+func TestInterleavedToolCallsKeepTheirOwnInput(t *testing.T) {
+	calls := toolStream(t,
+		toolStart(0, "toolu_1", "Read"),
+		toolStart(1, "toolu_2", "Read"),
+		toolInput(0, `{"file_path":`),
+		toolInput(1, `{"file_path":`),
+		toolInput(0, `"a.py"}`),
+		toolInput(1, `"b.py"}`),
+		blockStop(0),
+		blockStop(1),
+	)
+	if len(calls) != 2 || calls[0].ID != "toolu_1" || calls[0].Input != `{"file_path":"a.py"}` ||
+		calls[1].ID != "toolu_2" || calls[1].Input != `{"file_path":"b.py"}` {
+		t.Fatalf("calls = %+v, want toolu_1 on a.py and toolu_2 on b.py", calls)
+	}
+}
+
+// A call that takes no arguments streams no fragments; its input stays empty
+// rather than inventing one.
+func TestAToolCallWithNoInputFragmentsHasEmptyInput(t *testing.T) {
+	calls := toolStream(t,
+		toolStart(0, "toolu_1", "Now"),
+		blockStop(0),
+	)
+	if len(calls) != 1 || calls[0].ID != "toolu_1" || calls[0].Input != "" {
+		t.Fatalf("calls = %+v, want one Now with empty input", calls)
+	}
+}

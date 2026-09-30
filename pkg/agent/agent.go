@@ -335,22 +335,6 @@ func (a *Agent) Client() *ai.Client {
 	return a.client
 }
 
-// SetClient replaces the model handle, from the next inference on: a person
-// switching model mid-session, with the conversation, the tools and the prompt
-// unchanged. Setting Inference.Client in a PreInfer hook moves one call
-// instead.
-//
-// A nil client is ignored, because New already said an agent cannot exist
-// without one.
-func (a *Agent) SetClient(c *ai.Client) {
-	if c == nil {
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.client = c
-}
-
 // System returns the system prompt as it stands.
 func (a *Agent) System() string {
 	a.mu.Lock()

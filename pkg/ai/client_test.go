@@ -303,7 +303,7 @@ func TestPrepareCleansTheSystemPrompt(t *testing.T) {
 }
 
 // The conversation is the same conversation whichever model is asked, which is
-// what Agent.SetClient and Inference.Client are for. A reasoning model leaves
+// what Inference.Client is for. A reasoning model leaves
 // its own state in it — a signed thinking block, an opaque reasoning item —
 // and the next model is usually not the one that produced them.
 //

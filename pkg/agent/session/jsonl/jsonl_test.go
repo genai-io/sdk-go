@@ -138,65 +138,15 @@ func TestMessagesFoldsOnlyMessageEntries(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	msgs, err := session.Messages(ctx(), s, meta.ID)
+	_, msgs, err := session.Open(ctx(), s, meta.ID)
 	if err != nil {
-		t.Fatalf("Messages: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if len(msgs) != 2 {
 		t.Fatalf("folded %d messages, want 2 — the inference entry is not one", len(msgs))
 	}
 	if msgs[0].Text() != "hello" || msgs[1].Text() != "again" {
 		t.Errorf("folded %q and %q", msgs[0].Text(), msgs[1].Text())
-	}
-}
-
-func TestMetaSurvivesAppend(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	meta.Title = "a title worth keeping"
-	if err := s.SetMeta(ctx(), meta); err != nil {
-		t.Fatalf("SetMeta: %v", err)
-	}
-	if err := s.Append(ctx(), meta.ID, msg("a")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	got, err := s.Meta(ctx(), meta.ID)
-	if err != nil {
-		t.Fatalf("Meta: %v", err)
-	}
-	if got.Title != "a title worth keeping" {
-		t.Errorf("title = %q, want it preserved across an append", got.Title)
-	}
-	if got.Entries != 1 {
-		t.Errorf("Entries = %d, want 1", got.Entries)
-	}
-}
-
-// Entries is the store's to maintain, so a stale copy handed back must not
-// undo what the store has counted since.
-func TestSetMetaCannotRewriteTheCount(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("a"), msg("b")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	stale := meta // captured before the appends: Entries is 0 here
-	stale.Title = "renamed"
-	if err := s.SetMeta(ctx(), stale); err != nil {
-		t.Fatalf("SetMeta: %v", err)
-	}
-
-	got, err := s.Meta(ctx(), meta.ID)
-	if err != nil {
-		t.Fatalf("Meta: %v", err)
-	}
-	if got.Entries != 2 {
-		t.Errorf("Entries = %d after a stale SetMeta, want 2 — the store owns this field", got.Entries)
-	}
-	if got.Title != "renamed" {
-		t.Errorf("title = %q, want the caller's field to have been taken", got.Title)
 	}
 }
 
@@ -220,61 +170,6 @@ func TestListIsNewestFirst(t *testing.T) {
 	}
 	if list[1].ID != second.ID {
 		t.Errorf("second listed = %q, want %q", list[1].ID, second.ID)
-	}
-}
-
-func TestForkCopiesUpToTheCut(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	forked, err := s.Fork(ctx(), meta.ID, 2)
-	if err != nil {
-		t.Fatalf("Fork: %v", err)
-	}
-	if got := read(t, s, forked.ID); len(got) != 2 {
-		t.Fatalf("fork holds %d entries, want 2", len(got))
-	}
-	if got := read(t, s, meta.ID); len(got) != 3 {
-		t.Errorf("forking changed the original: %d entries", len(got))
-	}
-}
-
-func TestForkRecordsWhereItCameFrom(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("one"), msg("two")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	forked, err := s.Fork(ctx(), meta.ID, 1)
-	if err != nil {
-		t.Fatalf("Fork: %v", err)
-	}
-	if forked.Parent != meta.ID {
-		t.Errorf("fork's Parent = %q, want %q", forked.Parent, meta.ID)
-	}
-	if forked.ForkedAt != 1 {
-		t.Errorf("fork's ForkedAt = %d, want 1", forked.ForkedAt)
-	}
-	if forked.ID == meta.ID {
-		t.Error("a fork must be its own session")
-	}
-}
-
-func TestDeleteIsIdempotent(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Delete(ctx(), meta.ID); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if err := s.Delete(ctx(), meta.ID); err != nil {
-		t.Errorf("deleting an absent session = %v, want nil", err)
-	}
-	if _, err := s.Meta(ctx(), meta.ID); !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("Meta after Delete = %v, want ErrNotFound", err)
 	}
 }
 
@@ -500,17 +395,8 @@ func TestAnIdThatIsNotOneIsRefused(t *testing.T) {
 			if err := s.Append(ctx(), id, msg("x")); err == nil {
 				t.Error("Append accepted it")
 			}
-			if err := s.Delete(ctx(), id); err == nil {
-				t.Error("Delete accepted it")
-			}
 			if _, err := s.Meta(ctx(), id); err == nil {
 				t.Error("Meta accepted it")
-			}
-			if err := s.SetMeta(ctx(), session.Meta{ID: id}); err == nil {
-				t.Error("SetMeta accepted it")
-			}
-			if _, err := s.Fork(ctx(), id, 0); err == nil {
-				t.Error("Fork accepted it")
 			}
 			var failed bool
 			for _, err := range s.Entries(ctx(), id) {
@@ -615,54 +501,7 @@ func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
 	if failure == nil {
 		t.Fatalf("the session read back as %d entries and said nothing; the middle of it is missing", read)
 	}
-	if _, err := session.Messages(ctx(), reopened, meta.ID); err == nil {
+	if _, _, err := session.Open(ctx(), reopened, meta.ID); err == nil {
 		t.Error("the fold returned a conversation with a hole in it")
-	}
-}
-
-// Delete closes the file a session is being appended to. An append already
-// under way has to fail rather than corrupt the store — and whether the
-// directory goes with it is the race, since the appender recreates the file.
-func TestAppendRacingDeleteFailsCleanly(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-
-	var wg sync.WaitGroup
-	for w := range 4 {
-		wg.Add(1)
-		go func(w int) {
-			defer wg.Done()
-			for i := range 25 {
-				// Whether it lands or is refused is the race; either is fine.
-				_ = s.Append(ctx(), meta.ID, msg(fmt.Sprintf("w%d-%d", w, i)))
-			}
-		}(w)
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := s.Delete(ctx(), meta.ID); err != nil {
-			t.Logf("Delete lost the race and said so: %v", err)
-		}
-	}()
-	wg.Wait()
-
-	// However it went, the store is one of the two states a reader can handle.
-	if _, err := s.Meta(ctx(), meta.ID); err != nil && !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("Meta = %v, want the session or ErrNotFound", err)
-	}
-
-	// The session is gone, or what survived of it reads back as entries rather
-	// than as wreckage. Which of the two is the race; neither is a broken store.
-	for e, err := range s.Entries(ctx(), meta.ID) {
-		if errors.Is(err, session.ErrNotFound) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("what the race left does not read: %v", err)
-		}
-		if e.Message == nil {
-			t.Errorf("entry %d came back empty", e.Seq)
-		}
 	}
 }

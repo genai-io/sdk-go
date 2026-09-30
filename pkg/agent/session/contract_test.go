@@ -41,11 +41,11 @@ func TestStoreContract(t *testing.T) {
 
 			t.Run("Create keeps an id it was given, and refuses it twice", func(t *testing.T) {
 				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{ID: "chosen", Title: "kept"})
+				meta, err := st.Create(ctx(), session.Meta{ID: "chosen"})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if meta.ID != "chosen" || meta.Title != "kept" {
+				if meta.ID != "chosen" {
 					t.Errorf("Create = %+v, want the id and title it was given", meta)
 				}
 				if _, err := st.Create(ctx(), session.Meta{ID: "chosen"}); err == nil {

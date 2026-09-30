@@ -105,7 +105,7 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 		t.Errorf("after continuing, %d messages, want 4", got)
 	}
 
-	all, err := session.Messages(ctx, st, rec.ID())
+	all, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -192,75 +192,13 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 	}
 }
 
-func TestForkingASessionLeavesTheOriginalAlone(t *testing.T) {
-	// jsonl, explicitly: Fork and Delete are that store's own API, not
-	// part of the Store contract this package depends on.
-	st := jsonlStore(t)
-	ctx := context.Background()
-
-	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
-	rec, _, err := session.Open(ctx, st, "")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
-
-	all, err := session.Messages(ctx, st, rec.ID())
-	if err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if len(all) != 4 {
-		t.Fatalf("original holds %d messages, want 4", len(all))
-	}
-
-	// Branch back to just after the first exchange.
-	var cut int64
-	seen := 0
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		if e.Type == session.EntryMessage {
-			seen++
-			if seen == 2 {
-				cut = e.Seq
-			}
-		}
-	}
-
-	forked, err := st.Fork(ctx, rec.ID(), cut)
-	if err != nil {
-		t.Fatalf("Fork: %v", err)
-	}
-
-	branch, err := session.Messages(ctx, st, forked.ID)
-	if err != nil {
-		t.Fatalf("Messages: %v", err)
-	}
-	if len(branch) != 2 {
-		t.Errorf("branch holds %d messages, want the 2 up to the cut", len(branch))
-	}
-	if again, _ := session.Messages(ctx, st, rec.ID()); len(again) != 4 {
-		t.Errorf("the original changed: %d messages", len(again))
-	}
-}
-
 // Recording must not be able to stop the work. A store that fails surfaces on
 // the session handle instead.
 func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
-	ctx := context.Background()
-	// jsonl, explicitly: Fork and Delete are that store's own API, not
-	// part of the Store contract this package depends on.
-	st := jsonlStore(t)
-
 	a := newAgent(t, nil, aitest.Says("still working"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, _, err := session.Open(context.Background(), failingStore{&memStore{}}, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
-	}
-	// Delete the session out from under the recorder.
-	if err := st.Delete(ctx, rec.ID()); err != nil {
-		t.Fatalf("Delete: %v", err)
 	}
 
 	converse(t, a, rec, ai.UserMessage("hi"))
@@ -335,7 +273,7 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	b := newAgent(t, restored, aitest.Says("afternoon"))
 	converse(t, b, rec2, ai.UserMessage("still there?"))
 
-	final, err := session.Messages(ctx, second, id)
+	final, err := messages(ctx, second, id)
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -383,7 +321,7 @@ func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 	if rec.Err() == nil {
 		t.Fatal("a failed write was not reported")
 	}
-	restored, err := session.Messages(ctx, st, rec.ID())
+	restored, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("the session no longer folds: %v", err)
 	}
@@ -538,7 +476,7 @@ func TestNamesSurviveTheRoundTrip(t *testing.T) {
 	a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
 	converse(t, a, rec, ai.UserMessage("and again"))
 
-	restored, err := session.Messages(context.Background(), st, rec.ID())
+	restored, err := messages(context.Background(), st, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -652,7 +590,7 @@ func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
 		t.Fatalf("recording: %v", err)
 	}
 
-	msgs, err := session.Messages(ctx, st, rec.ID())
+	msgs, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("a session carrying application records would not fold: %v", err)
 	}
@@ -682,8 +620,7 @@ func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
 }
 
 // The kind is the fact that something happened and the data is the detail.
-// Losing the fact because the detail would not encode is the wrong way round,
-// and it is the trade WithToolDetails already makes for a tool's own value.
+// Losing the fact because the detail would not encode is the wrong way round.
 func TestARecordSurvivesAValueThatWillNotEncode(t *testing.T) {
 	ctx := context.Background()
 	st := store(t)
@@ -713,4 +650,17 @@ func TestARecordSurvivesAValueThatWillNotEncode(t *testing.T) {
 	if len(kinds) != 1 || kinds[0] != "hook.fired" {
 		t.Errorf("kinds = %v, want just the one that had a kind", kinds)
 	}
+}
+
+// failingStore opens sessions and then refuses to write to them.
+type failingStore struct{ session.Store }
+
+func (failingStore) Append(context.Context, string, ...session.Entry) error {
+	return errors.New("disk full")
+}
+
+// messages reads a session's conversation back without recording into it.
+func messages(ctx context.Context, st session.Store, id string) ([]ai.Message, error) {
+	_, msgs, err := session.Open(ctx, st, id)
+	return msgs, err
 }

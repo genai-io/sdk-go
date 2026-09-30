@@ -20,43 +20,16 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Option settles what a session keeps beyond the events themselves.
-type Option func(*Recorder)
-
-// WithToolDetails keeps agent.Result.Details — the diff behind an edit, the
-// rows behind a count — as whatever this returns, stored as JSON and read back
-// from ToolRun.Details:
-//
-//	session.Open(ctx, store, id, session.WithToolDetails(
-//	    func(e agent.ToolEnd) any { return e.Result.Details }))
-//
-// How much of it to keep is the caller's, since a diff or a listing has no
-// bound: return a smaller value for a smaller record, and nil for none. A
-// session without this keeps nothing, and so does a value that will not
-// marshal.
-func WithToolDetails(keep func(agent.ToolEnd) any) Option {
-	return func(r *Recorder) { r.details = keep }
-}
-
 // ErrNotFound is returned for a session that does not exist.
 var ErrNotFound = errors.New("session: not found")
 
 // Meta is what a session is, apart from what happened in it. Small on purpose:
 // it has to be listable without reading any session's entries.
 type Meta struct {
-	ID string `json:"id"`
-	// Title and Model are the application's to set through its store — jsonl
-	// has SetMeta. Which model answered is on each Inference entry instead.
-	Title     string    `json:"title,omitempty"`
-	Model     string    `json:"model,omitempty"`
+	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Entries   int64     `json:"entries"`
-
-	// Parent and ForkedAt record where a forked session came from: the
-	// session it branched off, and the entry it branched at.
-	Parent   string `json:"parent,omitempty"`
-	ForkedAt int64  `json:"forked_at,omitempty"`
 }
 
 // EntryType says which field of an Entry carries its payload.
@@ -156,9 +129,6 @@ type ToolRun struct {
 	Args    string `json:"args,omitempty"`
 	Content string `json:"content,omitempty"`
 	IsError bool   `json:"is_error,omitempty"`
-
-	// Details is what WithToolDetails kept, as it returned it.
-	Details json.RawMessage `json:"details,omitempty"`
 }
 
 // Outcome is how a turn ended.
@@ -221,14 +191,6 @@ type Store interface {
 	Meta(ctx context.Context, id string) (Meta, error)
 }
 
-// Messages folds a session's entries back into a conversation: messages
-// append, and a snapshot starts it over, because what came before one of those
-// is what the agent threw away.
-func Messages(ctx context.Context, store Store, id string) ([]ai.Message, error) {
-	msgs, _, err := fold(ctx, store, id)
-	return msgs, err
-}
-
 // fold reads a session once and answers both questions asked of it: what the
 // conversation is, and how many exchanges it has held. The second is not
 // derivable from the first — a snapshot resets the conversation and not the
@@ -269,13 +231,13 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 //	    rec.Handle(ctx, e)
 //	    render(e)
 //	}
-func Open(ctx context.Context, store Store, id string, opts ...Option) (*Recorder, []ai.Message, error) {
+func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message, error) {
 	if id == "" {
 		meta, err := store.Create(ctx, Meta{})
 		if err != nil {
 			return nil, nil, err
 		}
-		return newRecorder(store, meta.ID, opts), nil, nil
+		return newRecorder(store, meta.ID), nil, nil
 	}
 
 	if _, err := store.Meta(ctx, id); err != nil {
@@ -286,7 +248,7 @@ func Open(ctx context.Context, store Store, id string, opts ...Option) (*Recorde
 		return nil, nil, err
 	}
 
-	rec := newRecorder(store, id, opts)
+	rec := newRecorder(store, id)
 	// The agent numbers turns from one every time it runs, because what came
 	// back from storage was someone else's counting. The session is the one
 	// place that knows both numbers, so it is where they are reconciled —

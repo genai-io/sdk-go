@@ -9,6 +9,11 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Added
+
+- **`ai.CloneModels`**, `Model.Clone` for a whole list. `provider` uses it
+  wherever a list crosses in or out.
+
 ### Changed
 
 - **`pkg/ai/auth/oauth` runs on `golang.org/x/oauth2`.** `Device(ctx, cfg,

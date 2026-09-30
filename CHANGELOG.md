@@ -9,6 +9,21 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Removed
+
+APIs with no caller outside their own tests.
+
+- **`pkg/agent/session/memory`.** It lives on as a test-only second
+  `session.Store` in `session`'s tests. Use `jsonl`, or implement the
+  four-method `session.Store` yourself.
+- **`provider.Set`, `provider.NewSet`, `provider.RefreshResult` and
+  `auth.Providers`.** Keep your own `map[string]*provider.Provider`, built
+  from `auth.Provider(id)` for each vendor in `auth.Available()`.
+- **`ai.WithHeaders`, `ai.WithSamplingParams` and `Request.Headers`.** Set
+  headers on `ai.Config.Headers` or `Model.Headers`, and sampling parameters
+  on `Model.SamplingParams`. A header that changes per call can be set with
+  a `Config.HTTPClient` transport.
+
 ## [0.7.7] - 2026-09-30
 
 ### Changed

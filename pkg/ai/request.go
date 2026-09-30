@@ -45,10 +45,6 @@ type Request struct {
 	// drivers apply them.
 	SamplingParams map[string]any
 
-	// Headers are sent with this call, over the ones the Config and the model
-	// carry — a header that varies per call rather than per endpoint.
-	Headers map[string]string
-
 	// ProtocolOptions carries settings only one protocol has, as that driver's
 	// own value — anthropic.Options, responses.Options. It is the escape hatch for
 	// what the fields above deliberately do not model, so needing one thing a
@@ -114,40 +110,6 @@ func WithCacheRetention(c CacheRetention) Option {
 // WithSchema constrains the answer to a JSON shape.
 func WithSchema(s *Schema) Option {
 	return func(r *Request) { r.Schema = cloneSchema(s) }
-}
-
-// WithSamplingParams merges raw body parameters over whatever the model and
-// any lower layer set. Keys a lower layer set and this map does not name are
-// left in place.
-func WithSamplingParams(params map[string]any) Option {
-	return func(r *Request) {
-		if len(params) == 0 {
-			return
-		}
-		if r.SamplingParams == nil {
-			r.SamplingParams = make(map[string]any, len(params))
-		}
-		maps.Copy(r.SamplingParams, params)
-	}
-}
-
-// WithHeaders sends these headers over whatever the Config and the model
-// already carry: a name given here wins for this call, and one only a lower
-// layer set stays. Reach for it when a header depends on the call rather than
-// the endpoint — the alternative is a second client, and with it a second
-// connection pool.
-//
-//	client.Complete(ctx, msgs, ai.WithHeaders(map[string]string{"X-Tenant": id}))
-func WithHeaders(h map[string]string) Option {
-	return func(r *Request) {
-		if len(h) == 0 {
-			return
-		}
-		if r.Headers == nil {
-			r.Headers = make(map[string]string, len(h))
-		}
-		maps.Copy(r.Headers, h)
-	}
 }
 
 // WithProtocolOptions supplies one driver's protocol-specific settings.

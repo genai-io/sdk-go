@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent/session"
-	"github.com/genai-io/sdk-go/pkg/agent/session/memory"
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
@@ -20,7 +19,7 @@ func TestStoreContract(t *testing.T) {
 		name string
 		open func(*testing.T) session.Store
 	}{
-		{"memory", func(*testing.T) session.Store { return memory.Open() }},
+		{"memory", func(*testing.T) session.Store { return &memStore{} }},
 		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
 	} {
 		t.Run(impl.name, func(t *testing.T) {

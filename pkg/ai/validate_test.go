@@ -43,7 +43,7 @@ func TestVertexIsHeldToTheAnthropicRules(t *testing.T) {
 		"sampling extensions have nowhere to go on Messages": {
 			api:      APIAnthropicMessages,
 			messages: []Message{UserMessage("hi")},
-			opts:     []Option{WithSamplingParams(map[string]any{"top_k": 40})},
+			opts:     []Option{func(r *Request) { r.SamplingParams = map[string]any{"top_k": 40} }},
 			wantErr:  "does not support OpenAI sampling parameter extensions",
 		},
 		"sampling extensions have nowhere to go on Vertex either": {
@@ -51,13 +51,13 @@ func TestVertexIsHeldToTheAnthropicRules(t *testing.T) {
 			// parameter having had no effect.
 			api:      APIAnthropicVertex,
 			messages: []Message{UserMessage("hi")},
-			opts:     []Option{WithSamplingParams(map[string]any{"top_k": 40})},
+			opts:     []Option{func(r *Request) { r.SamplingParams = map[string]any{"top_k": 40} }},
 			wantErr:  "does not support OpenAI sampling parameter extensions",
 		},
 		"sampling extensions are fine on the protocol that defines them": {
 			api:      APIOpenAIChat,
 			messages: []Message{UserMessage("hi")},
-			opts:     []Option{WithSamplingParams(map[string]any{"top_k": 40})},
+			opts:     []Option{func(r *Request) { r.SamplingParams = map[string]any{"top_k": 40} }},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

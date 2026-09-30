@@ -130,17 +130,12 @@ func NewWithClient(client sdk.Client, cfg ai.Config, api ai.API) (ai.Driver, err
 func (d *Driver) Name() string { return string(d.api) }
 
 // requestOptions are the headers one call carries beyond the client's own: the
-// betas this protocol takes per request, then the caller's, which go last
-// because a caller who names a header meant that name.
-func requestOptions(req *ai.Request, native Options) []option.RequestOption {
-	var opts []option.RequestOption
+// betas this protocol takes per request.
+func requestOptions(native Options) []option.RequestOption {
 	if betas := native.Betas; len(betas) > 0 {
-		opts = append(opts, option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
+		return []option.RequestOption{option.WithHeader("anthropic-beta", strings.Join(betas, ","))}
 	}
-	for k, v := range req.Headers {
-		opts = append(opts, option.WithHeader(k, v))
-	}
-	return opts
+	return nil
 }
 
 // Stream runs one Messages call.
@@ -157,7 +152,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			return
 		}
 
-		stream := d.client.Messages.NewStreaming(ctx, *params, requestOptions(req, native)...)
+		stream := d.client.Messages.NewStreaming(ctx, *params, requestOptions(native)...)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Tool input is kept per content-block index: a compatible endpoint
@@ -311,7 +306,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	if !param.IsOmitted(params.Thinking) {
 		count.Thinking = params.Thinking
 	}
-	res, err := d.client.Messages.CountTokens(ctx, count, requestOptions(req, native)...)
+	res, err := d.client.Messages.CountTokens(ctx, count, requestOptions(native)...)
 	if err != nil {
 		return 0, d.fail.Wrap(err)
 	}

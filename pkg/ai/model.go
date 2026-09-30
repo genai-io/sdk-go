@@ -164,8 +164,7 @@ type Model struct {
 	// SamplingParams are merged into the request body verbatim, after the
 	// named fields, so a custom OpenAI-compatible server (llama.cpp, vLLM,
 	// SGLang) can receive parameters this SDK does not model — top_p, top_k,
-	// min_p, repetition_penalty. Per-request WithSamplingParams overrides
-	// these key by key. Only the OpenAI-family drivers apply them.
+	// min_p, repetition_penalty. Only the OpenAI-family drivers apply them.
 	SamplingParams map[string]any `json:"sampling_params,omitempty"`
 
 	// Headers are added to every request for this model, on top of whatever

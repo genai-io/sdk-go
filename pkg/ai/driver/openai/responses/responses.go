@@ -64,7 +64,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			yield(ai.Delta{}, err)
 			return
 		}
-		stream := d.client.Responses.NewStreaming(ctx, params, oai.RequestOptions(req)...)
+		stream := d.client.Responses.NewStreaming(ctx, params)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// A call is keyed by its call_id, the one name every event agrees on:

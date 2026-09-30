@@ -309,24 +309,6 @@ func TestProviderRefusesWhatItCannotReach(t *testing.T) {
 	}
 }
 
-func TestProvidersCoversEveryVendorThatCanBeReached(t *testing.T) {
-	defer withDefaultStore(t, NewMemoryStore())()
-	for _, v := range catalog.All() {
-		for _, name := range v.KeyEnv {
-			t.Setenv(name, "")
-		}
-	}
-	t.Setenv("DEEPSEEK_API_KEY", "sk-deepseek")
-
-	set := Providers()
-	if _, ok := set.Get("deepseek"); !ok {
-		t.Error("Providers left out a vendor with a usable credential")
-	}
-	if _, ok := set.Get("openai"); ok {
-		t.Error("Providers included a vendor with no credential")
-	}
-}
-
 // TestLoginStoresWhatTheGrantProduced drives a real flow — the Copilot one,
 // pointed at a stub, which is what its endpoints are a struct for.
 func TestLoginStoresWhatTheGrantProduced(t *testing.T) {

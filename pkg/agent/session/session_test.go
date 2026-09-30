@@ -11,7 +11,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
-	"github.com/genai-io/sdk-go/pkg/agent/session/memory"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
@@ -49,7 +48,7 @@ func converse(t *testing.T, a *agent.Agent, rec *session.Recorder, msgs ...ai.Me
 // about that store and not about sessions.
 func store(t *testing.T) session.Store {
 	t.Helper()
-	return memory.Open()
+	return &memStore{}
 }
 
 // jsonlStore is for the tests that are about the jsonl store itself.

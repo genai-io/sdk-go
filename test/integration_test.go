@@ -182,11 +182,8 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 	}
 }
 
-// A header the call names reaches the endpoint on every protocol, and beats
-// the one the client was built with. What varies per turn rather than per
-// endpoint — a tenant tag, an opt-in a provider meters differently — is then an
-// option on the call rather than a second client and a second connection pool.
-func TestEveryProtocolCarriesAPerCallHeader(t *testing.T) {
+// A header the Config names reaches the endpoint on every protocol.
+func TestEveryProtocolCarriesTheConfigHeaders(t *testing.T) {
 	tests := map[string]struct {
 		model ai.Model
 		serve func(*testing.T) *stub
@@ -233,27 +230,17 @@ func TestEveryProtocolCarriesAPerCallHeader(t *testing.T) {
 			e := tc.serve(t)
 			client, err := ai.New(ai.Config{
 				Model: tc.model, APIKey: "k", BaseURL: e.server.URL,
-				Headers: map[string]string{"X-Tenant": "endpoint", "X-Fixed": "kept"},
+				Headers: map[string]string{"X-Tenant": "endpoint"},
 			})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
 
-			_, err = client.Complete(context.Background(), []ai.Message{ai.UserMessage("hello")},
-				ai.WithHeaders(map[string]string{"X-Tenant": "call", "X-Turn": "1"}))
-			if err != nil {
+			if _, err = client.Complete(context.Background(), []ai.Message{ai.UserMessage("hello")}); err != nil {
 				t.Fatalf("Complete: %v", err)
 			}
-
-			want := map[string]string{
-				"X-Turn":   "1",    // what the call added
-				"X-Tenant": "call", // over what the endpoint carried
-				"X-Fixed":  "kept", // and what the call did not name is left alone
-			}
-			for header, value := range want {
-				if got := e.header.Get(header); got != value {
-					t.Errorf("%s = %q, want %q", header, got, value)
-				}
+			if got := e.header.Get("X-Tenant"); got != "endpoint" {
+				t.Errorf("X-Tenant = %q, want %q", got, "endpoint")
 			}
 		})
 	}

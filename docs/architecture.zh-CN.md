@@ -285,8 +285,6 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **两个 Vertex 的 `API` 值都不是线格式。** 六个 `API` 值里有四个是真正不同的请求形状。`APIAnthropicVertex` 是 Anthropic Messages 换了认证（Google ADC）、换了主机、换了模型 ID 形式，`APIGoogleVertex` 是对 Gemini 请求体做的同一件事；两个 driver 都把构造完客户端之后的一切原样交回各自的父包。它们之所以还是独立的 `API` 值，是因为注册表按 `API` 查 driver，而 Google Cloud auth 依赖很重——**271 个第三方包，对比 `anthropic` 的 43 个**——所以它必须只落进主动要它的构建里。要正经修，得给注册表加第二个维度，代价大于这个瑕疵本身。
 
-**OpenAI 的 cache-write token 没有被计入。** 端点在 `input_tokens_details.cache_write_tokens` 里报告它们，而当前锁定的 `openai-go` 版本没有暴露这个字段，所以那部分 token 被并进了 `Usage.Input`。厂商条目里写明了这一点。
-
 **`ResolveLevel` 的吸附是静默的。** 在一个只提供 off 和 high 的模型上要 `medium`，会拿到 high，而没有任何东西告诉调用方。方向是有意的——**静默地想得比要求的少，是更让人意外的那种失败**——但这份静默目前调用方观察不到。
 
 **目录只列厂商，不列模型。** 一家厂商有哪些模型、它们的上下文窗口、最大输出、价格、模态和提供哪些推理档位，变得比协议快得多，跟着 SDK 发版是错的节奏。目录只保留线路需要的东西——端点、凭证变量、协议、各家怪癖——其余由应用用自己的数据填到 `ai.Model` 上。`Reasoning` 只写模型提供哪几档：`ResolveLevel` 按协议和 `Compat` 给每一档补上线上的值，方言只在一个地方，`Model.WireEfforts` 说明这套方言能区分哪几档。不填时，窗口报告零余量、费用算出零而不是猜一个数，Anthropic driver 退回它自己的 `max_tokens` 默认值。

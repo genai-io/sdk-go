@@ -68,10 +68,6 @@ var vendors = []Vendor{
 		BaseURLEnv:  "OPENAI_BASE_URL",
 		KeyEnv:      []string{"OPENAI_API_KEY"},
 		Compat:      ai.OpenAIResponsesCompat{},
-		// The endpoint reports cache writes in
-		// input_tokens_details.cache_write_tokens, which the pinned openai-go
-		// release does not expose, so they arrive folded into Usage.Input.
-		Note: "This SDK cannot yet read the endpoint's cache-write token count; those tokens are reported as ordinary input.",
 	},
 	{
 		ID:          "azure-openai",
@@ -421,7 +417,7 @@ var vendors = []Vendor{
 		Verified:    verifiedGateways,
 		API:         ai.APIOpenAIResponses,
 		BaseURL:     "https://chatgpt.com/backend-api/codex",
-		Compat:      ai.OpenAIResponsesCompat{Stateless: true},
+		Compat:      ai.OpenAIResponsesCompat{NoMaxOutputTokens: true},
 		Note: "A ChatGPT subscription rather than an API key. Sign in with " +
 			"auth.Login(ctx, \"openai-codex\", ...), which runs the PKCE browser grant. " +
 			"The endpoint and client identifier come from OpenAI's Codex CLI, not from " +

@@ -105,6 +105,16 @@ func TestTheHighestMatchingTierWinsWhateverTheOrder(t *testing.T) {
 
 // A card with no rates is a card nobody published, and pricing a call against
 // it would report a confident zero.
+// OpenAI reports cache writes but its card has no write rate: they cost what
+// input costs, not nothing.
+func TestACacheWriteWithoutARateCostsInput(t *testing.T) {
+	p := Pricing{Input: 2, Output: 8}
+	got := p.Cost(Usage{Input: 1_000_000, CacheWrite: 1_000_000})
+	if got.CacheWrite != 2 || got.Total != 4 {
+		t.Fatalf("cost = %+v, want the write billed at the input rate", got)
+	}
+}
+
 func TestKnownSaysWhetherThereIsACardAtAll(t *testing.T) {
 	if (Pricing{}).Known() {
 		t.Error("an empty card claims to be known")

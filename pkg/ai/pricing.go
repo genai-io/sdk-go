@@ -60,6 +60,12 @@ func (p Pricing) Cost(u Usage) Cost {
 		}
 	}
 
+	// A card without a write rate is a vendor that bills writing the cache as
+	// ordinary input; none bills it for less.
+	if cacheWrite == 0 {
+		cacheWrite = input
+	}
+
 	// A long-lifetime cache write is billed at twice the input rate, where a
 	// short one costs the CacheWrite rate. Splitting them here is what keeps a
 	// long-cache turn from being understated.

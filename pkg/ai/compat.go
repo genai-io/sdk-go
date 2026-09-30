@@ -98,11 +98,9 @@ type OpenAIResponsesCompat struct {
 	// default lifetime rather than failing.
 	NoLongCacheRetention bool `json:"no_long_cache_retention,omitempty"`
 
-	// Stateless marks a backend that refuses server-side state, such as the
-	// ChatGPT/Codex subscription endpoint: the driver sends store=false and
-	// asks for encrypted reasoning content so reasoning can be replayed on the
-	// next turn rather than kept by the server.
-	Stateless bool `json:"stateless,omitempty"`
+	// NoMaxOutputTokens marks a backend that rejects max_output_tokens, such
+	// as the ChatGPT/Codex subscription endpoint. The request is sent uncapped.
+	NoMaxOutputTokens bool `json:"no_max_output_tokens,omitempty"`
 }
 
 // GoogleCompat is the behavior a Google GenAI endpoint needs.

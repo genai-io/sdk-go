@@ -413,11 +413,6 @@ is heavy — 271 third-party packages against `anthropic`'s 43 — so it must la
 only in a build that asks for it. Fixing it properly means a second dimension
 in the registry, which costs more than the wart.
 
-**OpenAI cache-write tokens are not counted.** The endpoint reports them in
-`input_tokens_details.cache_write_tokens`, which the pinned `openai-go` release
-does not expose, so they arrive folded into `Usage.Input`. The vendor entry
-says so.
-
 **`ResolveLevel` snaps silently.** Asking for `medium` on a model offering only
 off and high returns high, and nothing tells the caller. The direction is
 deliberate — quietly reasoning *less* than asked is the more surprising failure

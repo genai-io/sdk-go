@@ -67,10 +67,13 @@ func driverFor(t *testing.T, cfg ai.Config) ai.Driver {
 // on.
 func collect(t *testing.T, d ai.Driver) ([]ai.Delta, error) {
 	t.Helper()
+	return collectReq(t, d, &ai.Request{Messages: []ai.Message{ai.UserMessage("hello")}})
+}
+
+func collectReq(t *testing.T, d ai.Driver, req *ai.Request) ([]ai.Delta, error) {
+	t.Helper()
 	var out []ai.Delta
-	for delta, err := range d.Stream(context.Background(), &ai.Request{
-		Messages: []ai.Message{ai.UserMessage("hello")},
-	}) {
+	for delta, err := range d.Stream(context.Background(), req) {
 		if err != nil {
 			return out, err
 		}
@@ -323,5 +326,119 @@ func TestACallWhoseItemIDChangesBetweenEventsIsStillOneCall(t *testing.T) {
 	calls := toolCalls(deltas)
 	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Input != `{"file_path":"a.py"}` {
 		t.Fatalf("calls = %+v, want one Read of a.py", calls)
+	}
+}
+
+// reasoner is a model with a reasoning ladder, which is what earns a request
+// the encrypted reasoning back.
+var reasoner = ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses, Reasoning: []ai.ReasoningLevel{{Effort: ai.EffortHigh}}}
+
+// The whole conversation is replayed every turn, so nothing is left on the
+// server and a reasoning model is asked for the reasoning it will need back.
+func TestEveryRequestIsStatelessAndAReasonerAsksForItsReasoningBack(t *testing.T) {
+	s := sse(t, completed)
+	if _, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL, Model: reasoner})); err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	_, body, _ := s.seen()
+	if !strings.Contains(body, `"store":false`) {
+		t.Errorf("body = %s, want store=false", body)
+	}
+	if !strings.Contains(body, `"include":["reasoning.encrypted_content"]`) {
+		t.Errorf("body = %s, want the encrypted reasoning included", body)
+	}
+}
+
+// A model that cannot reason is not asked for reasoning it will never produce.
+func TestAModelThatCannotReasonIsStatelessWithoutAskingForReasoning(t *testing.T) {
+	s := sse(t, completed)
+	if _, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL})); err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	_, body, _ := s.seen()
+	if !strings.Contains(body, `"store":false`) {
+		t.Errorf("body = %s, want store=false", body)
+	}
+	if strings.Contains(body, `"include"`) {
+		t.Errorf("body = %s, want no include", body)
+	}
+}
+
+// Reasoning items come back on the regular API too, so the next turn can
+// replay them.
+func TestReasoningItemsAreKeptForReplayOnTheRegularAPI(t *testing.T) {
+	s := sse(t,
+		`{"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","encrypted_content":"opaque","summary":[{"type":"summary_text","text":"thought"}]}}`,
+		completed,
+	)
+	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL, Model: reasoner}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	var got []ai.ReasoningItem
+	for _, d := range deltas {
+		if d.Block.Type == ai.BlockReasoning {
+			got = append(got, *d.Block.Reasoning)
+		}
+	}
+	want := ai.ReasoningItem{ID: "rs_1", EncryptedContent: "opaque", Summary: "thought"}
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("reasoning = %+v, want [%+v]", got, want)
+	}
+}
+
+// The output cap is sent unless the backend is marked as rejecting it.
+func TestNoMaxOutputTokensLeavesTheCapOff(t *testing.T) {
+	for _, tc := range []struct {
+		compat ai.OpenAIResponsesCompat
+		want   bool
+	}{
+		{ai.OpenAIResponsesCompat{}, true},
+		{ai.OpenAIResponsesCompat{NoMaxOutputTokens: true}, false},
+	} {
+		s := sse(t, completed)
+		model := ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses, Compat: tc.compat}
+		req := &ai.Request{Messages: []ai.Message{ai.UserMessage("hello")}, MaxTokens: 100}
+		if _, err := collectReq(t, driverFor(t, ai.Config{BaseURL: s.URL, Model: model}), req); err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		_, body, _ := s.seen()
+		if got := strings.Contains(body, `"max_output_tokens":100`); got != tc.want {
+			t.Errorf("compat %+v: max_output_tokens sent = %v, want %v", tc.compat, got, tc.want)
+		}
+	}
+}
+
+// An answer cut short by the content filter was declined, not truncated.
+func TestAContentFilteredAnswerIsARefusal(t *testing.T) {
+	s := sse(t,
+		`{"type":"response.output_text.delta","delta":"Sure, h"}`,
+		`{"type":"response.incomplete","response":{"id":"resp_5","model":"gpt-5","status":"incomplete",`+
+			`"incomplete_details":{"reason":"content_filter"}}}`,
+	)
+	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if got := stopReason(deltas); got != ai.StopRefusal {
+		t.Errorf("stop reason = %q, want %q", got, ai.StopRefusal)
+	}
+}
+
+// Cache writes are part of input_tokens; they are reported apart so they can
+// be priced as writes.
+func TestCacheWritesAreReportedApartFromFreshInput(t *testing.T) {
+	s := sse(t,
+		`{"type":"response.completed","response":{"id":"resp_6","model":"gpt-5","status":"completed",`+
+			`"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":40,"cache_write_tokens":30},`+
+			`"output_tokens":5,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":105}}}`,
+	)
+	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	want := ai.Usage{Input: 30, Output: 5, CacheRead: 40, CacheWrite: 30}
+	if got := usage(deltas); got != want {
+		t.Errorf("usage = %+v, want %+v", got, want)
 	}
 }

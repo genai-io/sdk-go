@@ -24,13 +24,14 @@ func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 	if req.Temperature != nil {
 		params.Temperature = sdk.Opt(*req.Temperature)
 	}
-	// The stateless backend rejects an explicit output cap along with
-	// store=false, so the cap is only sent on the regular API.
-	if req.MaxTokens > 0 && !d.compat.Stateless {
+	if req.MaxTokens > 0 && !d.compat.NoMaxOutputTokens {
 		params.MaxOutputTokens = sdk.Opt(int64(req.MaxTokens))
 	}
-	if d.compat.Stateless {
-		params.Store = sdk.Bool(false)
+	// The whole conversation is replayed every turn, so nothing is stored
+	// server-side; a reasoning model's working comes back encrypted instead,
+	// to be replayed with the rest.
+	params.Store = sdk.Bool(false)
+	if d.model.Reasons() {
 		params.Include = []wire.ResponseIncludable{
 			wire.ResponseIncludableReasoningEncryptedContent,
 		}
@@ -98,8 +99,8 @@ func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 // model. Pass it with ai.WithProtocolOptions; the zero value changes nothing.
 type Options struct {
 	// Include asks for extra response fields, e.g.
-	// "reasoning.encrypted_content". The stateless backend sets that one
-	// itself; this is for anything else.
+	// "reasoning.encrypted_content". A reasoning model sets that one itself;
+	// this is for anything else.
 	Include []string
 
 	// PromptCacheKey routes requests that share a prefix to the same cache.
@@ -254,7 +255,7 @@ func imagePart(mediaType, data string) wire.ResponseInputContentUnionParam {
 	return part
 }
 
-// reasoningParam echoes a stored reasoning item back to the stateless backend.
+// reasoningParam echoes a reasoning item from an earlier turn back.
 func reasoningParam(r ai.ReasoningItem) *wire.ResponseReasoningItemParam {
 	p := &wire.ResponseReasoningItemParam{
 		ID:      r.ID,

@@ -19,26 +19,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
-
-// Stale returns the vendors whose entries have not been verified against
-// their vendor's documentation within the given age, oldest first. Pass the
-// current time explicitly so a caller decides what "now" means — a build
-// checking freshness in CI and a runtime warning want different clocks.
-func Stale(now time.Time, age time.Duration) []Vendor {
-	var out []Vendor
-	for _, v := range All() {
-		checked, err := time.Parse("2006-01-02", v.Verified)
-		if err != nil || now.Sub(checked) > age {
-			out = append(out, v)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Verified < out[j].Verified })
-	return out
-}
 
 // All returns every vendor, in display order.
 func All() []Vendor {

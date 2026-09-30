@@ -299,7 +299,6 @@ func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
 
 	a := newAgent(t, d, agent.WithSystem("first prompt"), agent.WithTools(before))
 
-	var hookSaw []string
 	for e, err := range a.Run(context.Background(), ai.UserMessage("go")) {
 		if err != nil {
 			t.Fatal(err)
@@ -308,12 +307,6 @@ func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
 		if _, ok := e.(agent.ToolEnd); ok {
 			a.SetTools(after)
 			a.SetSystem("second prompt")
-			a.AddHooks(agent.Hook{
-				PreInfer: func(_ context.Context, inf *agent.Inference) error {
-					hookSaw = append(hookSaw, inf.System)
-					return nil
-				},
-			})
 		}
 	}
 
@@ -332,10 +325,6 @@ func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
 	}
 	if n := len(sent[1].Tools); n != 1 || sent[1].Tools[0].Schema.Name != "after" {
 		t.Errorf("call 2 offered %v, want the replacement", toolNames(sent[1].Tools))
-	}
-	// The hook was added after the first call, so it saw only the second.
-	if len(hookSaw) != 1 || hookSaw[0] != "second prompt" {
-		t.Errorf("the added hook ran %d times %v, want once on the second call", len(hookSaw), hookSaw)
 	}
 }
 
@@ -372,12 +361,10 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 	for _, touch := range []func(){
 		func() { a.SetSystem("changed") },
 		func() { a.SetTools(slow) },
-		func() { a.AddHooks(agent.Hook{}) },
 		func() { a.AddMessages(ai.UserMessage("from outside")) },
 		func() { _ = a.Messages() },
 		func() { _ = a.Tools() },
 		func() { _ = a.System() },
-		func() { _ = a.String() },
 	} {
 		wg.Add(1)
 		go func(f func()) {

@@ -17,10 +17,6 @@ import (
 // Name is the driver's identifier.
 const Name = string(ai.APIAnthropicVertex)
 
-// DefaultRegion is where a model is served when the deployment names no
-// region — see ai.VertexDefaultRegion.
-const DefaultRegion = ai.VertexDefaultRegion
-
 func init() { ai.RegisterAPI(ai.APIAnthropicVertex, New) }
 
 // New builds a driver from a Config. The GCP project and region come from

@@ -177,7 +177,7 @@ func NewDriver(cfg Config) (Driver, error) {
 	f, ok := registry.m[cfg.Model.API]
 	registry.mu.RUnlock()
 	if !ok {
-		return nil, &UnregisteredAPIError{API: cfg.Model.API, Registered: RegisteredAPIs()}
+		return nil, unregistered(cfg.Model.API, RegisteredAPIs())
 	}
 	cfg.Model = cloneModel(cfg.Model)
 	cfg.Headers = maps.Clone(cfg.Headers)
@@ -203,22 +203,15 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 // Deprecated: call New.
 func NewClient(cfg Config, opts ...Option) (*Client, error) { return New(cfg, opts...) }
 
-// UnregisteredAPIError reports a model whose protocol has no driver linked
-// into the binary — nearly always a missing blank import.
-type UnregisteredAPIError struct {
-	API API
-	// Registered is what is linked in, in the order RegisteredAPIs gave it,
-	// which is sorted.
-	Registered []API
-}
-
-func (e *UnregisteredAPIError) Error() string {
-	if len(e.Registered) == 0 {
-		return fmt.Sprintf("ai: no driver registered for API %q; blank-import the package "+
+// unregistered reports a model whose protocol has no driver linked into the
+// binary — nearly always a missing blank import.
+func unregistered(api API, registered []API) error {
+	if len(registered) == 0 {
+		return fmt.Errorf("ai: no driver registered for API %q; blank-import the package "+
 			"that implements it from %s — or %s/all for every protocol, which costs "+
-			"every protocol's dependencies", e.API, driverPath, driverPath)
+			"every protocol's dependencies", api, driverPath, driverPath)
 	}
-	return fmt.Sprintf("ai: no driver registered for API %q (registered: %v)", e.API, e.Registered)
+	return fmt.Errorf("ai: no driver registered for API %q (registered: %v)", api, registered)
 }
 
 // ProtocolConfig is one driver's protocol-specific construction settings — the
@@ -227,14 +220,6 @@ type ProtocolConfig interface {
 	// ProtocolConfig marks this type as one driver's construction settings. A
 	// no-op, as ProtocolOptions.ProtocolOptions is.
 	ProtocolConfig()
-}
-
-// ProtocolConfigAs reads a driver's protocol-specific construction settings out
-// of a Config.
-//
-//	vertex, err := ai.ProtocolConfigAs[ai.VertexConfig](cfg)
-func ProtocolConfigAs[T ProtocolConfig](config Config) (T, error) {
-	return protocolValueAs[T](config.ProtocolConfig, "native driver configuration")
 }
 
 // RejectProtocolConfig returns an invalid-request error for a protocol with no

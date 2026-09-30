@@ -256,7 +256,7 @@ func TestAFailedStreamKeepsWhatItProduced(t *testing.T) {
 	if resp == nil || resp.Text() != "partial" || resp.Usage.Input != 7 {
 		t.Fatalf("response = %+v, want the partial answer and its tokens", resp)
 	}
-	if resp.StopReason != StopError || !resp.Failed() {
+	if resp.StopReason != StopError {
 		t.Errorf("stop reason = %q, want %q", resp.StopReason, StopError)
 	}
 }

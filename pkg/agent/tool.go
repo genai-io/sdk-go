@@ -130,24 +130,6 @@ func ToolFunc[T any](name, description string,
 	}
 }
 
-// FromAI lifts a plain ai.Tool, so anything written against pkg/ai runs here
-// unchanged.
-func FromAI(t ai.Tool) Tool {
-	return &funcTool{
-		schema: t.Schema,
-		run: func(ctx context.Context, call ai.ToolCall) (Result, error) {
-			if t.Run == nil {
-				return Result{}, &ai.Error{Kind: ai.KindInvalidRequest, Message: "agent: tool " + t.Schema.Name + " has no Run"}
-			}
-			out, err := t.Run(ctx, call.Input)
-			if err != nil {
-				return Result{}, err
-			}
-			return TextResult(out), nil
-		},
-	}
-}
-
 type funcTool struct {
 	schema ai.Schema
 	run    func(context.Context, ai.ToolCall) (Result, error)

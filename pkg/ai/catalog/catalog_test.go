@@ -117,7 +117,7 @@ func checkVendorCredential(t *testing.T, v Vendor) {
 	}
 	// The two halves of a deployment have to agree: DeploymentEnv is what a
 	// caller is told to set and Deployment is what reads it.
-	if v.NeedsDeployment() != (v.Deployment != nil) {
+	if (len(v.DeploymentEnv) > 0) != (v.Deployment != nil) {
 		t.Errorf("DeploymentEnv %v and Deployment %v disagree about whether this vendor needs one",
 			v.DeploymentEnv, v.Deployment != nil)
 	}
@@ -200,37 +200,6 @@ func TestAModelReferenceResolves(t *testing.T) {
 				t.Errorf("Vendor = %q, want %q", m.Vendor, tc.wantVendor)
 			}
 		})
-	}
-}
-
-// TestStaleReportsUnverifiedEntries covers the freshness check the Verified
-// column exists for. Nothing calls it at runtime; it is the tool a maintainer
-// runs to find rows that have gone unchecked.
-func TestStaleReportsUnverifiedEntries(t *testing.T) {
-	newest := ""
-	for _, v := range All() {
-		if v.Verified > newest {
-			newest = v.Verified
-		}
-	}
-	now, err := time.Parse("2006-01-02", newest)
-	if err != nil {
-		t.Fatalf("parsing the newest Verified date %q: %v", newest, err)
-	}
-
-	if got := Stale(now, 365*24*time.Hour); len(got) != 0 {
-		t.Errorf("Stale reported %d entries as a year old on the day of the last sweep", len(got))
-	}
-	// A day past the newest sweep, with no tolerance, every entry is stale.
-	all := Stale(now.AddDate(0, 0, 1), 0)
-	if len(all) != len(vendors) {
-		t.Errorf("Stale with no tolerance = %d entries, want all %d", len(all), len(vendors))
-	}
-	// Oldest first, so a maintainer reads the list top down.
-	for i := 1; i < len(all); i++ {
-		if all[i-1].Verified > all[i].Verified {
-			t.Errorf("Stale is not sorted oldest first: %q before %q", all[i-1].Verified, all[i].Verified)
-		}
 	}
 }
 

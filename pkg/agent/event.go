@@ -104,14 +104,8 @@ func (MessageUpdate) event() {}
 //
 //	case agent.MessageUpdate:
 //	    fmt.Print(v.Text())
-func (u MessageUpdate) Text() string { return u.fragment(ai.BlockText) }
-
-// Thinking is the fragment of reasoning this update carries, empty otherwise.
-// A model that reasons out loud produces these before its answer.
-func (u MessageUpdate) Thinking() string { return u.fragment(ai.BlockThinking) }
-
-func (u MessageUpdate) fragment(kind ai.BlockType) string {
-	if u.Delta.Type != ai.EventBlockDelta || u.Delta.Block.Type != kind {
+func (u MessageUpdate) Text() string {
+	if u.Delta.Type != ai.EventBlockDelta || u.Delta.Block.Type != ai.BlockText {
 		return ""
 	}
 	return u.Delta.Block.Text

@@ -416,14 +416,6 @@ func TestPromptsCanBeSizedBeforeSending(t *testing.T) {
 	if count.Exact {
 		t.Error("Chat Completions publishes no counting endpoint; the answer must say it is an estimate")
 	}
-
-	left, _, err := client.Headroom(context.Background(), messages)
-	if err != nil {
-		t.Fatalf("Headroom: %v", err)
-	}
-	if left <= 0 || left >= 1000 {
-		t.Errorf("headroom = %d, want what is left of a 1000-token window", left)
-	}
 }
 
 // A turn that failed partway still produced text and still cost tokens, and a
@@ -453,9 +445,6 @@ func TestAFailedTurnHandsBackWhatItProduced(t *testing.T) {
 	}
 	if resp.Usage.Output == 0 {
 		t.Errorf("Usage = %+v, want the tokens already billed", resp.Usage)
-	}
-	if !resp.Failed() {
-		t.Error("the response should report that the turn failed")
 	}
 }
 
@@ -1261,15 +1250,6 @@ func TestEveryProtocolSaysTheSameFourThingsAboutToolChoice(t *testing.T) {
 				}
 			})
 		}
-	}
-
-	// WithForceTool is shorthand for the named state, not a second way to say
-	// it — the two produce the same value, so no driver can tell them apart.
-	var one, two ai.Request
-	ai.WithForceTool("search")(&one)
-	ai.WithToolChoice(ai.ToolChoiceNamed("search"))(&two)
-	if one.ToolChoice != two.ToolChoice {
-		t.Errorf("WithForceTool = %v, want the same value as ToolChoiceNamed", one.ToolChoice)
 	}
 }
 

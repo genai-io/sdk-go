@@ -2,7 +2,6 @@ package agent_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -40,10 +39,6 @@ func TestSetClientRedirectsTheNextInference(t *testing.T) {
 	}
 	if first.Calls() != 1 || second.Calls() != 1 {
 		t.Errorf("calls = %d and %d, want one each", first.Calls(), second.Calls())
-	}
-	// And the agent says which model it is calling, not which it was built on.
-	if got := a.String(); !strings.Contains(got, "second") {
-		t.Errorf("String = %q, want the model it is calling now", got)
 	}
 }
 

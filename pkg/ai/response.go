@@ -100,11 +100,6 @@ type Response struct {
 	Usage      Usage      `json:"usage"`
 }
 
-// Failed reports whether the turn ended on an error or an abort.
-func (r *Response) Failed() bool {
-	return r != nil && (r.StopReason == StopError || r.StopReason == StopAborted)
-}
-
 // Text returns answer text in block order.
 func (r *Response) Text() string {
 	if r == nil {
@@ -162,18 +157,6 @@ func (r *Response) Unmarshal(v any) error {
 		return fmt.Errorf("ai: decoding response: %w", err)
 	}
 	return nil
-}
-
-// Parse decodes a completion into T, threading the call's error through so a
-// typed answer is one statement:
-//
-//	person, err := ai.Parse[Person](client.Complete(ctx, messages))
-func Parse[T any](resp *Response, err error) (T, error) {
-	var out T
-	if err != nil {
-		return out, err
-	}
-	return out, resp.Unmarshal(&out)
 }
 
 // ExtractJSON finds the JSON value in a model's answer.

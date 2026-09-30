@@ -32,13 +32,6 @@ func TestAProtocolValueOfTheWrongTypeIsReportedRatherThanIgnored(t *testing.T) {
 		t.Errorf("err = %v, want it to name the type that was actually given", err)
 	}
 
-	if got, err := ProtocolConfigAs[fakeConfig](Config{}); err != nil || got != (fakeConfig{}) {
-		t.Errorf("no config gave %v, %v; want the zero value and no error", got, err)
-	}
-	_, err = ProtocolConfigAs[fakeConfig](Config{ProtocolConfig: VertexConfig{Project: "p"}})
-	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "VertexConfig") {
-		t.Errorf("err = %v, want it to name the type that was actually given", err)
-	}
 }
 
 // A protocol that defines no escape hatch must say so rather than drop what it
@@ -64,14 +57,14 @@ func TestAProtocolWithNoEscapeHatchRefusesOne(t *testing.T) {
 // A missing blank import is the commonest way to hold an unusable client, and
 // the error is the only place it is ever explained.
 func TestAnUnregisteredProtocolSaysWhatToImport(t *testing.T) {
-	none := (&UnregisteredAPIError{API: "invented"}).Error()
+	none := unregistered("invented", nil).Error()
 	if !strings.Contains(none, driverPath) {
 		t.Errorf("err = %q, want it to name where the drivers live", none)
 	}
 
 	// Registered arrives from RegisteredAPIs, which sorted it; sorting again
 	// here would be the same work twice with nothing to show for it.
-	some := (&UnregisteredAPIError{API: "invented", Registered: []API{APIAnthropicMessages, APIOpenAIChat}}).Error()
+	some := unregistered("invented", []API{APIAnthropicMessages, APIOpenAIChat}).Error()
 	if !strings.Contains(some, "anthropic-messages openai-chat-completions") {
 		t.Errorf("err = %q, want it to list what is linked in, in order", some)
 	}

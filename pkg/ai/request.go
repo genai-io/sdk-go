@@ -90,12 +90,6 @@ func WithToolChoice(c ToolChoice) Option {
 	return func(r *Request) { r.ToolChoice = c }
 }
 
-// WithForceTool requires the model to call the named tool. Shorthand for
-// WithToolChoice(ToolChoiceNamed(name)).
-func WithForceTool(name string) Option {
-	return WithToolChoice(ToolChoiceNamed(name))
-}
-
 // WithStopSequences ends generation at any of these strings. Calling it with
 // none clears a lower layer's list.
 func WithStopSequences(stop ...string) Option {

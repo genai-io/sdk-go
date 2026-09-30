@@ -23,6 +23,27 @@ APIs with no caller outside their own tests.
   headers on `ai.Config.Headers` or `Model.Headers`, and sampling parameters
   on `Model.SamplingParams`. A header that changes per call can be set with
   a `Config.HTTPClient` transport.
+- **`agent.WithMessages`.** Call `SetMessages` after `New`.
+- **`Agent.AddHooks`.** Pass every hook to `WithHooks` when you build the
+  agent.
+- **`Agent.String` and `MessageUpdate.Thinking`.** Read
+  `Client().Model().ID` and `Delta.Block` directly.
+- **`agent.FromAI`.** Use `agent.ToolFunc`.
+- **`ai.WithForceTool`.** Use `ai.WithToolChoice(ai.ToolChoiceNamed(name))`.
+- **`ai.Parse`.** Use `ai.CompleteAs`, or `Complete` then
+  `Response.Unmarshal`.
+- **`Client.Headroom`.** Subtract `CountTokens` from
+  `Model.ContextWindow`.
+- **`Response.Failed`.** Check `StopReason` for `StopError` or
+  `StopAborted`.
+- **`ai.ProtocolConfigAs` and `ai.UnregisteredAPIError`.** The error
+  message is unchanged.
+- **`ai.CNY`.**
+- **`auth.MemoryStore` and `NewMemoryStore`.** Implement the four-method
+  `auth.Store`.
+- **`FileStore.Path`, `catalog.Stale` and `Vendor.NeedsDeployment`.** For
+  the last, check `len(v.DeploymentEnv) > 0`.
+- **`anthropic/vertex.DefaultRegion`.** Use `ai.VertexDefaultRegion`.
 
 ## [0.7.7] - 2026-09-30
 

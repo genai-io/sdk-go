@@ -393,23 +393,20 @@ func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
 // levels of the event that carries it.
 func TestAMessageUpdateSaysWhatFragmentItCarries(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		delta          ai.Event
-		text, thinking string
+		name  string
+		delta ai.Event
+		text  string
 	}{
-		{"text", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockText, Text: "hello"}}, "hello", ""},
-		{"thinking", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockThinking, Text: "hmm"}}, "", "hmm"},
-		{"a block opening", ai.Event{Type: ai.EventBlockStart, Block: ai.Block{Type: ai.BlockText, Text: "no"}}, "", ""},
-		{"a tool call taking shape", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockToolCall}}, "", ""},
-		{"the end", ai.Event{Type: ai.EventDone}, "", ""},
+		{"text", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockText, Text: "hello"}}, "hello"},
+		{"thinking", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockThinking, Text: "hmm"}}, ""},
+		{"a block opening", ai.Event{Type: ai.EventBlockStart, Block: ai.Block{Type: ai.BlockText, Text: "no"}}, ""},
+		{"a tool call taking shape", ai.Event{Type: ai.EventBlockDelta, Block: ai.Block{Type: ai.BlockToolCall}}, ""},
+		{"the end", ai.Event{Type: ai.EventDone}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			u := agent.MessageUpdate{Delta: tc.delta}
 			if got := u.Text(); got != tc.text {
 				t.Errorf("Text() = %q, want %q", got, tc.text)
-			}
-			if got := u.Thinking(); got != tc.thinking {
-				t.Errorf("Thinking() = %q, want %q", got, tc.thinking)
 			}
 		})
 	}
@@ -454,7 +451,8 @@ func TestEveryEventCarriesItsTurn(t *testing.T) {
 		aitest.Asks(ai.ToolCall{ID: "c1", Name: "look", Input: `{}`}),
 		aitest.Says("here it is"),
 		aitest.Says("and again"),
-	), agent.WithTools(slow), agent.WithMessages([]ai.Message{ai.UserMessage("from a session")}))
+	), agent.WithTools(slow))
+	a.SetMessages([]ai.Message{ai.UserMessage("from a session")})
 
 	seen := map[string]bool{}
 	for turn := 1; turn <= 2; turn++ {

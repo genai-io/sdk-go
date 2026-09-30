@@ -1,17 +1,18 @@
 package auth
 
-import "sync"
+import (
+	"maps"
+	"slices"
+	"sync"
+)
 
-// MemoryStore keeps credentials for the life of the process. It is what a test
-// or a server that manages its own secrets uses.
+// MemoryStore keeps credentials in memory: the second Store, which these tests
+// swap in for the file one.
 type MemoryStore struct {
 	mu sync.Mutex
 	m  map[string]Credential
 }
 
-// NewMemoryStore returns an empty store. A server that manages its own secrets
-// sets one as DefaultStore, which is how it opts out of this SDK writing
-// anything to disk at all.
 func NewMemoryStore() *MemoryStore { return &MemoryStore{m: map[string]Credential{}} }
 
 // Load returns the credential held for a vendor.
@@ -45,9 +46,5 @@ func (s *MemoryStore) Delete(vendor string) error {
 func (s *MemoryStore) List() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.m))
-	for vendor := range s.m {
-		out = append(out, vendor)
-	}
-	return out, nil
+	return slices.Collect(maps.Keys(s.m)), nil
 }

@@ -364,7 +364,7 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
     if len(inf.Messages) > 200 {
         inf.Messages = inf.Messages[len(inf.Messages)-200:]
     }
-    inf.Options = append(inf.Options, ai.WithForceTool("search"))
+    inf.Options = append(inf.Options, ai.WithToolChoice(ai.ToolChoiceNamed("search")))
     return nil
 },
 ```

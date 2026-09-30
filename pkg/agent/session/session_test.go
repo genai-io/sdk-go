@@ -18,10 +18,11 @@ import (
 func newAgent(t *testing.T, history []ai.Message, turns ...aitest.Turn) *agent.Agent {
 	t.Helper()
 	client := aitest.New(turns...).Client()
-	a, err := agent.New(client, agent.WithMessages(history))
+	a, err := agent.New(client)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	a.SetMessages(history)
 	return a
 }
 

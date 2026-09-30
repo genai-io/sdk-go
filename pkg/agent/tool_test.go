@@ -284,47 +284,6 @@ func TestASequentialToolRunsAloneThroughADecorator(t *testing.T) {
 // and adds nothing the agent knows about.
 type logged struct{ agent.Tool }
 
-// FromAI is the bridge that lets a tool written against pkg/ai run in an
-// agent without being rewritten. Its schema and its answer both have to
-// survive the crossing, and a failing one has to fail the agent's way — as a
-// result the model can read, not as a turn that dies.
-func TestAToolWrittenForTheClientRunsInAnAgent(t *testing.T) {
-	type args struct {
-		City string `json:"city" description:"which city"`
-	}
-	plain := ai.ToolFunc("weather", "Look up the weather.",
-		func(_ context.Context, a args) (string, error) {
-			if a.City == "" {
-				return "", errors.New("no city given")
-			}
-			return "mild in " + a.City, nil
-		})
-
-	lifted := agent.FromAI(plain)
-	if got := lifted.Schema(); got.Name != "weather" || got.Description != "Look up the weather." {
-		t.Errorf("Schema = %+v, want the ai.Tool's", got)
-	}
-	if _, ok := lifted.Schema().DefinitionMap()["properties"]; !ok {
-		t.Error("the derived schema did not cross over")
-	}
-
-	got, err := lifted.Run(context.Background(),
-		ai.ToolCall{ID: "1", Name: "weather", Input: `{"city":"Delhi"}`})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got.Text() != "mild in Delhi" {
-		t.Errorf("Run = %q, want what the ai.Tool returned", got.Text())
-	}
-
-	// A tool offered with nothing to run it is a configuration mistake, and
-	// says so rather than panicking.
-	empty := agent.FromAI(ai.Tool{Schema: ai.Schema{Name: "hollow"}})
-	if _, err := empty.Run(context.Background(), ai.ToolCall{Name: "hollow"}); err == nil {
-		t.Error("a tool with no Run was called without complaint")
-	}
-}
-
 // A tool is the caller's code, but it runs on a goroutine this package
 // created — the one place a panic cannot be recovered by whoever wrote it.
 // Unrecovered it takes the whole process down mid-conversation. A failing tool

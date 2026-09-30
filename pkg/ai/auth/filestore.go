@@ -44,9 +44,6 @@ func DefaultStorePath() (string, error) {
 	return filepath.Join(dir, "genai-io", "credentials.json"), nil
 }
 
-// Path is where this store reads and writes.
-func (s *FileStore) Path() string { return s.path }
-
 // Load returns the credential held for a vendor.
 func (s *FileStore) Load(vendor string) (Credential, bool, error) {
 	s.mu.Lock()

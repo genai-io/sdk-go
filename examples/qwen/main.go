@@ -71,19 +71,3 @@ func run(ref, question string) error {
 	fmt.Printf("\n\033[2m%d in / %d out\033[0m\n", resp.Usage.TotalInput(), resp.Usage.Output)
 	return nil
 }
-
-// anyCompatibleEndpoint reaches an OpenAI-compatible server the catalog has
-// never heard of — a self-hosted vLLM, an internal gateway, a new vendor.
-func anyCompatibleEndpoint(baseURL, key, modelID string) (*ai.Client, error) {
-	return ai.New(ai.Config{
-		Model: ai.Model{
-			ID:            modelID,
-			API:           ai.APIOpenAIChat,
-			ContextWindow: 32_000, // state it if you know it; leave it zero if you do not
-		},
-		APIKey:  key,
-		BaseURL: baseURL,
-	})
-}
-
-var _ = anyCompatibleEndpoint

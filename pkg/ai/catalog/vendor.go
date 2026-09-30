@@ -74,10 +74,6 @@ type Vendor struct {
 	Note string
 }
 
-// NeedsDeployment reports whether this vendor requires deployment-scoped
-// configuration — a cloud project, a region — beyond a credential.
-func (v Vendor) NeedsDeployment() bool { return len(v.DeploymentEnv) > 0 }
-
 func (v Vendor) clone() Vendor {
 	out := v
 	out.KeyEnv = slices.Clone(v.KeyEnv)

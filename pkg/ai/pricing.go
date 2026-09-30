@@ -26,11 +26,8 @@ type PricingTier struct {
 	CacheRead        float64 `json:"cache_read,omitempty"`
 }
 
-// Currency codes used by the catalog.
-const (
-	USD = "USD"
-	CNY = "CNY"
-)
+// USD is the currency code the catalog prices in.
+const USD = "USD"
 
 // Cost is the money breakdown of one call, in Pricing's currency.
 type Cost struct {

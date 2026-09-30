@@ -44,20 +44,6 @@ func (c *Client) CountTokens(ctx context.Context, messages []Message, opts ...Op
 	return TokenCount{Tokens: req.EstimateTokens()}, nil
 }
 
-// Headroom reports how many tokens are left in the model's context window
-// after the prompt, and whether the figure can be trusted.
-func (c *Client) Headroom(ctx context.Context, messages []Message, opts ...Option) (left int, count TokenCount, err error) {
-	count, err = c.CountTokens(ctx, messages, opts...)
-	if err != nil {
-		return 0, count, err
-	}
-	window := c.model.ContextWindow
-	if window <= 0 {
-		return 0, count, nil
-	}
-	return max(window-count.Tokens, 0), count, nil
-}
-
 // Token-estimation constants, leaning towards over-counting: compacting early
 // costs some context, discovering the prompt was too large costs a request.
 const (

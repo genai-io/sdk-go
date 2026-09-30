@@ -141,7 +141,7 @@ func TestValidateCatchesWhatTheModelCannotDo(t *testing.T) {
 		"forcing a tool that is not in the prompt": {
 			model:    Model{ID: "m"},
 			messages: []Message{UserMessage("hi")},
-			opts:     []Option{WithTools(tool), WithForceTool("other")},
+			opts:     []Option{WithTools(tool), WithToolChoice(ToolChoiceNamed("other"))},
 			wantErr:  "is not present in the prompt",
 		},
 		"two tools with one name": {

@@ -494,7 +494,12 @@ func TestAToolsImageReachesTheModel(t *testing.T) {
 		aitest.Asks(ai.ToolCall{ID: "c1", Name: "screenshot", Input: `{}`}),
 		aitest.Says("a login form"),
 	)
-	a := newAgent(t, driver, agent.WithTools(shot))
+	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub",
+		Input: []ai.Modality{ai.ModalityText, ai.ModalityImage}})
+	a, err := agent.New(client, agent.WithSystem("You are a test."), agent.WithTools(shot))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if _, err := collect(t, a, ai.UserMessage("what does it look like?")); err != nil {
 		t.Fatalf("turn failed: %v", err)

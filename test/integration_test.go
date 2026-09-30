@@ -1454,12 +1454,15 @@ func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
 		}),
 	}
 
+	// The models can see, so what is tested is the protocol, not the capability check.
+	seeing := []ai.Modality{ai.ModalityText, ai.ModalityImage}
+
 	carried := map[string]struct {
 		model ai.Model
 		serve func(*testing.T) *stub
 	}{
 		"anthropic": {
-			model: ai.Model{ID: "claude-test", API: ai.APIAnthropicMessages, MaxOutput: 1024},
+			model: ai.Model{ID: "claude-test", API: ai.APIAnthropicMessages, MaxOutput: 1024, Input: seeing},
 			serve: func(t *testing.T) *stub {
 				return sse(t, true,
 					[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{}}}`},
@@ -1468,7 +1471,7 @@ func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
 			},
 		},
 		"openai chat completions": {
-			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIChat},
+			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIChat, Input: seeing},
 			serve: func(t *testing.T) *stub {
 				return sse(t, false,
 					[2]string{"", `{"id":"1","model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
@@ -1476,7 +1479,7 @@ func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
 			},
 		},
 		"openai responses": {
-			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIResponses},
+			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIResponses, Input: seeing},
 			serve: func(t *testing.T) *stub {
 				return sse(t, false,
 					[2]string{"", `{"type":"response.completed","response":{"id":"r1","model":"gpt-test",` +

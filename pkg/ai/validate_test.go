@@ -97,6 +97,12 @@ func TestValidateCatchesWhatTheModelCannotDo(t *testing.T) {
 			messages: []Message{image},
 			wantErr:  "does not accept image input",
 		},
+		"a tool's image to a text-only model": {
+			model: Model{ID: "m"},
+			messages: []Message{ToolResultsMessage(ToolResult{ToolCallID: "c1",
+				Content: Content{ImageBlock(Image{MediaType: "image/png", Data: "x"})}})},
+			wantErr: "does not accept image input",
+		},
 		"an image to a model that takes them": {
 			model:    Model{ID: "m", Input: []Modality{ModalityText, ModalityImage}},
 			messages: []Message{image},

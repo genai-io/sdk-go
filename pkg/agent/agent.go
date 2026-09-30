@@ -304,6 +304,15 @@ func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.pending = append(a.pending, msgs...)
 }
 
+// Pending is how many added messages have not entered the conversation yet.
+// An exchange does not end while any wait, so a non-zero count between
+// exchanges means one arrived after the last ended and another is owed.
+func (a *Agent) Pending() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.pending)
+}
+
 // taken empties the queue AddMessages fills.
 func (a *Agent) taken() []ai.Message {
 	a.mu.Lock()

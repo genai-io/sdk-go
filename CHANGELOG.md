@@ -9,6 +9,17 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Added
+
+- **`Agent.Pending`** — how many added messages have not entered the
+  conversation yet, so a caller driving exchanges knows whether another is owed.
+
+### Changed
+
+- **An exchange does not end while added messages wait.** A message added
+  while the model gave its final answer used to sit until the next `Run`; the
+  exchange now takes another step to hear it.
+
 ## [0.7.2] - 2026-09-28
 
 ### Changed

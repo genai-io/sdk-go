@@ -529,6 +529,40 @@ func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
 	}
 }
 
+// A message added while the model gives its final answer is not left for an
+// exchange nobody may start: this one takes another step to hear it.
+func TestAMessageAddedDuringTheLastAnswerExtendsTheExchange(t *testing.T) {
+	driver := aitest.New(aitest.Says("waiting on the review"), aitest.Says("got it"))
+	a := newAgent(t, driver)
+
+	var ends, starts int
+	for e, err := range a.Run(context.Background(), ai.UserMessage("review")) {
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		switch v := e.(type) {
+		case agent.MessageStart:
+			if starts++; starts == 1 {
+				a.AddMessages(ai.UserMessage("the review finished"))
+			}
+		case agent.TurnEnd:
+			ends++
+			if got := v.Message.Text(); got != "got it" {
+				t.Errorf("the exchange ended on %q, want the answer to the late message", got)
+			}
+		}
+	}
+	if ends != 1 || driver.Calls() != 2 {
+		t.Fatalf("exchanges = %d, inferences = %d; want 1 exchange of 2 inferences", ends, driver.Calls())
+	}
+	if msgs := driver.Last().Messages; msgs[len(msgs)-1].Text() != "the review finished" {
+		t.Errorf("the second inference did not end on the late message")
+	}
+	if n := a.Pending(); n != 0 {
+		t.Errorf("Pending = %d after the exchange, want 0", n)
+	}
+}
+
 // A message queued after an exchange's last step boundary belongs to the
 // conversation ahead of the next exchange's own input: it was said first, and a
 // fold is only the conversation if that order is the truth.

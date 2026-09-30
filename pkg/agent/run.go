@@ -769,6 +769,12 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 				a.add(emit, ai.UserMessage(a.resumePrompt))
 				continue
 			}
+			// Something said while the model answered has not been heard: the
+			// exchange ends only when nothing is waiting, or it would sit
+			// unread until whoever next thinks to start one.
+			if a.Pending() > 0 {
+				continue
+			}
 			return out.stopped(endedBecause(resp.StopReason))
 		}
 

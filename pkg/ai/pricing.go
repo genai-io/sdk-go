@@ -1,5 +1,7 @@
 package ai
 
+import "cmp"
+
 // Pricing is a published rate card, per million tokens.
 type Pricing struct {
 	Currency   string  `json:"currency,omitempty"`
@@ -51,9 +53,9 @@ func (p Pricing) Cost(u Usage) Cost {
 	for _, tier := range p.Tiers {
 		if u.TotalInput() > tier.AboveInputTokens && tier.AboveInputTokens > matched {
 			matched = tier.AboveInputTokens
-			input, output = tierRate(tier.Input, p.Input), tierRate(tier.Output, p.Output)
-			cacheWrite = tierRate(tier.CacheWrite, p.CacheWrite)
-			cacheRead = tierRate(tier.CacheRead, p.CacheRead)
+			input, output = cmp.Or(tier.Input, p.Input), cmp.Or(tier.Output, p.Output)
+			cacheWrite = cmp.Or(tier.CacheWrite, p.CacheWrite)
+			cacheRead = cmp.Or(tier.CacheRead, p.CacheRead)
 		}
 	}
 
@@ -78,15 +80,6 @@ func (p Pricing) Cost(u Usage) Cost {
 	}
 	c.Total = c.Input + c.Output + c.CacheWrite + c.CacheRead
 	return c
-}
-
-// tierRate is what the tier charges: its own rate where it states one, and the
-// base card's where it is silent.
-func tierRate(tier, base float64) float64 {
-	if tier == 0 {
-		return base
-	}
-	return tier
 }
 
 // Known reports whether any rate is set.

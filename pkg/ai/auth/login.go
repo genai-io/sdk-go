@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -104,10 +105,7 @@ func Login(ctx context.Context, vendorID string, opts LoginOptions) (Credential,
 	if ui == nil {
 		ui = ConsoleInteraction()
 	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
+	client := cmp.Or(opts.HTTPClient, &http.Client{Timeout: 30 * time.Second})
 
 	credential, err := f.Login(ctx, client, ui)
 	if err != nil {

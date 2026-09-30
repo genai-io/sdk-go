@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"iter"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -233,13 +234,11 @@ func (s *Store) Close() error {
 	s.live = map[string]*openSession{}
 	s.mu.Unlock()
 
-	var firstErr error
+	var errs error
 	for _, o := range live {
-		if err := o.close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		errs = errors.Join(errs, o.close())
 	}
-	return firstErr
+	return errs
 }
 
 // dir is where a session lives. Ids come from application input, so Join alone
@@ -334,22 +333,16 @@ func (o *openSession) close() error {
 // to read it reads the truth.
 func (s *Store) saveAll() error {
 	s.mu.Lock()
-	live := make([]*openSession, 0, len(s.live))
-	for _, o := range s.live {
-		live = append(live, o)
-	}
+	live := slices.Collect(maps.Values(s.live))
 	s.mu.Unlock()
 
-	var firstErr error
+	var errs error
 	for _, o := range live {
 		o.mu.Lock()
-		err := o.save()
+		errs = errors.Join(errs, o.save())
 		o.mu.Unlock()
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
 	}
-	return firstErr
+	return errs
 }
 
 // trimTornTail drops a half-written last line, so the next entry begins a line

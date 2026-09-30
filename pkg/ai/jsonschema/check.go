@@ -2,10 +2,11 @@ package jsonschema
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
-	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -78,7 +79,7 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 		missing = append(missing, name)
 	}
 	if len(missing) > 0 {
-		sort.Strings(missing)
+		slices.Sort(missing)
 		return fmt.Errorf("%smissing required %s: %s", within(path),
 			plural("property", "properties", len(missing)), strings.Join(missing, ", "))
 	}
@@ -91,7 +92,7 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 			}
 		}
 		if len(unknown) > 0 {
-			sort.Strings(unknown)
+			slices.Sort(unknown)
 			return fmt.Errorf("%sunknown %s: %s", within(path),
 				plural("property", "properties", len(unknown)), strings.Join(unknown, ", "))
 		}
@@ -99,13 +100,7 @@ func checkObject(schema map[string]any, value map[string]any, path string) error
 
 	// Sorted, so the same bad arguments always come back with the same
 	// complaint rather than whichever the map happened to yield first.
-	names := make([]string, 0, len(value))
-	for name := range value {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(value)) {
 		if sub, ok := properties[name].(map[string]any); ok {
 			if err := checkValue(sub, value[name], join(path, name)); err != nil {
 				return err
@@ -210,13 +205,7 @@ func typeNames(value any) []string {
 	case string:
 		return []string{t}
 	case []any:
-		out := make([]string, 0, len(t))
-		for _, name := range t {
-			if s, ok := name.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
+		return stringList(t)
 	}
 	return nil
 }
@@ -241,6 +230,8 @@ func numberOf(value any) (float64, bool) {
 		return n, true
 	case int:
 		return float64(n), true
+	case int64:
+		return float64(n), true
 	}
 	return 0, false
 }
@@ -255,9 +246,6 @@ func inEnum(allowed []any, value any) bool {
 		a, aok := numberOf(candidate)
 		b, bok := numberOf(value)
 		if aok && bok && a == b {
-			return true
-		}
-		if n, ok := candidate.(int64); ok && bok && float64(n) == b {
 			return true
 		}
 	}
@@ -304,8 +292,6 @@ func joinWords(words []string, conjunction string) string {
 		return ""
 	case 1:
 		return words[0]
-	case 2:
-		return words[0] + " " + conjunction + " " + words[1]
 	}
 	return strings.Join(words[:len(words)-1], ", ") + " " + conjunction + " " + words[len(words)-1]
 }
@@ -319,8 +305,5 @@ func plural(one, many string, n int) string {
 
 // trim writes a bound the way it was written in the schema: 1 rather than 1.
 func trim(n float64) string {
-	if n == math.Trunc(n) {
-		return fmt.Sprintf("%d", int64(n))
-	}
-	return fmt.Sprintf("%g", n)
+	return strconv.FormatFloat(n, 'f', -1, 64)
 }

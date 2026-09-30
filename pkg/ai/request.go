@@ -214,12 +214,8 @@ func (e Effort) Valid() bool {
 }
 
 func effortRank(e Effort) (int, bool) {
-	for i, known := range Efforts {
-		if known == e {
-			return i, true
-		}
-	}
-	return 0, false
+	i := slices.Index(Efforts, e)
+	return i, i >= 0
 }
 
 // CacheRetention is how long a provider should hold a prompt cache entry.

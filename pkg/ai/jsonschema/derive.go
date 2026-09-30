@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -296,12 +297,9 @@ func nullable(schema map[string]any) map[string]any {
 			schema["type"] = []any{t, "null"}
 		}
 	case []any:
-		for _, existing := range t {
-			if existing == "null" {
-				return schema
-			}
+		if !slices.Contains(t, any("null")) {
+			schema["type"] = append(t, "null")
 		}
-		schema["type"] = append(t, "null")
 	}
 	return schema
 }

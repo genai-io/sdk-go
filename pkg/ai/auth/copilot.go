@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
@@ -125,10 +126,7 @@ func copilotSessionToken(ctx context.Context, client *http.Client, e copilotEndp
 			Code: "invalid_response", Description: "no Copilot token in the response", Status: res.StatusCode,
 		}
 	}
-	api = out.Endpoints.API
-	if api == "" {
-		api = e.api
-	}
+	api = cmp.Or(out.Endpoints.API, e.api)
 	if out.ExpiresAt > 0 {
 		expires = time.Unix(out.ExpiresAt, 0)
 	}

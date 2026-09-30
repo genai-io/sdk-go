@@ -3,8 +3,10 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -94,11 +96,7 @@ func (s *FileStore) List() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(all))
-	for vendor := range all {
-		out = append(out, vendor)
-	}
-	return out, nil
+	return slices.Collect(maps.Keys(all)), nil
 }
 
 func (s *FileStore) read() (map[string]Credential, error) {

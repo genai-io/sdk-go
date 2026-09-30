@@ -12,6 +12,7 @@
 package anthropic
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"iter"
@@ -335,10 +336,7 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	var out []ai.Model
 	for pager.Next() {
 		m := pager.Current()
-		name := m.DisplayName
-		if name == "" {
-			name = m.ID
-		}
+		name := cmp.Or(m.DisplayName, m.ID)
 		out = append(out, ai.Model{
 			ID:     m.ID,
 			Name:   name,

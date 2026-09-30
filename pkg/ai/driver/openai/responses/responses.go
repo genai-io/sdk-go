@@ -205,7 +205,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		}
 
 		if err := stream.Err(); err != nil {
-			yield(ai.Delta{}, wrapStream(err))
+			yield(ai.Delta{}, fail.WrapStream(err))
 			return
 		}
 
@@ -272,7 +272,7 @@ func finished(resp wire.Response, stop ai.StopReason) ai.Delta {
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	page, err := d.client.Models.List(ctx)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fail.Wrap(err)
 	}
 	out := make([]ai.Model, 0, len(page.Data))
 	for _, m := range page.Data {
@@ -296,17 +296,9 @@ var (
 )
 
 func isTextModel(id string) bool {
-	for _, p := range nonTextPrefixes {
-		if strings.HasPrefix(id, p) {
-			return false
-		}
-	}
-	for _, f := range nonTextFragments {
-		if strings.Contains(id, f) {
-			return false
-		}
-	}
-	return !strings.HasSuffix(id, "-instruct")
+	return !slices.ContainsFunc(nonTextPrefixes, func(p string) bool { return strings.HasPrefix(id, p) }) &&
+		!slices.ContainsFunc(nonTextFragments, func(f string) bool { return strings.Contains(id, f) }) &&
+		!strings.HasSuffix(id, "-instruct")
 }
 
 // callKey names a function call across its events: its call_id, or the item

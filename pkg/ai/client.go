@@ -18,7 +18,7 @@ type Client struct {
 // options given here become this client's defaults, which a per-call option
 // overrides.
 func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
-	return &Client{driver: d, model: cloneModel(m), defaults: slices.Clone(defaults)}
+	return &Client{driver: d, model: m.Clone(), defaults: slices.Clone(defaults)}
 }
 
 // Model describes the model this client talks to. The value is a detached
@@ -28,7 +28,7 @@ func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
 //
 //	client.Complete(ctx, msgs, ai.WithEffort(ai.EffortHigh)) // change a setting for a call
 //	other := ai.NewClientWithDriver(driver, tweaked)                         // talk to a different model
-func (c *Client) Model() Model { return cloneModel(c.model) }
+func (c *Client) Model() Model { return c.model.Clone() }
 
 // Driver returns the driver this client calls through, so a caller who built
 // the client from a Config can still reach the protocol seam — to wrap it in

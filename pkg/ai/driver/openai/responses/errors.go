@@ -34,6 +34,3 @@ func (d *Driver) responseError(code, message string) error {
 	}
 	return err
 }
-
-func wrap(err error) error       { return fail.Wrap(err) }
-func wrapStream(err error) error { return fail.WrapStream(err) }

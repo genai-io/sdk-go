@@ -160,12 +160,7 @@ func RegisterAPI(api API, f Factory) {
 func RegisteredAPIs() []API {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
-	out := make([]API, 0, len(registry.m))
-	for api := range registry.m {
-		out = append(out, api)
-	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(registry.m))
 }
 
 // NewDriver builds the driver for cfg.Model's protocol.
@@ -179,7 +174,7 @@ func NewDriver(cfg Config) (Driver, error) {
 	if !ok {
 		return nil, unregistered(cfg.Model.API, RegisteredAPIs())
 	}
-	cfg.Model = cloneModel(cfg.Model)
+	cfg.Model = cfg.Model.Clone()
 	cfg.Headers = maps.Clone(cfg.Headers)
 	return f(cfg)
 }

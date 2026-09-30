@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -381,15 +382,10 @@ func convertTools(tools []ai.Tool) []sdk.ToolUnionParam {
 // schemaExtras forwards the JSON Schema keywords the SDK's typed fields do not
 // cover, so a schema keeps its $defs, enums and descriptions.
 func schemaExtras(schema map[string]any) map[string]any {
-	extras := make(map[string]any, len(schema))
-	for k, v := range schema {
-		switch k {
-		case "type", "properties", "required":
-			continue
-		default:
-			extras[k] = v
-		}
-	}
+	extras := maps.Clone(schema)
+	delete(extras, "type")
+	delete(extras, "properties")
+	delete(extras, "required")
 	if len(extras) == 0 {
 		return nil
 	}

@@ -3,7 +3,7 @@ GOFILES := $(shell find . -path './vendor' -prune -o -path './.git' -prune -o -n
 GOIMPORTS_VERSION := v0.42.0
 GOLANGCI_VERSION := v2.12.2
 
-.PHONY: build format format-check lint golangci-lint test cover ci clean install-format-tools check-format-tools check-lint-tools
+.PHONY: build format format-check lint golangci-lint test cover ci clean check-format-tools check-lint-tools
 
 build:
 	go build ./...
@@ -25,9 +25,6 @@ format-check: check-format-tools
 		echo "$$files"; \
 		exit 1; \
 	fi
-
-install-format-tools:
-	go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
 
 check-format-tools:
 	@command -v goimports >/dev/null || go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
@@ -57,7 +54,7 @@ cover:
 		-coverpkg=./pkg/... -coverprofile=coverage.out \
 		./...
 
-ci: format-check build lint golangci-lint test
+ci: build lint golangci-lint test
 
 clean:
 	rm -f coverage.out

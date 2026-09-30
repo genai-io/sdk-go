@@ -44,12 +44,7 @@ func (m Model) validate(req *Request) error {
 // toolResultsHaveImages reports whether a tool result carries a picture: one
 // the model would be shown as surely as an image the caller attached.
 func toolResultsHaveImages(c Content) bool {
-	for _, r := range c.ToolResults() {
-		if r.Content.HasImages() {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(c.ToolResults(), func(r ToolResult) bool { return r.Content.HasImages() })
 }
 
 // validateCapabilities checks the request against what this model declares it
@@ -278,44 +273,44 @@ func (m Model) rewrites(content Content) bool {
 }
 
 func validateBlock(role Role, block Block) error {
-	noPointers := block.Image == nil && block.ToolCall == nil &&
-		block.ToolResult == nil && block.Reasoning == nil
+	// owner is the role a block type belongs to, if only one; rest is the block
+	// with the fields its type may carry cleared, so anything left belongs to
+	// another type.
+	var owner Role
+	missing := false
+	rest := block
+	rest.Type = ""
 	switch block.Type {
 	case BlockText:
-		if !noPointers || block.Signature != "" {
-			return fmt.Errorf("text block contains a payload for another block type")
-		}
-	case BlockImage:
-		if role != RoleUser {
-			return fmt.Errorf("image block belongs to a user message")
-		}
-		if block.Image == nil || block.Text != "" || block.Signature != "" ||
-			block.ToolCall != nil || block.ToolResult != nil || block.Reasoning != nil {
-			return fmt.Errorf("image block must contain only an image payload")
-		}
+		rest.Text = ""
 	case BlockThinking:
-		if role != RoleAssistant {
-			return fmt.Errorf("thinking block belongs to an assistant message")
-		}
-		if !noPointers {
-			return fmt.Errorf("thinking block contains a payload for another block type")
-		}
+		owner, rest.Text, rest.Signature = RoleAssistant, "", ""
+	case BlockImage:
+		owner, missing, rest.Image = RoleUser, block.Image == nil, nil
 	case BlockToolCall:
-		if role != RoleAssistant {
-			return fmt.Errorf("tool-call block belongs to an assistant message")
-		}
-		if block.ToolCall == nil || block.Text != "" || block.Signature != "" ||
-			block.Image != nil || block.ToolResult != nil || block.Reasoning != nil {
-			return fmt.Errorf("tool-call block must contain only a tool-call payload")
-		}
+		owner, missing, rest.ToolCall = RoleAssistant, block.ToolCall == nil, nil
 	case BlockToolResult:
-		if role != RoleUser {
-			return fmt.Errorf("tool-result block belongs to a user message")
+		owner, missing, rest.ToolResult = RoleUser, block.ToolResult == nil, nil
+	case BlockReasoning:
+		owner, missing, rest.Reasoning = RoleAssistant, block.Reasoning == nil, nil
+	default:
+		return fmt.Errorf("unknown block type %q", block.Type)
+	}
+	if owner != "" && role != owner {
+		article := "a"
+		if owner == RoleAssistant {
+			article = "an"
 		}
-		if block.ToolResult == nil || block.Text != "" || block.Signature != "" ||
-			block.Image != nil || block.ToolCall != nil || block.Reasoning != nil {
-			return fmt.Errorf("tool-result block must contain only a tool-result payload")
-		}
+		return fmt.Errorf("%s block belongs to %s %s message", block.Type, article, owner)
+	}
+	if missing {
+		return fmt.Errorf("%s block carries no payload", block.Type)
+	}
+	if rest != (Block{}) {
+		return fmt.Errorf("%s block contains a payload for another block type", block.Type)
+	}
+
+	if block.Type == BlockToolResult {
 		// What a tool returned is content of its own, and only two kinds of it
 		// mean anything: what the model reads, and what it looks at. A tool
 		// call or a thinking block in there is something nobody meant.
@@ -330,16 +325,6 @@ func validateBlock(role Role, block Block) error {
 					inner.Type)
 			}
 		}
-	case BlockReasoning:
-		if role != RoleAssistant {
-			return fmt.Errorf("reasoning block belongs to an assistant message")
-		}
-		if block.Reasoning == nil || block.Text != "" || block.Signature != "" ||
-			block.Image != nil || block.ToolCall != nil || block.ToolResult != nil {
-			return fmt.Errorf("reasoning block must contain only a reasoning payload")
-		}
-	default:
-		return fmt.Errorf("unknown block type %q", block.Type)
 	}
 	return nil
 }

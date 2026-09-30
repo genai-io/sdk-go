@@ -174,13 +174,10 @@ func validateSettings(req *Request) error {
 func (m Model) validateProtocolBlock(block Block) error {
 	if block.Type == BlockToolResult && block.ToolResult != nil &&
 		block.ToolResult.Content.HasImages() {
-		// Two of the four protocols take an image in a tool result. Sending
-		// one to the others drops it silently, and a model asked about a
-		// picture it was never shown answers anyway.
-		switch {
-		case m.API == APIOpenAIChat:
-			return fmt.Errorf("the Chat Completions protocol carries only text in a tool result")
-		case m.API.googleFamily():
+		// Gemini takes no image in a tool result. Sending one drops it
+		// silently, and a model asked about a picture it was never shown
+		// answers anyway. Chat carries it in a user message after the results.
+		if m.API.googleFamily() {
 			return fmt.Errorf("the Gemini protocol carries only text in a tool result")
 		}
 	}

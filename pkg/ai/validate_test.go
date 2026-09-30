@@ -285,7 +285,7 @@ func TestCallerContentIsStillRefused(t *testing.T) {
 		Content:    Content{TextBlock("here"), ImageBlock(Image{MediaType: "image/png", Data: "x"})},
 	})}}}
 
-	err := Model{ID: "m", API: APIOpenAIChat}.Validate(msgs)
+	err := Model{ID: "m", API: APIGoogleGenAI}.Validate(msgs)
 	if err == nil || !strings.Contains(err.Error(), "only text in a tool result") {
 		t.Errorf("err = %v, want the image refused", err)
 	}

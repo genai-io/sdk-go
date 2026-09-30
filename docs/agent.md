@@ -500,9 +500,9 @@ model can see and correct, rather than failing the turn.
 
 **A tool that looked at something answers with it.** `Result.Content` is
 `ai.Content`, so a screenshot or a rendered chart travels beside the text and
-reaches the model whole — on the Anthropic and OpenAI Responses protocols,
-which carry an image in a tool result; the other two refuse the request rather
-than dropping the picture on the way. `ResultText` is the same answer as text,
+reaches the model whole — inside the tool result on the Anthropic and OpenAI
+Responses protocols, in a user message right after it on Chat Completions;
+Gemini refuses the request rather than dropping the picture on the way. `ResultText` is the same answer as text,
 for a log or a session record.
 
 **A tool that takes a while shows its work.** `agent.Report(ctx, partial)`

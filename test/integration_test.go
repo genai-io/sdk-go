@@ -1436,9 +1436,9 @@ type FetchDocumentArgs struct {
 	ID string `json:"id" description:"the document to fetch"`
 }
 
-// A tool that looked at something answers with a picture. Two protocols carry
-// one; the other two are refused before the network, because a model asked
-// about an image it was never shown answers anyway.
+// A tool that looked at something answers with a picture. Three protocols carry
+// one; Gemini is refused before the network, because a model asked about an
+// image it was never shown answers anyway.
 func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
 	history := []ai.Message{
 		ai.UserMessage("what does it look like?"),
@@ -1464,6 +1464,14 @@ func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
 				return sse(t, true,
 					[2]string{"message_start", `{"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{}}}`},
 					[2]string{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{}}`},
+				)
+			},
+		},
+		"openai chat completions": {
+			model: ai.Model{ID: "gpt-test", API: ai.APIOpenAIChat},
+			serve: func(t *testing.T) *stub {
+				return sse(t, false,
+					[2]string{"", `{"id":"1","model":"gpt-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
 				)
 			},
 		},
@@ -1494,8 +1502,7 @@ func TestAToolResultCarriesAnImageWhereTheProtocolTakesOne(t *testing.T) {
 	}
 
 	refused := map[string]ai.Model{
-		"openai chat completions": {ID: "gpt-test", API: ai.APIOpenAIChat},
-		"google gemini":           {ID: "gemini-test", API: ai.APIGoogleGenAI},
+		"google gemini": {ID: "gemini-test", API: ai.APIGoogleGenAI},
 	}
 	for name, model := range refused {
 		t.Run(name, func(t *testing.T) {

@@ -9,6 +9,8 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-09-30
+
 ### Fixed
 
 - **A Responses tool call is one call even when its item ID changes between
@@ -734,6 +736,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.7.5]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.5
 [0.7.4]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.4
 [0.7.3]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.3
 [0.7.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.2

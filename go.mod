@@ -3,9 +3,9 @@ module github.com/genai-io/sdk-go
 go 1.26.0
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.75.0
+	github.com/anthropics/anthropic-sdk-go v1.76.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/openai/openai-go/v3 v3.66.0
+	github.com/openai/openai-go/v3 v3.68.0
 	golang.org/x/oauth2 v0.37.0
 )
 

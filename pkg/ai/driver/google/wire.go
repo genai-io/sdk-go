@@ -90,14 +90,22 @@ type thinkingConfig struct {
 }
 
 type generateResponse struct {
-	Candidates    []*candidate   `json:"candidates,omitempty"`
-	ResponseID    string         `json:"responseId,omitempty"`
-	UsageMetadata *usageMetadata `json:"usageMetadata,omitempty"`
+	Candidates []*candidate `json:"candidates,omitempty"`
+	// PromptFeedback is set when the prompt itself was blocked, in which case
+	// no candidate comes back at all.
+	PromptFeedback *promptFeedback `json:"promptFeedback,omitempty"`
+	ResponseID     string          `json:"responseId,omitempty"`
+	UsageMetadata  *usageMetadata  `json:"usageMetadata,omitempty"`
 }
 
 type candidate struct {
 	Content      *content `json:"content,omitempty"`
 	FinishReason string   `json:"finishReason,omitempty"`
+}
+
+type promptFeedback struct {
+	BlockReason        string `json:"blockReason,omitempty"`
+	BlockReasonMessage string `json:"blockReasonMessage,omitempty"`
 }
 
 type usageMetadata struct {

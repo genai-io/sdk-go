@@ -169,7 +169,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 // return the bare shape — id, object, owned_by — with no limits; where one
 // includes a window it is read out of the raw JSON, since the typed SDK struct
 // has no field for a non-standard extension. OpenRouter spells it
-// context_length; LiteLLM and VS Code LM gateways, max_input_tokens.
+// context_length; LiteLLM and VS Code LM gateways, max_input_tokens. A model
+// whose supported_endpoints (GitHub Copilot's field) omit Chat but name
+// Responses is listed as a Responses model, since Chat would refuse it.
 func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 	// One request is the whole listing: the SDK's page type for /models reports
 	// no next page ever, because the endpoint does not paginate.
@@ -182,8 +184,9 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 		model := ai.Model{ID: m.ID, Name: m.ID, API: ai.APIOpenAIChat, Vendor: d.model.Vendor}
 		if raw := m.RawJSON(); raw != "" {
 			var extra struct {
-				ContextLength  int `json:"context_length"`
-				MaxInputTokens int `json:"max_input_tokens"`
+				ContextLength      int      `json:"context_length"`
+				MaxInputTokens     int      `json:"max_input_tokens"`
+				SupportedEndpoints []string `json:"supported_endpoints"`
 			}
 			if json.Unmarshal([]byte(raw), &extra) == nil {
 				switch {
@@ -192,11 +195,21 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 				case extra.MaxInputTokens > 0:
 					model.ContextWindow = extra.MaxInputTokens
 				}
+				if responsesOnly(extra.SupportedEndpoints) {
+					// Stateless: nothing says the gateway keeps server-side state.
+					model.API = ai.APIOpenAIResponses
+					model.Compat = ai.OpenAIResponsesCompat{Stateless: true}
+				}
 			}
 		}
 		out = append(out, model)
 	}
 	return out, nil
+}
+
+// responsesOnly reports endpoints that serve Responses but not Chat.
+func responsesOnly(endpoints []string) bool {
+	return slices.Contains(endpoints, "/responses") && !slices.Contains(endpoints, "/chat/completions")
 }
 
 // reasoningText reads the reasoning a stream delta carries. Neither spelling is

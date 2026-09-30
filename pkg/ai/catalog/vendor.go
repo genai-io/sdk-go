@@ -103,14 +103,14 @@ func (v Vendor) Resolve(m ai.Model) ai.Model { return v.decorate(m) }
 func (v Vendor) decorate(m ai.Model) ai.Model {
 	m = m.Clone()
 	m.Vendor = v.ID
-	m.API = v.API
+	m.API = provider.ListedAPI(v.API, m.API)
 	if m.BaseURL == "" {
 		m.BaseURL = v.BaseURL
 	}
 	if m.Name == "" {
 		m.Name = m.ID
 	}
-	if m.Compat == nil {
+	if m.Compat == nil && m.API == v.API {
 		m.Compat = v.Compat
 	}
 	if m.SamplingParams == nil {

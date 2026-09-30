@@ -54,7 +54,7 @@ func (c *Client) Models(ctx context.Context) ([]Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cloneModels(models), nil
+	return CloneModels(models), nil
 }
 
 // Stream runs one inference call and yields events as they arrive.

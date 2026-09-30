@@ -394,7 +394,9 @@ func (m Model) Clone() Model {
 	return out
 }
 
-func cloneModels(models []Model) []Model {
+// CloneModels is Clone for each model, for a list that crosses from one owner
+// to another.
+func CloneModels(models []Model) []Model {
 	out := make([]Model, len(models))
 	for i, model := range models {
 		out[i] = model.Clone()

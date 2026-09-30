@@ -70,7 +70,10 @@ type Config struct {
 // New builds a provider from its parts.
 func New(cfg Config) *Provider {
 	cfg.Headers = maps.Clone(cfg.Headers)
-	cfg.Models = cloneAll(cfg.Models)
+	// A list is snapshotted here, in Refresh and in Models — wherever it
+	// crosses in or out — so a caller may keep mutating its own builders and a
+	// refresh in another goroutine cannot rewrite a list someone is reading.
+	cfg.Models = ai.CloneModels(cfg.Models)
 	if cfg.Name == "" {
 		cfg.Name = cfg.ID
 	}
@@ -94,7 +97,7 @@ func (p *Provider) API() ai.API { return p.cfg.API }
 // successful Refresh it is the baseline alone.
 func (p *Provider) Models() []ai.Model {
 	p.mu.RLock()
-	listing := cloneAll(p.listing)
+	listing := ai.CloneModels(p.listing)
 	p.mu.RUnlock()
 
 	// Decorate the baseline as well as the listing. Every model a provider
@@ -115,7 +118,7 @@ func (p *Provider) Models() []ai.Model {
 		merged[i] = MergeListing(merged[i], live)
 	}
 	// No clone on the way out: every entry above is already a fresh value —
-	// the baseline through Clone, the listing through cloneAll, a merged pair
+	// the baseline through Clone, the listing through CloneModels, a merged pair
 	// through MergeListing, which clones both sides.
 	return merged
 }
@@ -149,7 +152,7 @@ func (p *Provider) Refresh(ctx context.Context) error {
 		return err
 	}
 	p.mu.Lock()
-	p.listing = cloneAll(models)
+	p.listing = ai.CloneModels(models)
 	p.mu.Unlock()
 	return nil
 }
@@ -244,15 +247,4 @@ func ListedAPI(provider, listed ai.API) ai.API {
 		return listed
 	}
 	return provider
-}
-
-// cloneAll snapshots a model list wherever one crosses in or out of an
-// Provider, so a caller may keep mutating its own builders and a refresh
-// running in another goroutine cannot rewrite a list someone is reading.
-func cloneAll(models []ai.Model) []ai.Model {
-	out := make([]ai.Model, len(models))
-	for i, m := range models {
-		out[i] = m.Clone()
-	}
-	return out
 }

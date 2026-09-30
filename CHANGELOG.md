@@ -9,6 +9,14 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Responses tool call is one call even when its item ID changes between
+  events.** Calls were keyed by output-item ID; an endpoint that re-encodes it
+  per event (GitHub Copilot) lost the streamed arguments and produced the call
+  twice under one `call_id` — once with its arguments, once empty — and both
+  ran. Calls are now keyed by `call_id`, with the finished item's arguments.
+
 ## [0.7.4] - 2026-09-30
 
 ### Fixed

@@ -30,7 +30,7 @@ func newCodexFlow(cfg oauth2.Config) Flow {
 	return Flow{
 		Method: "browser (PKCE)",
 		Login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
-			token, err := oauth.Code(context.WithValue(ctx, oauth2.HTTPClient, client), &cfg, ui)
+			token, err := oauth.Code(ctx, &cfg, ui)
 			if err != nil {
 				return Credential{}, err
 			}
@@ -46,7 +46,6 @@ func newCodexFlow(cfg oauth2.Config) Flow {
 			}
 			// A token with no access half is one TokenSource refreshes at once;
 			// a provider that does not rotate the refresh token gets it back.
-			ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
 			token, err := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: c.Refresh}).Token()
 			if err != nil {
 				return "", time.Time{}, c, err

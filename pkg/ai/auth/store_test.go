@@ -14,7 +14,7 @@ import (
 func TestStoresBehaveAlike(t *testing.T) {
 	stores := map[string]func(t *testing.T) Store{
 		"file":   func(t *testing.T) Store { return newTestFileStore(t) },
-		"memory": func(t *testing.T) Store { return NewMemoryStore() },
+		"memory": func(t *testing.T) Store { return &memStore{} },
 	}
 
 	for name, build := range stores {
@@ -197,7 +197,7 @@ func TestDefaultStorePathFollowsXDG(t *testing.T) {
 }
 
 func TestResolveStorePrefersWhatItIsGiven(t *testing.T) {
-	given := NewMemoryStore()
+	given := &memStore{}
 	got, err := resolveStore(given)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +206,7 @@ func TestResolveStorePrefersWhatItIsGiven(t *testing.T) {
 		t.Error("resolveStore ignored the store it was handed")
 	}
 
-	fallback := NewMemoryStore()
+	fallback := &memStore{}
 	defer withDefaultStore(t, fallback)()
 	got, err = resolveStore(nil)
 	if err != nil {

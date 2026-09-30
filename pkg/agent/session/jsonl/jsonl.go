@@ -242,7 +242,7 @@ func (s *Store) Close() error {
 }
 
 // dir is where a session lives. Ids come from application input, so Join alone
-// would let "" name the store itself and ".." a neighbour for Delete to remove.
+// would let "" name the store itself and ".." a neighbour.
 func (s *Store) dir(id string) (string, error) {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
 		return "", fmt.Errorf("jsonl: %q is not a session id", id)

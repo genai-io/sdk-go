@@ -114,7 +114,7 @@ func TestExpiredIsOneRule(t *testing.T) {
 		"no stated lifetime":     {time.Time{}, false},
 		"good for another hour":  {time.Now().Add(time.Hour), false},
 		"gone":                   {time.Now().Add(-time.Minute), true},
-		"goes inside the margin": {time.Now().Add(oauth.ExpiryMargin / 2), true},
+		"goes inside the margin": {time.Now().Add(expiryMargin / 2), true},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -138,7 +138,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 		c.Endpoint = fmt.Sprintf("https://endpoint-%d.test", minted)
 		// Each token is good for less than the margin, so the next request
 		// has to renew.
-		return fmt.Sprintf("tok-%d", minted), time.Now().Add(oauth.ExpiryMargin / 2), c, nil
+		return fmt.Sprintf("tok-%d", minted), time.Now().Add(expiryMargin / 2), c, nil
 	})
 
 	var presented []string
@@ -147,7 +147,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := NewMemoryStore()
+	store := &memStore{}
 	if err := store.Save(Credential{Vendor: stubVendor, Access: "stored"}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	store := NewMemoryStore()
+	store := &memStore{}
 	start := Credential{Vendor: rotateVendor, Access: "a", Refresh: "r1"}
 	if err := store.Save(start); err != nil {
 		t.Fatal(err)

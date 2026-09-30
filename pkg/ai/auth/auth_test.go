@@ -177,7 +177,7 @@ func TestConfigRefusesAnUnknownReference(t *testing.T) {
 // two-kinds-of-vendor split: there is no key to read, so the only question is
 // whether somebody has signed in.
 func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
-	store := NewMemoryStore()
+	store := &memStore{}
 	defer withDefaultStore(t, store)()
 
 	_, err := Config("copilot/gpt-4o")
@@ -212,7 +212,7 @@ func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
 }
 
 func TestAvailableReportsWhatCanActuallyBeReached(t *testing.T) {
-	store := NewMemoryStore()
+	store := &memStore{}
 	defer withDefaultStore(t, store)()
 
 	// Start from nothing: whatever is in the developer's environment must not
@@ -336,7 +336,7 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 		api:      "https://api.individual.githubcopilot.test",
 	}))
 
-	store := NewMemoryStore()
+	store := &memStore{}
 	var shown oauth.Prompt
 	got, err := Login(t.Context(), copilotStub, LoginOptions{
 		Store: store,
@@ -381,13 +381,13 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 }
 
 func TestLoginRefusesAVendorThatTakesAKey(t *testing.T) {
-	_, err := Login(t.Context(), "deepseek", LoginOptions{Store: NewMemoryStore()})
+	_, err := Login(t.Context(), "deepseek", LoginOptions{Store: &memStore{}})
 	if err == nil || !strings.Contains(err.Error(), "API key") {
 		t.Errorf("err = %v, want it to say to set the key variable instead", err)
 	}
 
 	var unknown *UnknownVendorError
-	if _, err := Login(t.Context(), "nobody", LoginOptions{Store: NewMemoryStore()}); !errors.As(err, &unknown) {
+	if _, err := Login(t.Context(), "nobody", LoginOptions{Store: &memStore{}}); !errors.As(err, &unknown) {
 		t.Errorf("err = %v, want an UnknownVendorError", err)
 	}
 }

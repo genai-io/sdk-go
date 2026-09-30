@@ -14,8 +14,8 @@ Each such change is listed under **Changed** with what to write instead.
 - **`pkg/ai/auth/oauth` runs on `golang.org/x/oauth2`.** `Device(ctx, cfg,
   ui)` and `Code(ctx, cfg, ui)` now take an `*oauth2.Config` and return an
   `*oauth2.Token`. Pass the HTTP client in `ctx` under `oauth2.HTTPClient`.
-  `Prompt`, `Interaction`, `InteractionFunc` and `ExpiryMargin` are
-  unchanged. `Token`, `Config`, `Error`, `Refresh`, `DeviceEndpoints`,
+  `Prompt`, `Interaction` and `InteractionFunc` are unchanged;
+  `ExpiryMargin` is gone. `Token`, `Config`, `Error`, `Refresh`, `DeviceEndpoints`,
   `CodeEndpoints`, `AuthorizeURL` and `Exchange` are gone: use x/oauth2's
   `Token`, `Config`, `RetrieveError`, `TokenSource`, `AuthCodeURL` and
   `Exchange`.

@@ -6,44 +6,41 @@ import (
 	"sync"
 )
 
-// MemoryStore keeps credentials in memory: the second Store, which these tests
-// swap in for the file one.
-type MemoryStore struct {
+// memStore keeps credentials in memory: the second Store, which these tests
+// swap in for the file one. The zero value is ready to use.
+type memStore struct {
 	mu sync.Mutex
 	m  map[string]Credential
 }
 
-func NewMemoryStore() *MemoryStore { return &MemoryStore{m: map[string]Credential{}} }
-
-// Load returns the credential held for a vendor.
-func (s *MemoryStore) Load(vendor string) (Credential, bool, error) {
+func (s *memStore) Load(vendor string) (Credential, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.m[vendor]
 	return c, ok, nil
 }
 
-// Save keeps a credential for the life of the process.
-func (s *MemoryStore) Save(c Credential) error {
+func (s *memStore) Save(c Credential) error {
 	if c.Vendor == "" {
 		return errNoVendor()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]Credential{}
+	}
 	s.m[c.Vendor] = c
 	return nil
 }
 
-// Delete forgets a vendor's credential.
-func (s *MemoryStore) Delete(vendor string) error {
+func (s *memStore) Delete(vendor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.m, vendor)
 	return nil
 }
 
-// List names the vendors this store holds a credential for.
-func (s *MemoryStore) List() ([]string, error) {
+func (s *memStore) List() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Collect(maps.Keys(s.m)), nil

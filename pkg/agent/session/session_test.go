@@ -196,7 +196,7 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 // the session handle instead.
 func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 	a := newAgent(t, nil, aitest.Says("still working"))
-	rec, _, err := session.Open(context.Background(), failingStore{&memStore{}}, "")
+	rec, _, err := session.Open(context.Background(), &flaky{Store: &memStore{}, failOn: 1}, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -650,13 +650,6 @@ func TestARecordSurvivesAValueThatWillNotEncode(t *testing.T) {
 	if len(kinds) != 1 || kinds[0] != "hook.fired" {
 		t.Errorf("kinds = %v, want just the one that had a kind", kinds)
 	}
-}
-
-// failingStore opens sessions and then refuses to write to them.
-type failingStore struct{ session.Store }
-
-func (failingStore) Append(context.Context, string, ...session.Entry) error {
-	return errors.New("disk full")
 }
 
 // messages reads a session's conversation back without recording into it.

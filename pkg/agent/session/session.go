@@ -174,8 +174,8 @@ func ByRecency(a, b Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) }
 
 // Store is what a recorder writes to and a session is restored from — nothing
 // more. Listing, renaming, forking and deleting are the application's business
-// with the store it chose, and belong to that store's own type: an interface
-// only has to name what this package calls.
+// with the store it chose: an interface only has to name what this package
+// calls.
 type Store interface {
 	// Create starts a session. A blank Meta.ID means the store assigns one.
 	Create(ctx context.Context, meta Meta) (Meta, error)

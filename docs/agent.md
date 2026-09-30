@@ -709,8 +709,9 @@ type Store interface {
 ```
 
 Listing, renaming, forking and deleting are the application's business with the
-store it chose, and live on that store's own type — `jsonl.Store` has them. An
-interface only has to name what this package calls.
+store it chose — `jsonl.Store` adds `List`, and a session is a directory the
+application can copy or remove. An interface only has to name what this package
+calls.
 
 ## Package layout
 

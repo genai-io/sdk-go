@@ -48,7 +48,7 @@ func newCopilotFlow(e copilotEndpoints) Flow {
 				Scopes:   []string{"read:user"},
 				Endpoint: oauth2.Endpoint{DeviceAuthURL: e.device, TokenURL: e.token, AuthStyle: oauth2.AuthStyleInParams},
 			}
-			token, err := oauth.Device(context.WithValue(ctx, oauth2.HTTPClient, client), cfg, ui)
+			token, err := oauth.Device(ctx, cfg, ui)
 			if err != nil {
 				return Credential{}, err
 			}

@@ -9,6 +9,8 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-01
+
 ### Added
 
 - **`ai.CloneModels`**, `Model.Clone` for a whole list. `provider` uses it
@@ -842,6 +844,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.8.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.8.0
 [0.7.7]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.7
 [0.7.6]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.6
 [0.7.5]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.5

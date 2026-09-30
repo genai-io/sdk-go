@@ -9,6 +9,15 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-09-30
+
+### Changed
+
+- **anthropic-sdk-go 1.76.0 and openai-go 3.68.0.** Anthropic keeps a
+  caller's HTTP client when a request config is cloned and retries a
+  connection that drops part-way through a response; OpenAI honors
+  `Retry-After`.
+
 ## [0.7.5] - 2026-09-30
 
 ### Fixed
@@ -736,6 +745,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.7.6]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.6
 [0.7.5]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.5
 [0.7.4]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.4
 [0.7.3]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.3

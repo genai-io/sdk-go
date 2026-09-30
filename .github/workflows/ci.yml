@@ -30,13 +30,9 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
-      - name: Install format tools
-        run: make install-format-tools
-      - name: Format check
-        run: make format-check
       - name: Build
         run: make build
-      - name: Vet
+      - name: Vet and format check
         run: make lint
       - name: Test
         run: make test

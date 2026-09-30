@@ -74,10 +74,6 @@ type Vendor struct {
 	Note string
 }
 
-// NeedsDeployment reports whether this vendor requires deployment-scoped
-// configuration — a cloud project, a region — beyond a credential.
-func (v Vendor) NeedsDeployment() bool { return len(v.DeploymentEnv) > 0 }
-
 func (v Vendor) clone() Vendor {
 	out := v
 	out.KeyEnv = slices.Clone(v.KeyEnv)
@@ -92,15 +88,12 @@ func (v Vendor) clone() Vendor {
 // Model decorates a model ID with this vendor's protocol facts. It knows
 // nothing about the model itself: limits, prices, modalities and reasoning
 // efforts are the caller's to set.
-func (v Vendor) Model(id string) ai.Model { return v.decorate(ai.Model{ID: id}) }
+func (v Vendor) Model(id string) ai.Model { return v.Resolve(ai.Model{ID: id}) }
 
 // Resolve stamps a model with this vendor's protocol facts, overwriting
 // nothing the model already states. A live listing is what needs it: a host
 // reports an ID and a name and never a protocol quirk.
-func (v Vendor) Resolve(m ai.Model) ai.Model { return v.decorate(m) }
-
-// decorate fills in what a model inherits from its vendor's protocol.
-func (v Vendor) decorate(m ai.Model) ai.Model {
+func (v Vendor) Resolve(m ai.Model) ai.Model {
 	m = m.Clone()
 	m.Vendor = v.ID
 	m.API = provider.ListedAPI(v.API, m.API)

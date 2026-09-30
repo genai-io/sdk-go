@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -94,15 +93,6 @@ func WithTools(tools ...Tool) Option {
 // audit log should not have to be one function.
 func WithHooks(hooks ...Hook) Option {
 	return func(a *Agent) { a.hooks = append(a.hooks, hooks...) }
-}
-
-// WithMessages seeds the conversation, e.g. from a restored session. Change it
-// later with SetMessages.
-//
-// The first exchange announces these as MessagesReplaced: they entered without
-// ever being appended, so a fold over what was appended would not have them.
-func WithMessages(msgs []ai.Message) Option {
-	return func(a *Agent) { a.setMessages(msgs) }
 }
 
 // WithMaxSteps caps model calls per exchange. Zero means no cap.
@@ -217,9 +207,6 @@ func New(client *ai.Client, opts ...Option) (*Agent, error) {
 			opt(a)
 		}
 	}
-	// After the options rather than inside WithMessages, so that seeding a
-	// conversation and asking for names are two options in either order.
-	a.messages = a.named(a.messages)
 	return a, nil
 }
 
@@ -244,15 +231,6 @@ func (a *Agent) SetMessages(msgs []ai.Message) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.setMessages(msgs)
-}
-
-// setMessages is the rule WithMessages and SetMessages both follow: a
-// replacement is announced, but replacing nothing with nothing is not — that
-// happened to nobody, and announcing it records an empty conversation.
-//
-// The caller holds a.mu, except at construction, where there is nobody to race.
-func (a *Agent) setMessages(msgs []ai.Message) {
 	if len(a.messages) > 0 || len(msgs) > 0 {
 		a.replaced = true
 	}
@@ -357,35 +335,11 @@ func (a *Agent) Client() *ai.Client {
 	return a.client
 }
 
-// SetClient replaces the model handle, from the next inference on: a person
-// switching model mid-session, with the conversation, the tools and the prompt
-// unchanged. Setting Inference.Client in a PreInfer hook moves one call
-// instead.
-//
-// A nil client is ignored, because New already said an agent cannot exist
-// without one.
-func (a *Agent) SetClient(c *ai.Client) {
-	if c == nil {
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.client = c
-}
-
 // System returns the system prompt as it stands.
 func (a *Agent) System() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.system
-}
-
-// AddHooks registers more hooks. They take effect on the next inference, and
-// hooks run in the order they were added.
-func (a *Agent) AddHooks(hooks ...Hook) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.hooks = append(a.hooks, hooks...)
 }
 
 // SetSystem replaces the system prompt. It takes effect on the next inference,
@@ -396,10 +350,6 @@ func (a *Agent) SetSystem(prompt string) {
 	defer a.mu.Unlock()
 	a.system = prompt
 }
-
-// String names the agent by the model it is calling, which is the one thing
-// about it worth reading in a log.
-func (a *Agent) String() string { return fmt.Sprintf("agent(%s)", a.Client().Model().ID) }
 
 // inference is the call this agent would make. One lock, not three: a prompt
 // read before SetTools and a toolset read after it would describe an agent

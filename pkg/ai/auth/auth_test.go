@@ -177,7 +177,7 @@ func TestConfigRefusesAnUnknownReference(t *testing.T) {
 // two-kinds-of-vendor split: there is no key to read, so the only question is
 // whether somebody has signed in.
 func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
-	store := NewMemoryStore()
+	store := &memStore{}
 	defer withDefaultStore(t, store)()
 
 	_, err := Config("copilot/gpt-4o")
@@ -212,7 +212,7 @@ func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
 }
 
 func TestAvailableReportsWhatCanActuallyBeReached(t *testing.T) {
-	store := NewMemoryStore()
+	store := &memStore{}
 	defer withDefaultStore(t, store)()
 
 	// Start from nothing: whatever is in the developer's environment must not
@@ -309,24 +309,6 @@ func TestProviderRefusesWhatItCannotReach(t *testing.T) {
 	}
 }
 
-func TestProvidersCoversEveryVendorThatCanBeReached(t *testing.T) {
-	defer withDefaultStore(t, NewMemoryStore())()
-	for _, v := range catalog.All() {
-		for _, name := range v.KeyEnv {
-			t.Setenv(name, "")
-		}
-	}
-	t.Setenv("DEEPSEEK_API_KEY", "sk-deepseek")
-
-	set := Providers()
-	if _, ok := set.Get("deepseek"); !ok {
-		t.Error("Providers left out a vendor with a usable credential")
-	}
-	if _, ok := set.Get("openai"); ok {
-		t.Error("Providers included a vendor with no credential")
-	}
-}
-
 // TestLoginStoresWhatTheGrantProduced drives a real flow — the Copilot one,
 // pointed at a stub, which is what its endpoints are a struct for.
 func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
@@ -336,7 +318,10 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 		case "/device":
 			_, _ = w.Write([]byte(`{"device_code":"dc","user_code":"UC-9","verification_uri":"https://github.test/login/device","interval":1,"expires_in":600}`))
 		case "/token":
-			_, _ = w.Write([]byte(`{"access_token":"gho_stub","token_type":"bearer"}`))
+			// Form-encoded, as GitHub answers a token request that does not ask
+			// for JSON.
+			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+			_, _ = w.Write([]byte(`access_token=gho_stub&token_type=bearer`))
 		case "/exchange":
 			editorHeaders = r.Header.Clone()
 			_, _ = w.Write([]byte(`{"token":"copilot-session","expires_at":4102444800,"endpoints":{"api":"https://api.enterprise.githubcopilot.test"}}`))
@@ -351,7 +336,7 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 		api:      "https://api.individual.githubcopilot.test",
 	}))
 
-	store := NewMemoryStore()
+	store := &memStore{}
 	var shown oauth.Prompt
 	got, err := Login(t.Context(), copilotStub, LoginOptions{
 		Store: store,
@@ -396,13 +381,13 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 }
 
 func TestLoginRefusesAVendorThatTakesAKey(t *testing.T) {
-	_, err := Login(t.Context(), "deepseek", LoginOptions{Store: NewMemoryStore()})
+	_, err := Login(t.Context(), "deepseek", LoginOptions{Store: &memStore{}})
 	if err == nil || !strings.Contains(err.Error(), "API key") {
 		t.Errorf("err = %v, want it to say to set the key variable instead", err)
 	}
 
 	var unknown *UnknownVendorError
-	if _, err := Login(t.Context(), "nobody", LoginOptions{Store: NewMemoryStore()}); !errors.As(err, &unknown) {
+	if _, err := Login(t.Context(), "nobody", LoginOptions{Store: &memStore{}}); !errors.As(err, &unknown) {
 		t.Errorf("err = %v, want an UnknownVendorError", err)
 	}
 }

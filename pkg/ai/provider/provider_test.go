@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -267,113 +266,5 @@ func TestConfigForCarriesTheProviderSettings(t *testing.T) {
 	cfg.Headers["X-Acme"] = "tampered"
 	if again := p.ConfigFor(ai.Model{ID: "acme-pro"}); again.Headers["X-Acme"] != "1" {
 		t.Error("editing a built Config changed the provider's headers")
-	}
-}
-
-func TestSetGetIsCaseInsensitive(t *testing.T) {
-	s := NewSet(New(Config{ID: "DeepSeek", API: ai.APIOpenAIChat}))
-	for _, id := range []string{"DeepSeek", "deepseek", "DEEPSEEK", " deepseek "} {
-		if _, ok := s.Get(id); !ok {
-			t.Errorf("Get(%q) missed; the catalog resolves a vendor ID without regard to case", id)
-		}
-	}
-	if _, ok := s.Get("nobody"); ok {
-		t.Error("Get returned a provider that was never added")
-	}
-	s.Delete("DEEPSEEK")
-	if _, ok := s.Get("deepseek"); ok {
-		t.Error("Delete did not remove the provider it was asked to")
-	}
-}
-
-func TestSetModelSplitsOnTheFirstSlashOnly(t *testing.T) {
-	s := NewSet(New(Config{
-		ID:     "acme",
-		API:    ai.APIOpenAIChat,
-		Models: []ai.Model{{ID: "org/acme-pro", API: ai.APIOpenAIChat}},
-	}))
-
-	tests := map[string]struct {
-		ref     string
-		wantID  string
-		wantAny bool
-	}{
-		// A model ID may itself contain a slash — a host that qualifies its
-		// models by publisher — so only the first segment names the provider.
-		"a slash-bearing model ID": {ref: "acme/org/acme-pro", wantID: "org/acme-pro", wantAny: true},
-		"an unlisted model":        {ref: "acme/org/acme-new", wantID: "org/acme-new"},
-		"no provider named":        {ref: "org/acme-pro"},
-		"no slash at all":          {ref: "acme-pro"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got, found := s.Model(tc.ref)
-			if tc.wantID == "" {
-				if found || got.ID != "" {
-					t.Errorf("Model(%q) = %v, %v, want nothing", tc.ref, got, found)
-				}
-				return
-			}
-			if got.ID != tc.wantID {
-				t.Errorf("ID = %q, want %q", got.ID, tc.wantID)
-			}
-			if found != tc.wantAny {
-				t.Errorf("found = %v, want %v", found, tc.wantAny)
-			}
-		})
-	}
-}
-
-func TestSetRefreshFansOutAndReportsEachFailure(t *testing.T) {
-	boom := errors.New("down")
-	var mu sync.Mutex
-	asked := map[string]bool{}
-
-	fetch := func(id string, err error) func(context.Context, *Provider) ([]ai.Model, error) {
-		return func(context.Context, *Provider) ([]ai.Model, error) {
-			mu.Lock()
-			asked[id] = true
-			mu.Unlock()
-			if err != nil {
-				return nil, err
-			}
-			return []ai.Model{{ID: id + "-pro"}}, nil
-		}
-	}
-
-	s := NewSet(
-		New(Config{ID: "ok-one", API: ai.APIOpenAIChat, Fetch: fetch("ok-one", nil)}),
-		New(Config{ID: "ok-two", API: ai.APIOpenAIChat, Fetch: fetch("ok-two", nil)}),
-		New(Config{ID: "broken", API: ai.APIOpenAIChat, Fetch: fetch("broken", boom)}),
-	)
-
-	result := s.Refresh(t.Context())
-	if result.OK() {
-		t.Error("OK reported success although one provider failed")
-	}
-	if len(result.Errors) != 1 || !errors.Is(result.Errors["broken"], boom) {
-		t.Errorf("Errors = %v, want the one failure keyed by its provider", result.Errors)
-	}
-	// One failure must not cancel the others: a set is refreshed so that what
-	// can be reached still is.
-	for _, id := range []string{"ok-one", "ok-two", "broken"} {
-		if !asked[id] {
-			t.Errorf("%s was never asked", id)
-		}
-	}
-	if got := len(s.Models()); got != 2 {
-		t.Errorf("Models = %d, want the two listings that succeeded", got)
-	}
-}
-
-func TestSetAllIsSortedAndStable(t *testing.T) {
-	s := NewSet(New(Config{ID: "zeta"}), New(Config{ID: "alpha"}), New(Config{ID: "mid"}))
-	var ids []string
-	for _, p := range s.All() {
-		ids = append(ids, p.ID())
-	}
-	if strings.Join(ids, ",") != "alpha,mid,zeta" {
-		t.Errorf("All = %v, want it sorted by ID", ids)
 	}
 }

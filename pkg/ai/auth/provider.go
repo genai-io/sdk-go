@@ -38,15 +38,3 @@ func Provider(vendorID string) (*provider.Provider, error) {
 		ProtocolConfig: deployment,
 	}), nil
 }
-
-// Providers builds a live provider for every vendor with a usable credential, in
-// catalog display order.
-func Providers() *provider.Set {
-	out := provider.NewSet()
-	for _, v := range Available() {
-		if e, err := Provider(v.ID); err == nil {
-			out.Set(e)
-		}
-	}
-	return out
-}

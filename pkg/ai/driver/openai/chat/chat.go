@@ -67,7 +67,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		level, _ := d.model.ResolveLevel(req.Effort)
 		params := d.buildParams(req, level)
 
-		stream := d.client.Chat.Completions.NewStreaming(ctx, params, oai.RequestOptions(req)...)
+		stream := d.client.Chat.Completions.NewStreaming(ctx, params)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Tool calls arrive as indexed argument fragments spread across
@@ -109,12 +109,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 						out.StopReason = ai.StopRefusal
 					}
 				}
-				if chunk.Model != "" {
-					out.Model = chunk.Model
-				}
-				if chunk.ID != "" {
-					out.ID = chunk.ID
-				}
+				out.Model, out.ID = chunk.Model, chunk.ID
 
 				for _, tc := range choice.Delta.ToolCalls {
 					calls.add(tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments)

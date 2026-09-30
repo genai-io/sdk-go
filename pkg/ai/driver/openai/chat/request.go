@@ -252,10 +252,7 @@ func convertToolCalls(calls []ai.ToolCall) []sdk.ChatCompletionMessageToolCallUn
 func convertTools(tools []ai.Tool) []sdk.ChatCompletionToolUnionParam {
 	out := make([]sdk.ChatCompletionToolUnionParam, 0, len(tools))
 	for _, t := range tools {
-		var params sdk.FunctionParameters
-		if props := t.Schema.DefinitionMap(); props != nil {
-			params = props
-		}
+		params := sdk.FunctionParameters(t.Schema.DefinitionMap())
 		out = append(out, sdk.ChatCompletionToolUnionParam{
 			OfFunction: &sdk.ChatCompletionFunctionToolParam{
 				Function: sdk.FunctionDefinitionParam{

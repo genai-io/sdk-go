@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"iter"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -200,27 +201,6 @@ func (s *Store) Meta(_ context.Context, id string) (session.Meta, error) {
 	return s.readMeta(id)
 }
 
-// SetMeta replaces the caller-owned half of a session's metadata.
-func (s *Store) SetMeta(_ context.Context, meta session.Meta) error {
-	if err := s.saveAll(); err != nil {
-		return err
-	}
-	dir, err := s.dir(meta.ID)
-	if err != nil {
-		return err
-	}
-	current, err := s.readMeta(meta.ID)
-	if err != nil {
-		return err
-	}
-	// Entries and CreatedAt belong to the store: a caller that echoes back a
-	// stale Meta must not be able to rewrite history's length.
-	meta.Entries = current.Entries
-	meta.CreatedAt = current.CreatedAt
-	meta.UpdatedAt = time.Now().UTC()
-	return writeMeta(dir, meta)
-}
-
 // List returns every session, most recently updated first.
 func (s *Store) List(_ context.Context) ([]session.Meta, error) {
 	if err := s.saveAll(); err != nil {
@@ -245,61 +225,6 @@ func (s *Store) List(_ context.Context) ([]session.Meta, error) {
 	return out, nil
 }
 
-// Fork copies entries up to upto into a new session.
-func (s *Store) Fork(ctx context.Context, id string, upto int64) (session.Meta, error) {
-	source, err := s.Meta(ctx, id)
-	if err != nil {
-		return session.Meta{}, err
-	}
-
-	var kept []session.Entry
-	for e, err := range s.Entries(ctx, id) {
-		if err != nil {
-			return session.Meta{}, err
-		}
-		if upto > 0 && e.Seq > upto {
-			break
-		}
-		e.Seq = 0 // the new session numbers its own entries
-		kept = append(kept, e)
-	}
-
-	forked, err := s.Create(ctx, session.Meta{
-		Title:    source.Title,
-		Model:    source.Model,
-		Parent:   source.ID,
-		ForkedAt: upto,
-	})
-	if err != nil {
-		return session.Meta{}, err
-	}
-	if err := s.Append(ctx, forked.ID, kept...); err != nil {
-		return session.Meta{}, err
-	}
-	return s.Meta(ctx, forked.ID)
-}
-
-// Delete removes a session and everything in it. Deleting one still being
-// appended to is the caller's race: an appender recreating the entries file
-// makes this fail rather than pretend the session is gone.
-func (s *Store) Delete(_ context.Context, id string) error {
-	dir, err := s.dir(id)
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	live, ok := s.live[id]
-	delete(s.live, id)
-	s.mu.Unlock()
-	if ok {
-		live.mu.Lock()
-		_ = live.file.Close() // the directory holding it is removed below
-		live.mu.Unlock()
-	}
-	return os.RemoveAll(dir)
-}
-
 // Close saves what was appended and releases the files. Not closing loses no
 // entry, only how up to date meta.json looks from outside — and, since nothing
 // here fsyncs, the tail of a session on a machine that loses power.
@@ -309,17 +234,15 @@ func (s *Store) Close() error {
 	s.live = map[string]*openSession{}
 	s.mu.Unlock()
 
-	var firstErr error
+	var errs error
 	for _, o := range live {
-		if err := o.close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		errs = errors.Join(errs, o.close())
 	}
-	return firstErr
+	return errs
 }
 
 // dir is where a session lives. Ids come from application input, so Join alone
-// would let "" name the store itself and ".." a neighbour for Delete to remove.
+// would let "" name the store itself and ".." a neighbour.
 func (s *Store) dir(id string) (string, error) {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
 		return "", fmt.Errorf("jsonl: %q is not a session id", id)
@@ -410,22 +333,16 @@ func (o *openSession) close() error {
 // to read it reads the truth.
 func (s *Store) saveAll() error {
 	s.mu.Lock()
-	live := make([]*openSession, 0, len(s.live))
-	for _, o := range s.live {
-		live = append(live, o)
-	}
+	live := slices.Collect(maps.Values(s.live))
 	s.mu.Unlock()
 
-	var firstErr error
+	var errs error
 	for _, o := range live {
 		o.mu.Lock()
-		err := o.save()
+		errs = errors.Join(errs, o.save())
 		o.mu.Unlock()
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
 	}
-	return firstErr
+	return errs
 }
 
 // trimTornTail drops a half-written last line, so the next entry begins a line

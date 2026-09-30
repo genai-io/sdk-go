@@ -9,6 +9,69 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Added
+
+- **`ai.CloneModels`**, `Model.Clone` for a whole list. `provider` uses it
+  wherever a list crosses in or out.
+
+### Changed
+
+- **`pkg/ai/auth/oauth` runs on `golang.org/x/oauth2`.** `Device(ctx, cfg,
+  ui)` and `Code(ctx, cfg, ui)` now take an `*oauth2.Config` and return an
+  `*oauth2.Token`. Pass the HTTP client in `ctx` under `oauth2.HTTPClient`.
+  `Prompt`, `Interaction` and `InteractionFunc` are unchanged;
+  `ExpiryMargin` is gone. `Token`, `Config`, `Error`, `Refresh`, `DeviceEndpoints`,
+  `CodeEndpoints`, `AuthorizeURL` and `Exchange` are gone: use x/oauth2's
+  `Token`, `Config`, `RetrieveError`, `TokenSource`, `AuthCodeURL` and
+  `Exchange`.
+
+### Removed
+
+APIs with no caller outside their own tests.
+
+- **`pkg/agent/session/memory`.** It lives on as a test-only second
+  `session.Store` in `session`'s tests. Use `jsonl`, or implement the
+  four-method `session.Store` yourself.
+- **`provider.Set`, `provider.NewSet`, `provider.RefreshResult` and
+  `auth.Providers`.** Keep your own `map[string]*provider.Provider`, built
+  from `auth.Provider(id)` for each vendor in `auth.Available()`.
+- **`ai.WithHeaders`, `ai.WithSamplingParams` and `Request.Headers`.** Set
+  headers on `ai.Config.Headers` or `Model.Headers`, and sampling parameters
+  on `Model.SamplingParams`. A header that changes per call can be set with
+  a `Config.HTTPClient` transport.
+- **`agent.WithMessages`.** Call `SetMessages` after `New`.
+- **`Agent.AddHooks`.** Pass every hook to `WithHooks` when you build the
+  agent.
+- **`Agent.String` and `MessageUpdate.Thinking`.** Read
+  `Client().Model().ID` and `Delta.Block` directly.
+- **`agent.FromAI`.** Use `agent.ToolFunc`.
+- **`ai.WithForceTool`.** Use `ai.WithToolChoice(ai.ToolChoiceNamed(name))`.
+- **`ai.Parse`.** Use `ai.CompleteAs`, or `Complete` then
+  `Response.Unmarshal`.
+- **`Client.Headroom`.** Subtract `CountTokens` from
+  `Model.ContextWindow`.
+- **`Response.Failed`.** Check `StopReason` for `StopError` or
+  `StopAborted`.
+- **`ai.ProtocolConfigAs` and `ai.UnregisteredAPIError`.** The error
+  message is unchanged.
+- **`ai.CNY`.**
+- **`auth.MemoryStore` and `NewMemoryStore`.** Implement the four-method
+  `auth.Store`.
+- **`FileStore.Path`, `catalog.Stale` and `Vendor.NeedsDeployment`.** For
+  the last, check `len(v.DeploymentEnv) > 0`.
+- **`anthropic/vertex.DefaultRegion`.** Use `ai.VertexDefaultRegion`.
+- **`Agent.SetClient`.** Build a new agent with the other client, or route a
+  single call with `Inference.Client` in a `PreInfer` hook.
+- **`session.WithToolDetails`, `session.Option` and `ToolRun.Details`.**
+  `session.Open` takes no options. Store a tool's `Result.Details` in your
+  own records if you need it.
+- **`session.Messages`.** `session.Open` on an existing id returns the
+  folded conversation.
+- **`jsonl.Store.Fork`, `SetMeta` and `Delete`, and `Meta.Title`,
+  `Meta.Model`, `Meta.Parent` and `Meta.ForkedAt`.** A session is a
+  directory under the store's root, so remove or copy it yourself. Existing
+  `meta.json` files still load; the dropped fields are ignored.
+
 ## [0.7.7] - 2026-09-30
 
 ### Changed

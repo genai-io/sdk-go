@@ -78,26 +78,12 @@ func TestAMessageThatArrivedNamedKeepsItsName(t *testing.T) {
 		{Role: ai.RoleAssistant, Content: ai.TextContent("unnamed, from before IDs")},
 	}
 
-	// Either order: seeding a conversation and asking for names are two
-	// options, and an agent built with them the other way round is the same
-	// agent.
-	for _, tc := range []struct {
-		name string
-		opts []agent.Option
-	}{
-		{"messages first", []agent.Option{
-			agent.WithMessages(stored), agent.WithMessageIDs(counter())}},
-		{"ids first", []agent.Option{
-			agent.WithMessageIDs(counter()), agent.WithMessages(stored)}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a := newAgent(t, aitest.New(aitest.Says("ok")), tc.opts...)
+	a := newAgent(t, aitest.New(aitest.Says("ok")), agent.WithMessageIDs(counter()))
+	a.SetMessages(stored)
 
-			got := ids(a.Messages())
-			if want := []string{"from-storage", "m1"}; !slices.Equal(got, want) {
-				t.Errorf("conversation is named %v, want %v", got, want)
-			}
-		})
+	got := ids(a.Messages())
+	if want := []string{"from-storage", "m1"}; !slices.Equal(got, want) {
+		t.Errorf("conversation is named %v, want %v", got, want)
 	}
 }
 

@@ -54,19 +54,7 @@ func Replies(r ai.Response) Turn {
 	usage := r.Usage
 	out = append(out, ai.Delta{StopReason: stop, Usage: &usage, Model: r.Model, ID: r.ID})
 
-	if r.Err == nil {
-		return Streams(out...)
-	}
-	return func(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
-		return func(yield func(ai.Delta, error) bool) {
-			for _, d := range out {
-				if !yield(d, nil) {
-					return
-				}
-			}
-			yield(ai.Delta{}, r.Err)
-		}
-	}
+	return play(out, r.Err)
 }
 
 // Says is a model that answers with one piece of text and finishes.
@@ -91,11 +79,7 @@ func Asks(calls ...ai.ToolCall) Turn {
 
 // Fails produces nothing and ends on an error. For one that got partway first,
 // put the error on the response and use [Replies].
-func Fails(err error) Turn {
-	return func(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
-		return func(yield func(ai.Delta, error) bool) { yield(ai.Delta{}, err) }
-	}
-}
+func Fails(err error) Turn { return play(nil, err) }
 
 // Hangs never answers: the stream stays open until the context ends.
 func Hangs() Turn {
@@ -108,13 +92,19 @@ func Hangs() Turn {
 }
 
 // Streams sends exactly these deltas, for a test about the shape of a stream.
-func Streams(deltas ...ai.Delta) Turn {
+func Streams(deltas ...ai.Delta) Turn { return play(deltas, nil) }
+
+// play sends these deltas, then err if there is one.
+func play(deltas []ai.Delta, err error) Turn {
 	return func(context.Context, *ai.Request) iter.Seq2[ai.Delta, error] {
 		return func(yield func(ai.Delta, error) bool) {
 			for _, d := range deltas {
 				if !yield(d, nil) {
 					return
 				}
+			}
+			if err != nil {
+				yield(ai.Delta{}, err)
 			}
 		}
 	}

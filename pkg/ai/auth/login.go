@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
+	"golang.org/x/oauth2"
 )
 
 // Flow is one vendor's interactive sign-in: the grant that authenticates a
@@ -104,12 +106,10 @@ func Login(ctx context.Context, vendorID string, opts LoginOptions) (Credential,
 	if ui == nil {
 		ui = ConsoleInteraction()
 	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
+	client := cmp.Or(opts.HTTPClient, &http.Client{Timeout: 30 * time.Second})
 
-	credential, err := f.Login(ctx, client, ui)
+	// Also on the context, which is where golang.org/x/oauth2 looks for it.
+	credential, err := f.Login(context.WithValue(ctx, oauth2.HTTPClient, client), client, ui)
 	if err != nil {
 		return Credential{}, err
 	}

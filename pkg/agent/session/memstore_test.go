@@ -1,8 +1,4 @@
-// Package memory keeps sessions in the process that made them: the second
-// implementation of session.Store, which is what keeps the first one
-// replaceable, and what the session package's own tests record into. Nothing
-// here survives the process — for a session that should, see jsonl beside it.
-package memory
+package session_test
 
 import (
 	"context"
@@ -15,8 +11,10 @@ import (
 	"github.com/genai-io/sdk-go/pkg/agent/session"
 )
 
-// Store holds sessions in memory. The zero value is ready to use.
-type Store struct {
+// memStore keeps sessions in memory: the second implementation of
+// session.Store, which is what keeps jsonl replaceable, and what these tests
+// record into.
+type memStore struct {
 	mu       sync.Mutex
 	sessions map[string]*held
 	seq      int64 // names sessions the caller did not name
@@ -27,14 +25,10 @@ type held struct {
 	entries []session.Entry
 }
 
-var _ session.Store = (*Store)(nil)
-
-// Open returns an empty store, mirroring jsonl.Open so the two are swapped by
-// changing one line.
-func Open() *Store { return &Store{} }
+var _ session.Store = (*memStore)(nil)
 
 // Create starts a session, assigning an id when none was given.
-func (s *Store) Create(_ context.Context, meta session.Meta) (session.Meta, error) {
+func (s *memStore) Create(_ context.Context, meta session.Meta) (session.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -55,7 +49,7 @@ func (s *Store) Create(_ context.Context, meta session.Meta) (session.Meta, erro
 }
 
 // Append writes entries in order, assigning Seq to any that lack one.
-func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) error {
+func (s *memStore) Append(_ context.Context, id string, entries ...session.Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -81,7 +75,7 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 
 // Entries reads a session from the beginning. A cancelled context ends the
 // read with its error, since stopping quietly looks like a shorter session.
-func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
+func (s *memStore) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
 	s.mu.Lock()
 	h, ok := s.sessions[id]
 	var snapshot []session.Entry
@@ -108,7 +102,7 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 }
 
 // Meta reads one session's metadata.
-func (s *Store) Meta(_ context.Context, id string) (session.Meta, error) {
+func (s *memStore) Meta(_ context.Context, id string) (session.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -117,27 +111,6 @@ func (s *Store) Meta(_ context.Context, id string) (session.Meta, error) {
 		return session.Meta{}, fmt.Errorf("memory: %s: %w", id, session.ErrNotFound)
 	}
 	return h.meta, nil
-}
-
-// List returns every session, most recently updated first.
-func (s *Store) List(_ context.Context) ([]session.Meta, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	out := make([]session.Meta, 0, len(s.sessions))
-	for _, h := range s.sessions {
-		out = append(out, h.meta)
-	}
-	slices.SortFunc(out, session.ByRecency)
-	return out, nil
-}
-
-// Delete removes a session and everything in it.
-func (s *Store) Delete(_ context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, id)
-	return nil
 }
 
 // cloneEntry copies the parts of an entry a caller could still be holding.

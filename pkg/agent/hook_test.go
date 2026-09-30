@@ -337,7 +337,6 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 	var seen *agent.Inference
 	a, err := agent.New(client,
 		agent.WithSystem("mine"),
-		agent.WithMessages([]ai.Message{ai.UserMessage("earlier")}),
 		agent.WithHooks(agent.Hook{
 			PreInfer: func(_ context.Context, inf *agent.Inference) error {
 				seen = inf
@@ -347,6 +346,7 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	a.SetMessages([]ai.Message{ai.UserMessage("earlier")})
 
 	events, err := collect(t, a, ai.UserMessage("go on"))
 	if err != nil {
@@ -907,10 +907,6 @@ func TestPreStepIsPricedAgainstTheConversationItHasNow(t *testing.T) {
 	var seen []int
 	done := false
 	a := newAgent(t, aitest.New(aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: `{}`}), aitest.Says("done")),
-		agent.WithMessages([]ai.Message{
-			ai.UserMessage(strings.Repeat("a long history. ", 200)),
-			ai.AssistantMessage(strings.Repeat("and a long answer. ", 200)),
-		}),
 		agent.WithHooks(agent.Hook{
 			PreStep: func(_ context.Context, c agent.PreStepContext) ([]ai.Message, error) {
 				seen = append(seen, c.Tokens)
@@ -921,6 +917,10 @@ func TestPreStepIsPricedAgainstTheConversationItHasNow(t *testing.T) {
 				return []ai.Message{ai.UserMessage("(short)")}, nil
 			},
 		}))
+	a.SetMessages([]ai.Message{
+		ai.UserMessage(strings.Repeat("a long history. ", 200)),
+		ai.AssistantMessage(strings.Repeat("and a long answer. ", 200)),
+	})
 
 	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
 		t.Fatalf("turn failed: %v", err)

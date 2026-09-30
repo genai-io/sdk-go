@@ -2,7 +2,6 @@ package session_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -32,7 +31,7 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 
 	converse(t, a, rec, ai.UserMessage("third"))
 
-	restored, err := session.Messages(ctx, st, rec.ID())
+	restored, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -75,7 +74,7 @@ func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
 	}
 	converse(t, a, rec, ai.UserMessage("go"))
 
-	restored, err := session.Messages(ctx, st, rec.ID())
+	restored, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -141,7 +140,7 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 		t.Error("the snapshot is the last thing in the session; the step that ran against it recorded nothing")
 	}
 
-	restored, err := session.Messages(ctx, st, rec.ID())
+	restored, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -191,7 +190,7 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 			second.SetMessages(restored)
 			converse(t, second, rec2, ai.UserMessage("again"))
 
-			all, err := session.Messages(ctx, st, rec.ID())
+			all, err := messages(ctx, st, rec.ID())
 			if err != nil {
 				t.Fatalf("Messages: %v", err)
 			}
@@ -227,7 +226,7 @@ func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 			a.SetMessages(nil)
 			converse(t, a, rec, ai.UserMessage("starting over"))
 
-			restored, err := session.Messages(ctx, st, rec.ID())
+			restored, err := messages(ctx, st, rec.ID())
 			if err != nil {
 				t.Fatalf("Messages: %v", err)
 			}
@@ -239,154 +238,5 @@ func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 				t.Errorf("the restore starts at %q, want the first thing said after the clearing", got)
 			}
 		})
-	}
-}
-
-// detailsAgent runs one tool that answers with details, which is the whole
-// setup the three tests below need.
-func detailsAgent(t *testing.T, details any) *agent.Agent {
-	t.Helper()
-	tool := agent.ToolFunc("run", "Do a thing.",
-		func(context.Context, struct{}) (agent.Result, error) {
-			return agent.Result{Content: ai.TextContent("ok"), Details: details}, nil
-		})
-	client := ai.NewClientWithDriver(aitest.New(
-		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "run", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
-		aitest.Says("done"),
-	), ai.Model{ID: "stub", API: "stub"})
-	a, err := agent.New(client, agent.WithTools(tool))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return a
-}
-
-// toolRun reads back the one tool run a session recorded.
-func toolRun(t *testing.T, st session.Store, id string) *session.ToolRun {
-	t.Helper()
-	var run *session.ToolRun
-	for e, err := range st.Entries(context.Background(), id) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		if e.Type == session.EntryToolRun {
-			run = e.ToolRun
-		}
-	}
-	if run == nil {
-		t.Fatal("the tool run was not recorded")
-	}
-	return run
-}
-
-// A tool's structured answer is kept when a session asks for it, and comes
-// back byte for byte: what an interface redrawing a transcript needs, and what
-// it joins to the restored conversation by the call's own ID. Both stores,
-// because it is the wire format that would lose it.
-func TestAToolsDetailsAreKeptWhenASessionAsksForThem(t *testing.T) {
-	type edit struct {
-		Path  string `json:"path"`
-		Added int    `json:"added"`
-	}
-
-	for _, impl := range []struct {
-		name string
-		open func(*testing.T) session.Store
-	}{
-		{"memory", store},
-		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
-	} {
-		t.Run(impl.name, func(t *testing.T) {
-			st := impl.open(t)
-			a := detailsAgent(t, edit{Path: "main.go", Added: 12})
-
-			var sawTool string
-			rec, _, err := session.Open(context.Background(), st, "", session.WithToolDetails(
-				func(e agent.ToolEnd) any {
-					sawTool = e.Name // the whole event, not the value alone
-					return e.Result.Details
-				}))
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			converse(t, a, rec, ai.UserMessage("go"))
-
-			if sawTool != "run" {
-				t.Errorf("the encoder was told the tool was %q", sawTool)
-			}
-			run := toolRun(t, st, rec.ID())
-			var got edit
-			if err := json.Unmarshal(run.Details, &got); err != nil {
-				t.Fatalf("the details did not survive: %v (%s)", err, run.Details)
-			}
-			if got.Path != "main.go" || got.Added != 12 {
-				t.Errorf("details = %+v, want what the tool produced", got)
-			}
-			// And it is joined to the conversation by the call it answers.
-			if run.ID != "c1" {
-				t.Errorf("the record is keyed %q, want the tool call's own ID", run.ID)
-			}
-		})
-	}
-}
-
-// Without the option nothing is kept, which is the default because a
-// structured answer is an interface's and has no size a session can assume.
-func TestAToolsDetailsAreNotKeptByDefault(t *testing.T) {
-	st := store(t)
-	a := detailsAgent(t, map[string]any{"rows": 10_000})
-
-	rec, _, err := session.Open(context.Background(), st, "")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	converse(t, a, rec, ai.UserMessage("go"))
-
-	if run := toolRun(t, st, rec.ID()); len(run.Details) > 0 {
-		t.Errorf("a session that asked for nothing kept %s", run.Details)
-	}
-}
-
-// A value that will not marshal loses its own payload and nothing else. It is
-// what an interface draws; what a restore needs is the conversation, and
-// stopping the session over the first would lose the second.
-func TestABadDetailsPayloadKeepsTheSessionRecording(t *testing.T) {
-	st := store(t)
-	a := detailsAgent(t, nil)
-
-	rec, _, err := session.Open(context.Background(), st, "", session.WithToolDetails(
-		func(agent.ToolEnd) any { return json.RawMessage("{not json") }))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	converse(t, a, rec, ai.UserMessage("go"))
-
-	if err := rec.Err(); err != nil {
-		t.Fatalf("recording stopped over a payload nobody replays: %v", err)
-	}
-	if run := toolRun(t, st, rec.ID()); len(run.Details) > 0 {
-		t.Errorf("the unwritable payload was stored as %s", run.Details)
-	}
-	restored, err := session.Messages(context.Background(), st, rec.ID())
-	if err != nil || len(restored) == 0 {
-		t.Fatalf("the conversation no longer folds: %d messages, %v", len(restored), err)
-	}
-}
-
-// Returning nil keeps nothing, and does not keep the JSON null it would
-// otherwise marshal to: a record of nothing is not what the caller asked for.
-func TestReturningNoDetailsKeepsNone(t *testing.T) {
-	st := store(t)
-	a := detailsAgent(t, map[string]any{"rows": 10_000})
-
-	rec, _, err := session.Open(context.Background(), st, "", session.WithToolDetails(
-		func(agent.ToolEnd) any { return nil }))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	converse(t, a, rec, ai.UserMessage("go"))
-
-	if run := toolRun(t, st, rec.ID()); len(run.Details) > 0 {
-		t.Errorf("an encoder that kept nothing stored %s", run.Details)
 	}
 }

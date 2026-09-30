@@ -3,8 +3,10 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -43,9 +45,6 @@ func DefaultStorePath() (string, error) {
 	}
 	return filepath.Join(dir, "genai-io", "credentials.json"), nil
 }
-
-// Path is where this store reads and writes.
-func (s *FileStore) Path() string { return s.path }
 
 // Load returns the credential held for a vendor.
 func (s *FileStore) Load(vendor string) (Credential, bool, error) {
@@ -97,11 +96,7 @@ func (s *FileStore) List() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(all))
-	for vendor := range all {
-		out = append(out, vendor)
-	}
-	return out, nil
+	return slices.Collect(maps.Keys(all)), nil
 }
 
 func (s *FileStore) read() (map[string]Credential, error) {

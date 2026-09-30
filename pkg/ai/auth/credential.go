@@ -2,8 +2,6 @@ package auth
 
 import (
 	"time"
-
-	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
 
 // Credential is what was obtained for a vendor, and what has to survive
@@ -28,10 +26,15 @@ func (c Credential) Expired() bool { return expired(c.ExpiresAt) }
 
 // expired is the one expiry rule in this package, so a credential cannot be
 // fresh by one caller's reckoning and stale by another's. A zero time never
-// expires; anything else is gone oauth.ExpiryMargin early.
+// expires; anything else is gone expiryMargin early.
 func expired(at time.Time) bool {
-	return !at.IsZero() && !time.Now().Add(oauth.ExpiryMargin).Before(at)
+	return !at.IsZero() && !time.Now().Add(expiryMargin).Before(at)
 }
+
+// expiryMargin is how early a token is treated as expired. A request that
+// starts with thirty seconds left can still finish after it has run out, and
+// the resulting 401 looks like a bad credential rather than a stale one.
+const expiryMargin = 60 * time.Second
 
 // Store keeps credentials between runs.
 type Store interface {

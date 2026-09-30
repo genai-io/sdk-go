@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"maps"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -257,7 +256,7 @@ func TestAFailedStreamKeepsWhatItProduced(t *testing.T) {
 	if resp == nil || resp.Text() != "partial" || resp.Usage.Input != 7 {
 		t.Fatalf("response = %+v, want the partial answer and its tokens", resp)
 	}
-	if resp.StopReason != StopError || !resp.Failed() {
+	if resp.StopReason != StopError {
 		t.Errorf("stop reason = %q, want %q", resp.StopReason, StopError)
 	}
 }
@@ -303,33 +302,8 @@ func TestPrepareCleansTheSystemPrompt(t *testing.T) {
 	}
 }
 
-// Headers layer the way every other setting does: the client's, then the
-// call's over them, name by name. Restating a whole set to change one of them
-// is what a caller would otherwise build a second client to avoid.
-func TestACallsHeadersLayerOverTheClients(t *testing.T) {
-	base := map[string]string{"X-Tenant": "client", "X-Fixed": "kept"}
-	d := &scripted{scripts: []script{{}}}
-	c := NewClientWithDriver(d, stubModel(), WithHeaders(base))
-
-	if _, err := c.Complete(context.Background(), []Message{UserMessage("hi")},
-		WithHeaders(map[string]string{"X-Tenant": "call"}),
-		WithHeaders(map[string]string{"X-Turn": "1"})); err != nil {
-		t.Fatalf("Complete: %v", err)
-	}
-
-	want := map[string]string{"X-Tenant": "call", "X-Fixed": "kept", "X-Turn": "1"}
-	if got := d.reqs[0].Headers; !maps.Equal(got, want) {
-		t.Errorf("Headers = %v, want %v", got, want)
-	}
-	// And the client's own map is not the request's, or one turn's header
-	// would be on every turn after it.
-	if base["X-Tenant"] != "client" || len(base) != 2 {
-		t.Errorf("the client's headers = %v, want them untouched by the call", base)
-	}
-}
-
 // The conversation is the same conversation whichever model is asked, which is
-// what Agent.SetClient and Inference.Client are for. A reasoning model leaves
+// what Inference.Client is for. A reasoning model leaves
 // its own state in it — a signed thinking block, an opaque reasoning item —
 // and the next model is usually not the one that produced them.
 //

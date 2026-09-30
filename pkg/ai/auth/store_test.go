@@ -14,7 +14,7 @@ import (
 func TestStoresBehaveAlike(t *testing.T) {
 	stores := map[string]func(t *testing.T) Store{
 		"file":   func(t *testing.T) Store { return newTestFileStore(t) },
-		"memory": func(t *testing.T) Store { return NewMemoryStore() },
+		"memory": func(t *testing.T) Store { return &memStore{} },
 	}
 
 	for name, build := range stores {
@@ -100,9 +100,9 @@ func TestFileStoreIsReadableOnlyByItsOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, err := os.Stat(s.Path())
+	info, err := os.Stat(s.path)
 	if err != nil {
-		t.Fatalf("the store wrote nothing to %s: %v", s.Path(), err)
+		t.Fatalf("the store wrote nothing to %s: %v", s.path, err)
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("mode = %#o, want 0600: a credential file anyone can read is a credential anyone has", perm)
@@ -112,7 +112,7 @@ func TestFileStoreIsReadableOnlyByItsOwner(t *testing.T) {
 	if err := s.Save(Credential{Vendor: "copilot", Access: "gho_2"}); err != nil {
 		t.Fatal(err)
 	}
-	info, err = os.Stat(s.Path())
+	info, err = os.Stat(s.path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,11 +131,11 @@ func TestFileStoreLeavesNoTemporaryFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	entries, err := os.ReadDir(filepath.Dir(s.Path()))
+	entries, err := os.ReadDir(filepath.Dir(s.path))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != filepath.Base(s.Path()) {
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(s.path) {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
@@ -148,10 +148,10 @@ func TestFileStoreLeavesNoTemporaryFiles(t *testing.T) {
 // away every other vendor's sign-in the moment one byte went wrong.
 func TestFileStoreReportsAFileItCannotRead(t *testing.T) {
 	s := newTestFileStore(t)
-	if err := os.MkdirAll(filepath.Dir(s.Path()), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(s.Path(), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(s.path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,7 +164,7 @@ func TestFileStoreReportsAFileItCannotRead(t *testing.T) {
 
 	// An empty file, on the other hand, is what an interrupted first write
 	// leaves and means nothing is stored yet.
-	if err := os.WriteFile(s.Path(), nil, 0o600); err != nil {
+	if err := os.WriteFile(s.path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, err := s.Load("copilot"); err != nil || found {
@@ -197,7 +197,7 @@ func TestDefaultStorePathFollowsXDG(t *testing.T) {
 }
 
 func TestResolveStorePrefersWhatItIsGiven(t *testing.T) {
-	given := NewMemoryStore()
+	given := &memStore{}
 	got, err := resolveStore(given)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +206,7 @@ func TestResolveStorePrefersWhatItIsGiven(t *testing.T) {
 		t.Error("resolveStore ignored the store it was handed")
 	}
 
-	fallback := NewMemoryStore()
+	fallback := &memStore{}
 	defer withDefaultStore(t, fallback)()
 	got, err = resolveStore(nil)
 	if err != nil {

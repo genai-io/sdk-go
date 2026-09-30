@@ -71,7 +71,7 @@ const VertexDefaultRegion = "global"
 // driver: the deployment is how a Vertex caller says who they are, and both
 // Vertex drivers refuse the same way.
 func VertexDeployment(cfg Config, driver string) (VertexConfig, error) {
-	deployment, err := ProtocolConfigAs[VertexConfig](cfg)
+	deployment, err := protocolValueAs[VertexConfig](cfg.ProtocolConfig, "native driver configuration")
 	if err != nil {
 		return VertexConfig{}, err
 	}
@@ -164,8 +164,7 @@ type Model struct {
 	// SamplingParams are merged into the request body verbatim, after the
 	// named fields, so a custom OpenAI-compatible server (llama.cpp, vLLM,
 	// SGLang) can receive parameters this SDK does not model — top_p, top_k,
-	// min_p, repetition_penalty. Per-request WithSamplingParams overrides
-	// these key by key. Only the OpenAI-family drivers apply them.
+	// min_p, repetition_penalty. Only the OpenAI-family drivers apply them.
 	SamplingParams map[string]any `json:"sampling_params,omitempty"`
 
 	// Headers are added to every request for this model, on top of whatever
@@ -205,12 +204,7 @@ func (m Model) Efforts() []Effort {
 // to ask a model what it can do before asking it to do it; ResolveLevel is
 // what happens when you ask for a rung it does not declare.
 func (m Model) Offers(e Effort) bool {
-	for _, level := range m.Reasoning {
-		if level.Effort == e {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(m.Reasoning, func(l ReasoningLevel) bool { return l.Effort == e })
 }
 
 // DefaultLevel returns the rung used when a request leaves Effort unset, and
@@ -386,26 +380,26 @@ func Available(models []Model) []Model {
 	return out
 }
 
-func cloneModel(model Model) Model {
-	out := model
-	out.Input = slices.Clone(model.Input)
-	out.Reasoning = slices.Clone(model.Reasoning)
-	out.Pricing.Tiers = slices.Clone(model.Pricing.Tiers)
-	out.SamplingParams = maps.Clone(model.SamplingParams)
-	out.Headers = maps.Clone(model.Headers)
-	return out
-}
-
 // Clone returns a model snapshot whose mutable fields do not alias m.
 // A Model handed to a caller is always one of these: the catalog's rows are a
 // package-level table, and a client's model is its own, so returning either
 // directly would let one caller corrupt what every other one reads.
-func (m Model) Clone() Model { return cloneModel(m) }
+func (m Model) Clone() Model {
+	out := m
+	out.Input = slices.Clone(m.Input)
+	out.Reasoning = slices.Clone(m.Reasoning)
+	out.Pricing.Tiers = slices.Clone(m.Pricing.Tiers)
+	out.SamplingParams = maps.Clone(m.SamplingParams)
+	out.Headers = maps.Clone(m.Headers)
+	return out
+}
 
-func cloneModels(models []Model) []Model {
+// CloneModels is Clone for each model, for a list that crosses from one owner
+// to another.
+func CloneModels(models []Model) []Model {
 	out := make([]Model, len(models))
 	for i, model := range models {
-		out[i] = cloneModel(model)
+		out[i] = model.Clone()
 	}
 	return out
 }

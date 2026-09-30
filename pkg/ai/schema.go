@@ -52,13 +52,15 @@ func SchemaOf[T any](description string) *Schema {
 
 // CompleteAs asks for an answer shaped like T and decodes it into one.
 //
-//	ai.Parse[Company](client.Complete(ctx, msgs,
-//		ai.WithSchema(ai.SchemaOf[Person]("…"))))   // compiles, fails at runtime
-//
 //	company, err := ai.CompleteAs[Company](ctx, client, messages)
 func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts ...Option) (T, error) {
 	withDerived := append([]Option{WithSchema(SchemaOf[T](""))}, opts...)
-	return Parse[T](c.Complete(ctx, messages, withDerived...))
+	var out T
+	resp, err := c.Complete(ctx, messages, withDerived...)
+	if err != nil {
+		return out, err
+	}
+	return out, resp.Unmarshal(&out)
 }
 
 // DefinitionMap returns an independent JSON-object representation of the

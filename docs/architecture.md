@@ -291,9 +291,9 @@ one that cannot constrain output to a schema, is an error naming the model.
 Moving the instructions into a user turn, or asking for JSON in words, is a
 decision about the product, not about the wire.
 
-It does not guess. A model whose context window is unknown reports zero
-headroom rather than a substituted number, because acting on a guessed limit
-fails silently in both directions.
+It does not guess. A model whose context window is unknown has none, not a
+substituted number, because acting on a guessed limit fails silently in both
+directions.
 
 ## What one call passes through
 
@@ -426,8 +426,8 @@ variables, protocol, quirks — and an application sets the rest on `ai.Model`
 from its own data. `Reasoning` names only the efforts a model offers:
 `ResolveLevel` fills each rung's wire value from the protocol and `Compat`, so
 the dialect lives in one place, and `Model.WireEfforts` says which efforts that
-dialect can tell apart. Left unset, a window reports no headroom, a cost comes
-out zero rather than a guess, and the Anthropic driver falls back to its own
+dialect can tell apart. Left unset, a cost comes out zero rather than a guess,
+and the Anthropic driver falls back to its own
 `max_tokens` default.
 
 ## Testing

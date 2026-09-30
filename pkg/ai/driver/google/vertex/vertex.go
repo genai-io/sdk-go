@@ -8,6 +8,7 @@
 package vertex
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -59,10 +60,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	}
 	// The token rides the transport, so a caller's client keeps its own
 	// settings and gains the authorization on top.
-	client := http.DefaultClient
-	if cfg.HTTPClient != nil {
-		client = cfg.HTTPClient
-	}
+	client := cmp.Or(cfg.HTTPClient, http.DefaultClient)
 	authed := *client
 	authed.Transport = &oauth2.Transport{Base: client.Transport, Source: creds.TokenSource}
 	cfg.HTTPClient = &authed

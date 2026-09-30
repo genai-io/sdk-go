@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -113,7 +114,7 @@ func TestExpiredIsOneRule(t *testing.T) {
 		"no stated lifetime":     {time.Time{}, false},
 		"good for another hour":  {time.Now().Add(time.Hour), false},
 		"gone":                   {time.Now().Add(-time.Minute), true},
-		"goes inside the margin": {time.Now().Add(oauth.ExpiryMargin / 2), true},
+		"goes inside the margin": {time.Now().Add(expiryMargin / 2), true},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -137,7 +138,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 		c.Endpoint = fmt.Sprintf("https://endpoint-%d.test", minted)
 		// Each token is good for less than the margin, so the next request
 		// has to renew.
-		return fmt.Sprintf("tok-%d", minted), time.Now().Add(oauth.ExpiryMargin / 2), c, nil
+		return fmt.Sprintf("tok-%d", minted), time.Now().Add(expiryMargin / 2), c, nil
 	})
 
 	var presented []string
@@ -146,7 +147,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := NewMemoryStore()
+	store := &memStore{}
 	if err := store.Save(Credential{Vendor: stubVendor, Access: "stored"}); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	store := NewMemoryStore()
+	store := &memStore{}
 	start := Credential{Vendor: rotateVendor, Access: "a", Refresh: "r1"}
 	if err := store.Save(start); err != nil {
 		t.Fatal(err)
@@ -363,3 +364,35 @@ func (readOnlyStore) Load(string) (Credential, bool, error) { return Credential{
 func (readOnlyStore) Save(Credential) error                 { return errors.New("read-only") }
 func (readOnlyStore) Delete(string) error                   { return errors.New("read-only") }
 func (readOnlyStore) List() ([]string, error)               { return nil, nil }
+
+// An expired Codex credential is refreshed, as a public client names itself in
+// the form, and a provider that does not rotate the refresh token leaves the
+// stored one in place.
+func TestCodexRefreshesAnExpiredCredential(t *testing.T) {
+	var form url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		form = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	cfg := codexDefaults
+	cfg.Endpoint.TokenURL = server.URL
+	flow := newCodexFlow(cfg)
+
+	stale := Credential{Access: "old", Refresh: "rt", ExpiresAt: time.Now().Add(-time.Minute)}
+	present, expires, updated, err := flow.Token(t.Context(), server.Client(), stale)
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if present != "fresh" || updated.Refresh != "rt" || !expires.After(time.Now()) {
+		t.Errorf("got %q, %v, %+v; want the refreshed token and the old refresh token kept", present, expires, updated)
+	}
+	if form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt" || form.Get("client_id") != cfg.ClientID {
+		t.Errorf("refresh sent %v", form)
+	}
+}

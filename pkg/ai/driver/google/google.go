@@ -12,6 +12,7 @@
 package google
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -66,10 +67,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
-	base := cfg.URL()
-	if base == "" {
-		base = defaultBaseURL
-	}
+	base := cmp.Or(cfg.URL(), defaultBaseURL)
 	return NewAt(cfg, ai.APIGoogleGenAI, strings.TrimSuffix(base, "/")+"/"+apiVersion+"/models")
 }
 
@@ -81,12 +79,8 @@ func NewAt(cfg ai.Config, api ai.API, models string) (*Driver, error) {
 	if cfg.Model.ID == "" {
 		return nil, fmt.Errorf("%s: model ID is required", api)
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
 	return &Driver{
-		client:  client,
+		client:  cmp.Or(cfg.HTTPClient, http.DefaultClient),
 		api:     api,
 		fail:    errs.For(string(api), details),
 		models:  models,
@@ -109,7 +103,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			return
 		}
 
-		res, err := d.post(ctx, d.methodURL("streamGenerateContent", "alt=sse"), body, req.Headers)
+		res, err := d.post(ctx, d.methodURL("streamGenerateContent", "alt=sse"), body)
 		if err != nil {
 			yield(ai.Delta{}, d.fail.WrapStream(err))
 			return
@@ -263,7 +257,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 		inner.Model = "models/" + d.model.ID
 		body = &countTokensRequest{GenerateContentRequest: inner}
 	}
-	res, err := d.post(ctx, d.methodURL("countTokens", ""), body, req.Headers)
+	res, err := d.post(ctx, d.methodURL("countTokens", ""), body)
 	if err != nil {
 		return 0, d.fail.Wrap(err)
 	}
@@ -309,10 +303,7 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 			if strings.Contains(id, "-exp") || strings.Contains(id, "-latest") {
 				continue
 			}
-			name := m.DisplayName
-			if name == "" {
-				name = id
-			}
+			name := cmp.Or(m.DisplayName, id)
 			out = append(out, ai.Model{
 				ID:            id,
 				Name:          name,

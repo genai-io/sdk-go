@@ -262,7 +262,7 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
     if len(inf.Messages) > 200 {
         inf.Messages = inf.Messages[len(inf.Messages)-200:]
     }
-    inf.Options = append(inf.Options, ai.WithForceTool("search"))
+    inf.Options = append(inf.Options, ai.WithToolChoice(ai.ToolChoiceNamed("search")))
     return nil
 },
 ```
@@ -284,7 +284,7 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 
 它每次尝试都会重建,所以重试可以发到上一次尝试没去过的地方:**备用端点是一个 hook,不是第二个循环**。传一个你已经持有的 client——`ai.New` 会建一个 driver,而 driver 会带上一整个连接池。
 
-想改 agent 本身而不是某一次调用,用 `SetMessages` / `SetTools` / `SetSystem` / `SetClient`。`SetClient` 就是一个人在会话中途换模型:agent 的其余部分原封不动,变的只是下一次调用去哪里。
+想改 agent 本身而不是某一次调用,用 `SetMessages` / `SetTools` / `SetSystem`。
 
 ### 压缩
 
@@ -350,15 +350,6 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 **跑得久的工具要边跑边给人看。** `agent.Report(ctx, partial)` 会作为 `ToolUpdate` 到达消费者——命令的输出边出边报、文件列表边走边报。它走 context 而不是参数,**这样没东西可报的工具一分钱都不付**。
 
 **`Result` 把两个受众分开。** `Content` 是告诉模型的;`Details` 是给界面看、模型永远看不到的——一段 diff、一个文件列表、一个退出码。**一个为人排版的工具,最后会把那些排版发给模型,而且此后每一轮都为它付费。**
-
-**一个会回来的界面**——resume 之后重画的那份转录——要自己说留什么:这个值只有它的主人读得懂,一段 diff 或一个列表值得存多少,也只有它的主人知道。
-
-```go
-rec, history, err := session.Open(ctx, store, resume, session.WithToolDetails(
-    func(e agent.ToolEnd) any { return e.Result.Details }))
-```
-
-它原样回到 `ToolRun.Details`,以那次调用的 ID 为键,和恢复出来的对话对得上。**不传这个 option,会话一个字节都不存。**
 
 **并行。** 一批工具默认并发执行。`agent.Sequential(t)` 标记一个不能与别人同时跑的工具,而**一批里只要有一个这样的,整批就串行**——一批工具只有在每个成员都安全时才能并行。
 
@@ -449,7 +440,7 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 rec.Record(ctx, turn, "permission.decided", decision)
 ```
 
-`Data` 存进去、原样交回来、从不解读,和 `ToolRun.Details` 是同一套规矩:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
+`Data` 存进去、原样交回来、从不解读:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
 
 `Record` 放在 `Recorder` 上,而不是让你直接 `store.Append`(你本来就能调),因为条目属于第几轮是**从会话开头**数的,而那个偏移量在 recorder 手里。
 
@@ -488,7 +479,7 @@ type Store interface {
 }
 ```
 
-列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,写在那个 store 自己的类型上——`jsonl.Store` 就有这些。**接口只需要写出这个包自己会调的东西。**
+列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,`jsonl.Store` 多给了一个 `List`,一个会话就是一个目录,复制、删除都由应用自己来。**接口只需要写出这个包自己会调的东西。**
 
 ## 包结构
 

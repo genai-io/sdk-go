@@ -1,14 +1,17 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
+	"golang.org/x/oauth2"
 )
 
 // Copilot signs in with GitHub's device grant, then exchanges the resulting
@@ -40,11 +43,12 @@ func newCopilotFlow(e copilotEndpoints) Flow {
 	return Flow{
 		Method: "device code",
 		Login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
-			cfg := oauth.Config{ClientID: copilotClientID, Scopes: []string{"read:user"}, HTTPClient: client}
-			token, err := oauth.Device(ctx, cfg, oauth.DeviceEndpoints{
-				Code:  e.device,
-				Token: e.token,
-			}, ui)
+			cfg := &oauth2.Config{
+				ClientID: copilotClientID,
+				Scopes:   []string{"read:user"},
+				Endpoint: oauth2.Endpoint{DeviceAuthURL: e.device, TokenURL: e.token, AuthStyle: oauth2.AuthStyleInParams},
+			}
+			token, err := oauth.Device(ctx, cfg, ui)
 			if err != nil {
 				return Credential{}, err
 			}
@@ -53,14 +57,14 @@ func newCopilotFlow(e copilotEndpoints) Flow {
 			// enterprise account's differs from an individual's — and it is where
 			// an account without a Copilot subscription is found out, at sign-in
 			// rather than on the first request.
-			api, _, _, err := copilotSessionToken(ctx, client, e, token.Access)
+			api, _, _, err := copilotSessionToken(ctx, client, e, token.AccessToken)
 			if err != nil {
 				return Credential{}, err
 			}
 			// The GitHub token does not expire, so it is what persists.
 			// Storing the short-lived Copilot token instead would mean signing
 			// in again every half hour.
-			return Credential{Access: token.Access, Endpoint: api}, nil
+			return Credential{Access: token.AccessToken, Endpoint: api}, nil
 		},
 		Token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
 			api, expires, token, err := copilotSessionToken(ctx, client, e, c.Access)
@@ -106,11 +110,8 @@ func copilotSessionToken(ctx context.Context, client *http.Client, e copilotEndp
 		return "", time.Time{}, "", err
 	}
 	if res.StatusCode >= 400 {
-		return "", time.Time{}, "", &oauth.Error{
-			Code:        "copilot_token_denied",
-			Description: "GitHub declined to issue a Copilot token; the account may not have a subscription",
-			Status:      res.StatusCode,
-		}
+		return "", time.Time{}, "", fmt.Errorf("auth: GitHub declined to issue a Copilot token (http %d); "+
+			"the account may not have a subscription", res.StatusCode)
 	}
 
 	var out struct {
@@ -121,14 +122,9 @@ func copilotSessionToken(ctx context.Context, client *http.Client, e copilotEndp
 		} `json:"endpoints"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil || out.Token == "" {
-		return "", time.Time{}, "", &oauth.Error{
-			Code: "invalid_response", Description: "no Copilot token in the response", Status: res.StatusCode,
-		}
+		return "", time.Time{}, "", fmt.Errorf("auth: no Copilot token in the response (http %d)", res.StatusCode)
 	}
-	api = out.Endpoints.API
-	if api == "" {
-		api = e.api
-	}
+	api = cmp.Or(out.Endpoints.API, e.api)
 	if out.ExpiresAt > 0 {
 		expires = time.Unix(out.ExpiresAt, 0)
 	}

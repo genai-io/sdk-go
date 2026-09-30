@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"cmp"
+
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
 )
@@ -95,13 +97,9 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 	if err != nil {
 		return ai.Config{}, err
 	}
-	baseURL := cred.Endpoint
-	if baseURL == "" {
-		baseURL = v.BaseURL
-	}
 	// APIKey stays empty: the transport supplies a fresh token per request,
 	// and a static one here would go stale mid-session.
-	return ai.Config{Model: model, BaseURL: baseURL, HTTPClient: client}, nil
+	return ai.Config{Model: model, BaseURL: cmp.Or(cred.Endpoint, v.BaseURL), HTTPClient: client}, nil
 }
 
 // Client returns a client for a model reference, with the credential and

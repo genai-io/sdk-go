@@ -2,7 +2,6 @@ package agent_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -15,36 +14,6 @@ import (
 
 func stubClient(id string, d ai.Driver) *ai.Client {
 	return ai.NewClientWithDriver(d, ai.Model{ID: id, API: "stub"})
-}
-
-// SetClient is a person switching model mid-session. Everything else about the
-// agent — the conversation, the prompt, the tools — is what it was.
-func TestSetClientRedirectsTheNextInference(t *testing.T) {
-	first := aitest.New(aitest.Says("first"))
-	second := aitest.New(aitest.Says("second"))
-	a := newAgent(t, first)
-
-	if out, err := outcome(t, a, ai.UserMessage("one")); err != nil || out.Message.Text() != "first" {
-		t.Fatalf("first turn = %q, %v", out.Message.Text(), err)
-	}
-
-	a.SetClient(nil) // ignored: an agent without a client can do nothing
-	a.SetClient(stubClient("second", second))
-
-	out, err := outcome(t, a, ai.UserMessage("two"))
-	if err != nil {
-		t.Fatalf("second turn: %v", err)
-	}
-	if got := out.Message.Text(); got != "second" {
-		t.Errorf("answer = %q, want the new client's", got)
-	}
-	if first.Calls() != 1 || second.Calls() != 1 {
-		t.Errorf("calls = %d and %d, want one each", first.Calls(), second.Calls())
-	}
-	// And the agent says which model it is calling, not which it was built on.
-	if got := a.String(); !strings.Contains(got, "second") {
-		t.Errorf("String = %q, want the model it is calling now", got)
-	}
 }
 
 // A hook routes one inference and no more: the call after it goes back to the

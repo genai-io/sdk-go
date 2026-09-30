@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 // transport injects a vendor's current token into every request.
@@ -133,7 +135,7 @@ func (s *tokenSource) token(ctx context.Context) (string, error) {
 		}
 	}
 
-	present, expires, updated, err := s.flow.Token(ctx, s.client, s.cred)
+	present, expires, updated, err := s.flow.Token(context.WithValue(ctx, oauth2.HTTPClient, s.client), s.client, s.cred)
 	if err != nil {
 		return "", err
 	}

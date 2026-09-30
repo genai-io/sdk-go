@@ -13,7 +13,6 @@ version: "2"
 
 run:
   timeout: 5m
-  tests: true
 
 linters:
   # errcheck, govet, ineffassign, staticcheck, unused.
@@ -44,6 +43,3 @@ linters:
     # English, and pinning either one would turn "recognise" and "honouring"
     # into findings. Omitting the key is how that is spelled — the schema
     # accepts only US or UK, not an empty string.
-
-  exclusions:
-    generated: lax

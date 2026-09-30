@@ -15,8 +15,7 @@ type Result struct {
 	// structured form of the answer: the rows behind a count, the paths behind
 	// a total, the diff behind an edit.
 	//
-	// It reaches a session only if one was opened with session.WithToolDetails,
-	// which is where an interface that comes back says what to keep of it.
+	// A session does not keep it.
 	//
 	// Not a type parameter, because that would land on Tool and an agent's
 	// tools are a heterogeneous list. Producer and consumer agree out of band.
@@ -126,24 +125,6 @@ func ToolFunc[T any](name, description string,
 				return Result{}, err
 			}
 			return run(ctx, args)
-		},
-	}
-}
-
-// FromAI lifts a plain ai.Tool, so anything written against pkg/ai runs here
-// unchanged.
-func FromAI(t ai.Tool) Tool {
-	return &funcTool{
-		schema: t.Schema,
-		run: func(ctx context.Context, call ai.ToolCall) (Result, error) {
-			if t.Run == nil {
-				return Result{}, &ai.Error{Kind: ai.KindInvalidRequest, Message: "agent: tool " + t.Schema.Name + " has no Run"}
-			}
-			out, err := t.Run(ctx, call.Input)
-			if err != nil {
-				return Result{}, err
-			}
-			return TextResult(out), nil
 		},
 	}
 }

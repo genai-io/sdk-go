@@ -364,7 +364,7 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
     if len(inf.Messages) > 200 {
         inf.Messages = inf.Messages[len(inf.Messages)-200:]
     }
-    inf.Options = append(inf.Options, ai.WithForceTool("search"))
+    inf.Options = append(inf.Options, ai.WithToolChoice(ai.ToolChoiceNamed("search")))
     return nil
 },
 ```
@@ -399,9 +399,7 @@ a client you already hold — `ai.New` builds a driver, and a driver brings a
 connection pool with it.
 
 To change the agent itself rather than one call, use `SetMessages`, `SetTools`,
-`SetSystem`, `SetClient`. `SetClient` is a person switching model mid-session:
-everything else about the agent is what it was, and only where the next call
-goes is different.
+`SetSystem`.
 
 ### Compaction
 
@@ -514,19 +512,6 @@ parameter so that a tool with nothing to report pays nothing for it.
 `Details` is what the interface shows and the model never sees — a diff, a file
 list, an exit code. A tool that formats for a person ends up sending that
 formatting to the model, and paying for it every turn thereafter.
-
-An interface that comes back — a transcript redrawn on resume — asks for it to
-be kept, since only its owner can read the value and only its owner knows how
-much of a diff or a listing is worth storing:
-
-```go
-rec, history, err := session.Open(ctx, store, resume, session.WithToolDetails(
-    func(e agent.ToolEnd) any { return e.Result.Details }))
-```
-
-It comes back on `ToolRun.Details`, byte for byte, keyed by the ID of the call
-the restored conversation answers. Without the option a session keeps none of
-it.
 
 **Parallelism.** A batch runs concurrently by default. `agent.Sequential(t)`
 marks a tool that must not run beside others, and one of them in a batch makes
@@ -667,8 +652,8 @@ two logs cannot state it.
 rec.Record(ctx, turn, "permission.decided", decision)
 ```
 
-`Data` is stored and handed back and never read, on the terms `ToolRun.Details`
-already set: the value is yours, and so is the question it answers. `Kind` is
+`Data` is stored and handed back and never read: the value is yours, and so is
+the question it answers. `Kind` is
 your vocabulary too — namespace it, so a store holding more than one
 application's sessions stays legible. A fold walks past these: they explain the
 conversation, they are not it.
@@ -724,8 +709,9 @@ type Store interface {
 ```
 
 Listing, renaming, forking and deleting are the application's business with the
-store it chose, and live on that store's own type — `jsonl.Store` has them. An
-interface only has to name what this package calls.
+store it chose — `jsonl.Store` adds `List`, and a session is a directory the
+application can copy or remove. An interface only has to name what this package
+calls.
 
 ## Package layout
 

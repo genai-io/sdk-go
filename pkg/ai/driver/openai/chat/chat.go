@@ -196,9 +196,10 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 					model.ContextWindow = extra.MaxInputTokens
 				}
 				if responsesOnly(extra.SupportedEndpoints) {
-					// Stateless: nothing says the gateway keeps server-side state.
+					// Uncapped like the Codex backend: nothing says the gateway
+					// takes max_output_tokens.
 					model.API = ai.APIOpenAIResponses
-					model.Compat = ai.OpenAIResponsesCompat{Stateless: true}
+					model.Compat = ai.OpenAIResponsesCompat{NoMaxOutputTokens: true}
 				}
 			}
 		}

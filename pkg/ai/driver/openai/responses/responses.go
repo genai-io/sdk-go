@@ -141,9 +141,6 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				item := event.AsResponseOutputItemDone().Item
 				switch item.Type {
 				case "reasoning":
-					if !d.compat.Stateless {
-						continue
-					}
 					if reasoning, ok := extractReasoningItem(item); ok {
 						if !yield(ai.Delta{Block: ai.ReasoningBlock(reasoning)}, nil) {
 							return
@@ -171,7 +168,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				// says which outcome it means in the status.
 				switch resp.Status {
 				case wire.ResponseStatusIncomplete:
-					if !yield(finished(resp, ai.StopMaxTokens), nil) {
+					if !yield(finished(resp, incompleteStop(resp)), nil) {
 						return
 					}
 				case wire.ResponseStatusFailed:
@@ -190,7 +187,8 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			case "response.incomplete":
 				// Incomplete and failed are event types of their own, not a
 				// status inside response.completed.
-				if !yield(finished(event.AsResponseIncomplete().Response, ai.StopMaxTokens), nil) {
+				resp := event.AsResponseIncomplete().Response
+				if !yield(finished(resp, incompleteStop(resp)), nil) {
 					return
 				}
 
@@ -234,15 +232,23 @@ func endOfTurn(refused, calledTools bool) ai.StopReason {
 	}
 }
 
+// incompleteStop says why a response stopped short. A reason this driver does
+// not know is taken as the cap, the common case.
+func incompleteStop(resp wire.Response) ai.StopReason {
+	if resp.IncompleteDetails.Reason == "content_filter" {
+		return ai.StopRefusal
+	}
+	return ai.StopMaxTokens
+}
+
 // finished reads the token accounting off a terminal response. All three
 // terminal events carry the same Response, so the three of them share this.
 func finished(resp wire.Response, stop ai.StopReason) ai.Delta {
-	// input_tokens is the whole prompt; the cached slice sits under
-	// input_tokens_details.
-	fresh, cached := ai.SplitPromptTokens(
-		int(resp.Usage.InputTokens),
-		int(resp.Usage.InputTokensDetails.CachedTokens),
-	)
+	// input_tokens is the whole prompt; the cached and newly cached slices
+	// sit under input_tokens_details.
+	details := resp.Usage.InputTokensDetails
+	fresh, cached := ai.SplitPromptTokens(int(resp.Usage.InputTokens), int(details.CachedTokens))
+	fresh, written := ai.SplitPromptTokens(fresh, int(details.CacheWriteTokens))
 	return ai.Delta{
 		Model:      string(resp.Model),
 		ID:         resp.ID,
@@ -252,8 +258,9 @@ func finished(resp wire.Response, stop ai.StopReason) ai.Delta {
 			Output: int(resp.Usage.OutputTokens),
 			// Reasoning is already inside output_tokens; it travels separately
 			// only so a caller can see what the thinking cost.
-			Reasoning: int(resp.Usage.OutputTokensDetails.ReasoningTokens),
-			CacheRead: cached,
+			Reasoning:  int(resp.Usage.OutputTokensDetails.ReasoningTokens),
+			CacheRead:  cached,
+			CacheWrite: written,
 		},
 	}
 }
@@ -302,8 +309,6 @@ func isTextModel(id string) bool {
 	return !strings.HasSuffix(id, "-instruct")
 }
 
-// extractReasoningItem keeps only replayable state. Without encrypted content
-// an item cannot restore anything on a stateless backend.
 // callKey names a function call across its events: its call_id, or the item
 // ID for an endpoint that leaves call_id out.
 func callKey(fn wire.ResponseFunctionToolCall) string {
@@ -313,6 +318,8 @@ func callKey(fn wire.ResponseFunctionToolCall) string {
 	return fn.ID
 }
 
+// extractReasoningItem keeps only replayable state. Without encrypted content
+// an item cannot restore anything.
 func extractReasoningItem(item wire.ResponseOutputItemUnion) (ai.ReasoningItem, bool) {
 	r := item.AsReasoning()
 	if r.EncryptedContent == "" {

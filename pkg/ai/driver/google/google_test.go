@@ -117,6 +117,140 @@ func usage(deltas []ai.Delta) ai.Usage {
 	return total
 }
 
+func stopReason(deltas []ai.Delta) ai.StopReason {
+	var last ai.StopReason
+	for _, d := range deltas {
+		if d.StopReason != "" {
+			last = d.StopReason
+		}
+	}
+	return last
+}
+
+func toolCalls(deltas []ai.Delta) []ai.ToolCall {
+	var out []ai.ToolCall
+	for _, d := range deltas {
+		if d.Block.ToolCall != nil {
+			out = append(out, *d.Block.ToolCall)
+		}
+	}
+	return out
+}
+
+func text(deltas []ai.Delta) string {
+	var b strings.Builder
+	for _, d := range deltas {
+		if d.Block.Type == ai.BlockText {
+			b.WriteString(d.Block.Text)
+		}
+	}
+	return b.String()
+}
+
+// A blocked prompt comes back with no candidate at all, only promptFeedback.
+// Read as an ordinary chunk it was an empty answer with no stop reason.
+func TestABlockedPromptIsARefusalThatSaysWhy(t *testing.T) {
+	s := sse(t, `{"promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"the prompt was blocked"},`+
+		`"usageMetadata":{"promptTokenCount":8}}`)
+
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if got := stopReason(deltas); got != ai.StopRefusal {
+		t.Errorf("stop reason = %q, want %q", got, ai.StopRefusal)
+	}
+	if got := text(deltas); !strings.Contains(got, "the prompt was blocked") {
+		t.Errorf("text = %q, want the block reason message", got)
+	}
+}
+
+// Gemini finishes a turn that called a function with STOP, the same as a
+// finished answer. Taken at its word, the caller never ran the call.
+func TestATurnThatCalledAFunctionStopsForToolUse(t *testing.T) {
+	s := sse(t,
+		`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{"path":"a.go"}}}]}}]}`,
+		`{"candidates":[{"content":{"parts":[{"text":""}]},"finishReason":"STOP"}]}`)
+
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if got := stopReason(deltas); got != ai.StopToolUse {
+		t.Errorf("stop reason = %q, want %q", got, ai.StopToolUse)
+	}
+}
+
+func TestAFunctionCallBecomesOneToolCallWithItsArgsAsJSON(t *testing.T) {
+	s := sse(t, `{"candidates":[{"content":{"parts":[{"functionCall":`+
+		`{"id":"c1","name":"read","args":{"path":"a.go","lines":3}}}]},"finishReason":"STOP"}]}`)
+
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	calls := toolCalls(deltas)
+	if len(calls) != 1 {
+		t.Fatalf("calls = %+v, want one", calls)
+	}
+	if calls[0].ID != "c1" || calls[0].Name != "read" {
+		t.Errorf("call = %+v, want c1 read", calls[0])
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(calls[0].Input), &args); err != nil {
+		t.Fatalf("input %q is not JSON: %v", calls[0].Input, err)
+	}
+	if args["path"] != "a.go" || args["lines"] != float64(3) {
+		t.Errorf("args = %v, want path and lines", args)
+	}
+}
+
+func TestParallelFunctionCallsKeepTheirOrder(t *testing.T) {
+	s := sse(t, `{"candidates":[{"content":{"parts":[`+
+		`{"functionCall":{"id":"c1","name":"read","args":{}}},`+
+		`{"functionCall":{"id":"c2","name":"grep","args":{}}}]},"finishReason":"STOP"}]}`)
+
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	calls := toolCalls(deltas)
+	if len(calls) != 2 || calls[0].Name != "read" || calls[1].Name != "grep" {
+		t.Fatalf("calls = %+v, want read then grep", calls)
+	}
+}
+
+// The Gemini API often sends no id; the driver passes that through rather
+// than making one up, and request.go sends it back the same way.
+func TestAFunctionCallWithoutAnIDKeepsAnEmptyOne(t *testing.T) {
+	s := sse(t, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{}}}]},"finishReason":"STOP"}]}`)
+
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	calls := toolCalls(deltas)
+	if len(calls) != 1 || calls[0].ID != "" || calls[0].Name != "read" {
+		t.Fatalf("calls = %+v, want one read call with an empty id", calls)
+	}
+}
+
+// Gemini rejects the next turn if the signature does not come back with the
+// call, so it has to survive the trip onto the ToolCall.
+func TestAFunctionCallKeepsItsThoughtSignature(t *testing.T) {
+	s := sse(t, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{}},`+
+		`"thoughtSignature":"c2lnbmVk"}]},"finishReason":"STOP"}]}`)
+
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	calls := toolCalls(deltas)
+	if len(calls) != 1 || string(calls[0].Signature) != "signed" {
+		t.Fatalf("calls = %+v, want the signature \"signed\"", calls)
+	}
+}
+
 // Gemini counts thinking outside candidatesTokenCount, unlike every other
 // protocol here. Reading only candidates under-reported both the turn and its
 // price.

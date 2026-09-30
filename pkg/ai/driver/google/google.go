@@ -116,6 +116,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		}
 		defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
 
+		// Gemini finishes a turn that called a function with STOP, and the call
+		// may arrive in an earlier chunk than the finish.
+		called := false
 		for chunk, err := range sseEvents(res.Body) {
 			if err != nil {
 				yield(ai.Delta{}, d.fail.WrapStream(err))
@@ -126,16 +129,27 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				yield(ai.Delta{}, d.fail.WrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
 				return
 			}
-			if !d.emit(out, yield) {
+			if !d.emit(out, &called, yield) {
 				return
 			}
 		}
 	}
 }
 
-// emit turns one decoded chunk into deltas. It reports false when the consumer
-// stopped iterating.
-func (d *Driver) emit(out generateResponse, yield func(ai.Delta, error) bool) bool {
+// emit turns one decoded chunk into deltas, noting in called whether the turn
+// made a function call. It reports false when the consumer stopped iterating.
+func (d *Driver) emit(out generateResponse, called *bool, yield func(ai.Delta, error) bool) bool {
+	// A blocked prompt gets no candidate, only the reason, which is carried as
+	// the refusal's text so the caller does not see an empty answer.
+	if f := out.PromptFeedback; f != nil && f.BlockReason != "" {
+		msg := f.BlockReasonMessage
+		if msg == "" {
+			msg = "prompt blocked: " + f.BlockReason
+		}
+		if !yield(ai.Delta{Block: ai.TextBlock(msg), StopReason: ai.StopRefusal}, nil) {
+			return false
+		}
+	}
 	for _, c := range out.Candidates {
 		if c.Content != nil {
 			for _, part := range c.Content.Parts {
@@ -143,13 +157,20 @@ func (d *Driver) emit(out generateResponse, yield func(ai.Delta, error) bool) bo
 				if !ok {
 					continue
 				}
+				if delta.Block.ToolCall != nil {
+					*called = true
+				}
 				if !yield(delta, nil) {
 					return false
 				}
 			}
 		}
 		if c.FinishReason != "" {
-			if !yield(ai.Delta{StopReason: mapFinishReason(c.FinishReason)}, nil) {
+			stop := mapFinishReason(c.FinishReason)
+			if stop == ai.StopEndTurn && *called {
+				stop = ai.StopToolUse
+			}
+			if !yield(ai.Delta{StopReason: stop}, nil) {
 				return false
 			}
 		}

@@ -318,7 +318,10 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 		case "/device":
 			_, _ = w.Write([]byte(`{"device_code":"dc","user_code":"UC-9","verification_uri":"https://github.test/login/device","interval":1,"expires_in":600}`))
 		case "/token":
-			_, _ = w.Write([]byte(`{"access_token":"gho_stub","token_type":"bearer"}`))
+			// Form-encoded, as GitHub answers a token request that does not ask
+			// for JSON.
+			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+			_, _ = w.Write([]byte(`access_token=gho_stub&token_type=bearer`))
 		case "/exchange":
 			editorHeaders = r.Header.Clone()
 			_, _ = w.Write([]byte(`{"token":"copilot-session","expires_at":4102444800,"endpoints":{"api":"https://api.enterprise.githubcopilot.test"}}`))

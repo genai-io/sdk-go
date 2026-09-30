@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -363,3 +364,35 @@ func (readOnlyStore) Load(string) (Credential, bool, error) { return Credential{
 func (readOnlyStore) Save(Credential) error                 { return errors.New("read-only") }
 func (readOnlyStore) Delete(string) error                   { return errors.New("read-only") }
 func (readOnlyStore) List() ([]string, error)               { return nil, nil }
+
+// An expired Codex credential is refreshed, as a public client names itself in
+// the form, and a provider that does not rotate the refresh token leaves the
+// stored one in place.
+func TestCodexRefreshesAnExpiredCredential(t *testing.T) {
+	var form url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		form = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	cfg := codexDefaults
+	cfg.Endpoint.TokenURL = server.URL
+	flow := newCodexFlow(cfg)
+
+	stale := Credential{Access: "old", Refresh: "rt", ExpiresAt: time.Now().Add(-time.Minute)}
+	present, expires, updated, err := flow.Token(t.Context(), server.Client(), stale)
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if present != "fresh" || updated.Refresh != "rt" || !expires.After(time.Now()) {
+		t.Errorf("got %q, %v, %+v; want the refreshed token and the old refresh token kept", present, expires, updated)
+	}
+	if form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt" || form.Get("client_id") != cfg.ClientID {
+		t.Errorf("refresh sent %v", form)
+	}
+}

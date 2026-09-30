@@ -292,7 +292,7 @@ type ToolResult struct {
 	// Content is what the tool returned: text, and images where the protocol
 	// carries them — a screenshot, a rendered chart. TextContent says the
 	// text-only answer most tools give; Model.Validate refuses an image on the
-	// two protocols that would drop it.
+	// protocol that would drop it.
 	Content Content `json:"content"`
 	// IsError marks a tool that failed. Say so rather than failing the turn: a
 	// model shown an error can correct its arguments and try again.

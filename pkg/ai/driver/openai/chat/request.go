@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"fmt"
+
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
 
@@ -146,6 +148,11 @@ func (d *Driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessagePar
 			for _, r := range msg.ToolResults() {
 				out = append(out, sdk.ToolMessage(r.Text(), r.ToolCallID))
 			}
+			// A tool message holds only text, so the images the tools returned
+			// follow in a user message that says whose they are.
+			if images := toolResultImages(msg.ToolResults()); len(images) > 0 {
+				out = append(out, d.userMessage(ai.Message{Role: ai.RoleUser, Content: images}))
+			}
 			continue
 		}
 		switch msg.Role {
@@ -153,6 +160,22 @@ func (d *Driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessagePar
 			out = append(out, d.userMessage(msg))
 		case ai.RoleAssistant:
 			out = append(out, d.assistantMessage(msg))
+		}
+	}
+	return out
+}
+
+func toolResultImages(results []ai.ToolResult) ai.Content {
+	var out ai.Content
+	for _, r := range results {
+		if !r.Content.HasImages() {
+			continue
+		}
+		out = append(out, ai.TextBlock(fmt.Sprintf("Images returned by tool call %s:", r.ToolCallID)))
+		for _, block := range r.Content {
+			if block.Type == ai.BlockImage {
+				out = append(out, block)
+			}
 		}
 	}
 	return out

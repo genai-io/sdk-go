@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
-	"maps"
 	"slices"
 
 	sdk "github.com/openai/openai-go/v3"
@@ -73,7 +72,10 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 		// Tool calls arrive as indexed argument fragments spread across
 		// chunks, so they can only be emitted once the stream ends.
-		calls := make(map[int]*ai.ToolCall)
+		calls := toolCallSet{byIndex: make(map[int64]*ai.ToolCall)}
+		// A refusal can be finished off by an ordinary finish_reason, whose
+		// stop reason would otherwise overwrite the refusal.
+		refused := false
 
 		for stream.Next() {
 			chunk := stream.Current()
@@ -92,9 +94,20 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 						return
 					}
 				}
+				if choice.Delta.Refusal != "" {
+					// A refusal is an answer, not a failure: the text is what the
+					// model produced, and the stop reason is what says it declined.
+					refused = true
+					if !yield(ai.Delta{Block: ai.TextBlock(choice.Delta.Refusal), StopReason: ai.StopRefusal}, nil) {
+						return
+					}
+				}
 				var out ai.Delta
 				if choice.FinishReason != "" && !d.compat.NoFinishReason {
 					out.StopReason = mapFinishReason(choice.FinishReason)
+					if refused {
+						out.StopReason = ai.StopRefusal
+					}
 				}
 				if chunk.Model != "" {
 					out.Model = chunk.Model
@@ -104,19 +117,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				}
 
 				for _, tc := range choice.Delta.ToolCalls {
-					idx := int(tc.Index)
-					if _, ok := calls[idx]; !ok {
-						calls[idx] = &ai.ToolCall{ID: tc.ID, Name: tc.Function.Name}
-					}
-					// An ID or name can arrive on a later fragment than the
-					// first one for that index.
-					if tc.ID != "" {
-						calls[idx].ID = tc.ID
-					}
-					if tc.Function.Name != "" {
-						calls[idx].Name = tc.Function.Name
-					}
-					calls[idx].Input += tc.Function.Arguments
+					calls.add(tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments)
 				}
 
 				if out.StopReason != "" || out.Model != "" || out.ID != "" {
@@ -135,8 +136,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					int(chunk.Usage.PromptTokensDetails.CachedTokens),
 				)
 				if !yield(ai.Delta{Usage: &ai.Usage{
-					Input:     fresh,
-					Output:    int(chunk.Usage.CompletionTokens),
+					Input:  fresh,
+					Output: int(chunk.Usage.CompletionTokens),
+					// Reasoning is already inside completion_tokens; it travels
+					// separately only so a caller can see what the thinking cost.
+					Reasoning: int(chunk.Usage.CompletionTokensDetails.ReasoningTokens),
 					CacheRead: cached,
 				}}, nil) {
 					return
@@ -145,8 +149,8 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		}
 
 		flush := func() bool {
-			for _, idx := range slices.Sorted(maps.Keys(calls)) {
-				if !yield(ai.Delta{Block: ai.ToolCallBlock(*calls[idx])}, nil) {
+			for _, call := range calls.inOrder {
+				if !yield(ai.Delta{Block: ai.ToolCallBlock(*call)}, nil) {
 					return false
 				}
 			}
@@ -163,6 +167,52 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		}
 		flush()
 	}
+}
+
+// toolCallSet gathers tool-call fragments into whole calls. The spec keys a
+// call by index alone, but gateways stray from it, so an ID outranks the index.
+type toolCallSet struct {
+	inOrder []*ai.ToolCall // by first appearance
+	byIndex map[int64]*ai.ToolCall
+}
+
+func (s *toolCallSet) add(index int64, id, name, args string) {
+	call := s.byIndex[index]
+	if known := s.byID(id); known != nil {
+		// The same call at another index: one call, not two sharing an ID.
+		call = known
+	} else if call == nil || (id != "" && call.ID != "" && call.ID != id) {
+		// A new index, or a new ID at a used one from gateways that put every
+		// parallel call at index 0.
+		call = &ai.ToolCall{}
+		s.inOrder = append(s.inOrder, call)
+	}
+	s.byIndex[index] = call
+
+	// An ID or name can arrive on a later fragment than the first.
+	if id != "" {
+		call.ID = id
+	}
+	if name != "" {
+		call.Name = name
+	}
+	// Some gateways resend the whole arguments once they are complete.
+	if args == call.Input && json.Valid([]byte(args)) {
+		return
+	}
+	call.Input += args
+}
+
+func (s *toolCallSet) byID(id string) *ai.ToolCall {
+	if id == "" {
+		return nil
+	}
+	for _, call := range s.inOrder {
+		if call.ID == id {
+			return call
+		}
+	}
+	return nil
 }
 
 // Models lists what the endpoint serves. Most OpenAI-compatible endpoints

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -159,6 +160,193 @@ func TestToolCallFragmentsAccumulateByIndex(t *testing.T) {
 		if got[i].ID != want[i].ID || got[i].Name != want[i].Name || got[i].Input != want[i].Input {
 			t.Errorf("call %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+// wantCalls fails unless the stream produced exactly these calls, in order.
+func wantCalls(t *testing.T, deltas []ai.Delta, want ...ai.ToolCall) {
+	t.Helper()
+	got := toolCalls(deltas)
+	if len(got) != len(want) {
+		t.Fatalf("got %d calls, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].ID != want[i].ID || got[i].Name != want[i].Name || got[i].Input != want[i].Input {
+			t.Errorf("call %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// A gateway that numbers one call's fragments differently still sent one
+// call. Two sharing an ID is a request the next turn cannot answer.
+func TestAFragmentCarryingAKnownIDJoinsThatCallWhateverItsIndex(t *testing.T) {
+	s := sse(t,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"id":"call_a","function":{"name":"weather","arguments":"{\"city\""}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":1,"id":"call_a","function":{"arguments":":\"Oslo\"}"}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	)
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	wantCalls(t, deltas, ai.ToolCall{ID: "call_a", Name: "weather", Input: `{"city":"Oslo"}`})
+}
+
+// Some gateways put every parallel call at index 0; a new ID is what says a
+// new call began.
+func TestANewIDAtAUsedIndexStartsAnotherCall(t *testing.T) {
+	s := sse(t,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"id":"call_a","function":{"name":"weather","arguments":"{\"city\":\"Oslo\"}"}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"id":"call_b","function":{"name":"count","arguments":"{\"n\""}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"function":{"arguments":":2}"}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	)
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	wantCalls(t, deltas,
+		ai.ToolCall{ID: "call_a", Name: "weather", Input: `{"city":"Oslo"}`},
+		ai.ToolCall{ID: "call_b", Name: "count", Input: `{"n":2}`},
+	)
+}
+
+// Some gateways resend the whole arguments once they are complete. Appended,
+// they would be two JSON objects back to back, which no tool can parse.
+func TestArgumentsResentWholeAtTheEndAreNotAppendedTwice(t *testing.T) {
+	s := sse(t,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"id":"call_a","function":{"name":"weather","arguments":"{\"city\""}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"function":{"arguments":":\"Oslo\"}"}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"id":"call_a","function":{"arguments":"{\"city\":\"Oslo\"}"}}]}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	)
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	wantCalls(t, deltas, ai.ToolCall{ID: "call_a", Name: "weather", Input: `{"city":"Oslo"}`})
+}
+
+// A refusal streams under its own key. It is the answer, so it reads as text,
+// and the ordinary finish_reason after it must not hide that the model declined.
+func TestARefusalIsTextThatStopsAsARefusal(t *testing.T) {
+	s := sse(t,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"refusal":"I can't help with that."}}]}`,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"[DONE]",
+	)
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	var text strings.Builder
+	var stop ai.StopReason
+	for _, d := range deltas {
+		if d.Block.Type == ai.BlockText {
+			text.WriteString(d.Block.Text)
+		}
+		if d.StopReason != "" {
+			stop = d.StopReason
+		}
+	}
+	if text.String() != "I can't help with that." {
+		t.Errorf("text = %q, want the refusal", text.String())
+	}
+	if stop != ai.StopRefusal {
+		t.Errorf("stop reason = %q, want %q", stop, ai.StopRefusal)
+	}
+}
+
+// Reasoning tokens sit inside completion_tokens; they are reported apart only
+// so a caller can see what the thinking cost.
+func TestReasoningTokensAreReportedBesideTheOutput(t *testing.T) {
+	s := sse(t,
+		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`,
+		`{"id":"c1","model":"m","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":50,`+
+			`"completion_tokens_details":{"reasoning_tokens":40}}}`,
+		"[DONE]",
+	)
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	var usage *ai.Usage
+	for _, d := range deltas {
+		if d.Usage != nil {
+			usage = d.Usage
+		}
+	}
+	if usage == nil {
+		t.Fatal("no usage")
+	}
+	if usage.Output != 50 || usage.Reasoning != 40 {
+		t.Errorf("output = %d, reasoning = %d, want 50 and 40", usage.Output, usage.Reasoning)
+	}
+}
+
+// A tool message holds only text, so a screenshot a tool returned follows the
+// turn's tool messages in a user message naming the call it came from.
+func TestImagesAToolReturnedFollowInAUserMessage(t *testing.T) {
+	s := sse(t, `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`, "[DONE]")
+	req := &ai.Request{Messages: []ai.Message{
+		ai.UserMessage("look"),
+		{Role: ai.RoleAssistant, Content: ai.Content{
+			ai.ToolCallBlock(ai.ToolCall{ID: "call_a", Name: "screenshot", Input: `{}`}),
+			ai.ToolCallBlock(ai.ToolCall{ID: "call_b", Name: "ls", Input: `{}`}),
+		}},
+		ai.ToolResultsMessage(
+			ai.ToolResult{ToolCallID: "call_a", Content: ai.Content{
+				ai.TextBlock("the page"),
+				ai.ImageBlock(ai.Image{MediaType: "image/png", Data: "AAAA"}),
+			}},
+			ai.ToolResult{ToolCallID: "call_b", Content: ai.TextContent("a.go")},
+		),
+	}}
+	for _, err := range driverFor(t, ai.Config{BaseURL: s.URL}).Stream(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+	}
+	_, body, _ := s.seen()
+	var sent struct {
+		Messages []struct {
+			Role       string          `json:"role"`
+			ToolCallID string          `json:"tool_call_id"`
+			Content    json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body), &sent); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	var roles []string
+	for _, m := range sent.Messages {
+		roles = append(roles, m.Role)
+	}
+	if got, want := strings.Join(roles, ","), "user,assistant,tool,tool,user"; got != want {
+		t.Fatalf("roles = %s, want %s", got, want)
+	}
+	if got := string(sent.Messages[2].Content); got != `"the page"` {
+		t.Errorf("tool message content = %s, want the text alone", got)
+	}
+	images := string(sent.Messages[4].Content)
+	for _, want := range []string{"call_a", "data:image/png;base64,AAAA"} {
+		if !strings.Contains(images, want) {
+			t.Errorf("image message = %s, want it to carry %q", images, want)
+		}
+	}
+	if strings.Contains(images, "call_b") {
+		t.Errorf("image message = %s, names a call that returned no image", images)
 	}
 }
 

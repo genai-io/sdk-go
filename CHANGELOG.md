@@ -9,6 +9,40 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-09-30
+
+### Changed
+
+- **Every Responses request is stateless.** The SDK replays the whole
+  conversation each turn, so it now always sends `store=false`; a reasoning
+  model asks for `reasoning.encrypted_content`, and reasoning items are kept
+  and replayed on OpenAI and Azure too, not only on Codex. Responses are no
+  longer stored server-side.
+- **`OpenAIResponsesCompat.Stateless` is now `NoMaxOutputTokens`**
+  (`no_max_output_tokens`) — the one thing it still meant: a backend that
+  rejects an output cap. Rename the field and its JSON key.
+- **A tool result's image needs a model that takes images.** The capability
+  check now covers pictures a tool returned, on every protocol, so a
+  text-only model is refused before the request goes out.
+
+### Fixed
+
+- **Chat tool calls survive gateway quirks.** A call ID outranks the
+  fragment index: one call under two indexes stays one call, parallel calls
+  all sent at index 0 stay apart, and arguments resent whole are not
+  appended twice. A spec-following stream merges as before.
+- **Chat keeps refusals, reasoning usage and tool images.** `delta.refusal`
+  is text with `StopRefusal`; `reasoning_tokens` fill `Usage.Reasoning`; a
+  tool result's images follow the tool messages in a user message instead
+  of being refused.
+- **Responses:** an answer cut by `content_filter` is a refusal; cache
+  writes are read, and a price card with no write rate bills them at the
+  input rate rather than nothing.
+- **Gemini:** a prompt blocked by safety is a refusal that says why, not an
+  empty answer; a turn that called a function stops for tool use.
+- **Anthropic:** tool input accumulates per content block, so interleaved
+  tool_use blocks keep their own arguments.
+
 ## [0.7.6] - 2026-09-30
 
 ### Changed
@@ -745,6 +779,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.7.7]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.7
 [0.7.6]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.6
 [0.7.5]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.5
 [0.7.4]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.4

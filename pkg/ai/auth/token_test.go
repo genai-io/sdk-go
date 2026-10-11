@@ -285,6 +285,37 @@ func TestAuthenticatedRedirectsStayOnTheOriginalOrigin(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedRedirectsWithoutOriginAreRejected(t *testing.T) {
+	withTokenHook(t, nil)
+	for _, previous := range []*http.Request{nil, {}} {
+		visited := false
+		base := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "origin.test" {
+				return &http.Response{StatusCode: http.StatusFound, Body: http.NoBody,
+					Header: http.Header{"Location": {"https://other.test"}}, Request: previous}, nil
+			}
+			visited = true
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		})}
+		client, err := HTTPClient(stubVendor, Credential{Access: "secret"}, nil, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://origin.test", nil)
+		res, err := client.Do(req)
+		if res != nil {
+			_ = res.Body.Close()
+		}
+		if err == nil || visited {
+			t.Errorf("previous request=%v: err=%v, cross-origin visited=%v", previous, err, visited)
+		}
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
 // TestTwoClientsShareOneRenewal is the race this package had: a refresh token
 // rotates, so two clients for one vendor renewing independently means the
 // second renewal is refused and one of them is left signed out.

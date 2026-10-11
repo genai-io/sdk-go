@@ -20,7 +20,10 @@ type transport struct {
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Redirects must not reintroduce credentials stripped by http.Client.
-	if previous := req.Response; previous != nil && previous.Request != nil {
+	if previous := req.Response; previous != nil {
+		if previous.Request == nil || previous.Request.URL == nil {
+			return nil, fmt.Errorf("auth: refusing a redirect with an unknown origin")
+		}
 		origin := previous.Request.URL
 		if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
 			return nil, fmt.Errorf("auth: refusing a redirect to a different origin")

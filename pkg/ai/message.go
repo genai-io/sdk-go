@@ -305,6 +305,9 @@ func (r ToolResult) Text() string { return r.Content.Text() }
 
 // ReasoningItem is reasoning state you cannot read and must carry forward.
 type ReasoningItem struct {
+	// API identifies the format of opaque state so another protocol cannot
+	// replay it. Empty is accepted for histories saved before this was recorded.
+	API API `json:"api,omitempty"`
 	// ID is the provider's handle for this piece of reasoning.
 	ID string `json:"id"`
 	// EncryptedContent is the model's own working. Replay it untouched and a

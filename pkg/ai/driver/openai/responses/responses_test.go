@@ -164,6 +164,25 @@ func TestAFailedResponseIsAnError(t *testing.T) {
 	}
 }
 
+func TestFailedTerminalEventsPreserveUsageThroughThePublicClient(t *testing.T) {
+	for _, event := range []string{"response.failed", "response.completed"} {
+		t.Run(event, func(t *testing.T) {
+			s := sse(t,
+				`{"type":"response.output_text.delta","delta":"half"}`,
+				`{"type":"`+event+`","response":{"id":"failed-id","model":"actual-model","status":"failed","error":{"code":"server_error","message":"failed"},"usage":{"input_tokens":20,"output_tokens":10}}}`,
+			)
+			client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: s.URL}), ai.Model{ID: "test", API: ai.APIOpenAIResponses})
+			response, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("hi")})
+			if !ai.IsKind(err, ai.KindOverloaded) {
+				t.Fatalf("error = %v, want overloaded", err)
+			}
+			if response.Usage.Input != 20 || response.Usage.Output != 10 || response.ID != "failed-id" || response.Model != "actual-model" || response.Text() != "half" {
+				t.Errorf("failed response lost its accounting or metadata: %+v", response)
+			}
+		})
+	}
+}
+
 // A refusal is an answer: the words are the model's, and the stop reason says
 // it declined rather than finished.
 func TestARefusalIsAnAnswerAndSaysSo(t *testing.T) {
@@ -381,7 +400,7 @@ func TestReasoningItemsAreKeptForReplayOnTheRegularAPI(t *testing.T) {
 			got = append(got, *d.Block.Reasoning)
 		}
 	}
-	want := ai.ReasoningItem{ID: "rs_1", EncryptedContent: "opaque", Summary: "thought"}
+	want := ai.ReasoningItem{API: ai.APIOpenAIResponses, ID: "rs_1", EncryptedContent: "opaque", Summary: "thought"}
 	if len(got) != 1 || got[0] != want {
 		t.Errorf("reasoning = %+v, want [%+v]", got, want)
 	}

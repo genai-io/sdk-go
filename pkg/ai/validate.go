@@ -211,7 +211,27 @@ func (m Model) validateProtocolBlock(block Block) error {
 func (m Model) replayable(block Block) (Block, bool) {
 	switch block.Type {
 	case BlockReasoning:
-		return block, m.API == "" || m.API == APIOpenAIResponses
+		if m.API == "" {
+			return block, true
+		}
+		if block.Reasoning == nil {
+			return block, false
+		}
+		r := block.Reasoning
+		switch r.API {
+		case APIAnthropicMessages, APIAnthropicVertex:
+			return block, m.API.anthropicFamily()
+		case "":
+			// Older Anthropic histories have only encrypted content, no item ID.
+			if m.API.anthropicFamily() {
+				return block, r.ID == "" && r.Summary == "" && r.EncryptedContent != ""
+			}
+			return block, m.API == APIOpenAIResponses
+		case APIOpenAIResponses:
+			return block, m.API == APIOpenAIResponses
+		default:
+			return block, false
+		}
 	case BlockThinking:
 		switch {
 		case m.API == "":

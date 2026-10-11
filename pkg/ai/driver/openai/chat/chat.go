@@ -9,13 +9,18 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
+	"net/http"
 	"slices"
 
 	sdk "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
@@ -67,7 +72,17 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		level, _ := d.model.ResolveLevel(req.Effort)
 		params := d.buildParams(req, level)
 
-		stream := d.client.Chat.Completions.NewStreaming(ctx, params)
+		var raw *http.Response
+		err := d.client.Post(ctx, "chat/completions", params, &raw, option.WithJSONSet("stream", true))
+		if err != nil {
+			if raw != nil && raw.Body != nil {
+				_ = raw.Body.Close() // the request error is the one worth reporting
+			}
+			yield(ai.Delta{}, fail.WrapStream(err))
+			return
+		}
+		decoder := &completionDecoder{Decoder: ssestream.NewDecoder(raw)}
+		stream := ssestream.NewStream[sdk.ChatCompletionChunk](decoder, nil)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Tool calls arrive as indexed argument fragments spread across
@@ -76,6 +91,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		// A refusal can be finished off by an ordinary finish_reason, whose
 		// stop reason would otherwise overwrite the refusal.
 		refused := false
+		complete := false
 
 		for stream.Next() {
 			chunk := stream.Current()
@@ -103,6 +119,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					}
 				}
 				var out ai.Delta
+				complete = complete || choice.FinishReason != ""
 				if choice.FinishReason != "" && !d.compat.NoFinishReason {
 					out.StopReason = mapFinishReason(choice.FinishReason)
 					if refused {
@@ -160,8 +177,28 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			}
 			return
 		}
+		if !complete && !decoder.done && !d.compat.NoFinishReason {
+			if flush() {
+				yield(ai.Delta{}, fail.WrapStream(io.ErrUnexpectedEOF))
+			}
+			return
+		}
 		flush()
 	}
+}
+
+// The SDK consumes [DONE] without exposing it on the typed stream.
+type completionDecoder struct {
+	ssestream.Decoder
+	done bool
+}
+
+func (d *completionDecoder) Next() bool {
+	if d.Decoder == nil || !d.Decoder.Next() {
+		return false
+	}
+	d.done = d.done || bytes.Equal(bytes.TrimSpace(d.Event().Data), []byte("[DONE]"))
+	return true
 }
 
 // toolCallSet gathers tool-call fragments into whole calls. The spec keys a

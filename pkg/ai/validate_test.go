@@ -305,6 +305,7 @@ func TestWhichProtocolReplaysWhichReasoningState(t *testing.T) {
 	signed := ThinkingBlock("hmm", "sig")
 	plain := ThinkingBlock("hmm", "")
 	opaque := ReasoningBlock(ReasoningItem{ID: "r1", EncryptedContent: "x"})
+	redacted := ReasoningBlock(ReasoningItem{API: APIAnthropicMessages, EncryptedContent: "redacted"})
 
 	chatWithReasoning := Model{ID: "m", API: APIOpenAIChat,
 		Compat: OpenAIChatCompat{ReasoningContent: true}}
@@ -330,6 +331,11 @@ func TestWhichProtocolReplaysWhichReasoningState(t *testing.T) {
 		{"Responses replays items, not readable thinking", Model{API: APIOpenAIResponses}, plain, false, ""},
 		{"opaque items belong to Responses", Model{API: APIOpenAIResponses}, opaque, true, ""},
 		{"and nowhere else", Model{API: APIAnthropicMessages}, opaque, false, ""},
+		{"Anthropic replays redacted thinking", Model{API: APIAnthropicMessages}, redacted, true, ""},
+		{"Vertex replays Anthropic redacted thinking", Model{API: APIAnthropicVertex}, redacted, true, ""},
+		{"Responses cannot replay Anthropic redacted thinking", Model{API: APIOpenAIResponses}, redacted, false, ""},
+		{"older Anthropic histories still replay", Model{API: APIAnthropicMessages}, ReasoningBlock(ReasoningItem{EncryptedContent: "old"}), true, ""},
+		{"Responses state without an ID is still foreign", Model{API: APIAnthropicMessages}, ReasoningBlock(ReasoningItem{API: APIOpenAIResponses, EncryptedContent: "x"}), false, ""},
 		{"a protocol this package does not know is left alone", Model{API: "custom"}, signed, false, ""},
 		{"a model that states no protocol keeps everything", Model{}, opaque, true, ""},
 	} {

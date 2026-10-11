@@ -123,7 +123,7 @@ func TestCacheTokensArriveSplitByWhatTheyCost(t *testing.T) {
 	s := sse(t, event{"message_start", `{"type":"message_start","message":{"id":"m","model":"claude-test",` +
 		`"usage":{"input_tokens":12,"cache_creation_input_tokens":900,` +
 		`"cache_creation":{"ephemeral_1h_input_tokens":600,"ephemeral_5m_input_tokens":300},` +
-		`"cache_read_input_tokens":4000}}}`})
+		`"cache_read_input_tokens":4000}}}`}, event{"message_stop", `{"type":"message_stop"}`})
 
 	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
 	if err != nil {
@@ -263,12 +263,16 @@ func TestRedactedThinkingComesBackAndGoesBackOut(t *testing.T) {
 		Effort: ai.EffortHigh,
 		Messages: []ai.Message{
 			ai.UserMessage("hi"),
-			{Role: ai.RoleAssistant, Content: ai.Content{ai.ReasoningBlock(item)}},
-			ai.UserMessage("go on"),
+			{Role: ai.RoleAssistant, Content: ai.Content{
+				ai.ReasoningBlock(item),
+				ai.ToolCallBlock(ai.ToolCall{ID: "call", Name: "action", Input: `{}`}),
+			}},
+			ai.ToolResultsMessage(ai.ToolResult{ToolCallID: "call", ToolName: "action", Content: ai.TextContent("done")}),
 		},
 	}
-	if _, err := collect(t, context.Background(),
-		driverFor(t, ai.Config{BaseURL: back.URL, Model: thinker}), req); err != nil {
+	thinker.API = ai.APIAnthropicMessages
+	client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: back.URL, Model: thinker}), thinker)
+	if _, err := client.Complete(t.Context(), req.Messages, ai.WithEffort(req.Effort)); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	_, body, _ := back.seen()

@@ -348,6 +348,61 @@ func TestACallWhoseItemIDChangesBetweenEventsIsStillOneCall(t *testing.T) {
 	}
 }
 
+func TestUnfinishedToolCallsSurviveStreamFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		terminal string
+		wantErr  bool
+	}{
+		{"EOF", "", true},
+		{"error event", `{"type":"error","code":"server_error","message":"failed"}`, true},
+		{"failed event", `{"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"failed"}}}`, true},
+		{"completed with failure", `{"type":"response.completed","response":{"status":"failed","error":{"code":"server_error","message":"failed"}}}`, true},
+		{"completed", completed, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{
+				`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read"}}`,
+				`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":"{}"}}`,
+				`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_2","call_id":"call_2","name":"Read"}}`,
+				`{"type":"response.function_call_arguments.delta","item_id":"fc_2","delta":"{\"file_path\":\"a.py\"}"}`,
+			}
+			if tc.terminal != "" {
+				events = append(events, tc.terminal)
+			}
+			s := sse(t, events...)
+			client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: s.URL}), ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses})
+			resp, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("go")})
+			if (err != nil) != tc.wantErr || tc.terminal == "" && !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("err=%v, wantErr=%v", err, tc.wantErr)
+			}
+			calls := resp.ToolCalls()
+			if len(calls) != 2 || calls[0].ID != "call_1" || calls[1].ID != "call_2" || calls[1].Input != `{"file_path":"a.py"}` {
+				t.Errorf("calls=%+v, want both calls and the received arguments without duplicates", calls)
+			}
+		})
+	}
+}
+
+func TestToolCallsSurviveATransportReadError(t *testing.T) {
+	const payload = "data: " + `{"type":"response.output_item.added","item":{"type":"function_call","id":"fc","call_id":"call","name":"Read"}}` + "\n\n" +
+		"data: " + `{"type":"response.function_call_arguments.delta","item_id":"fc","delta":"{}"}` + "\n\n"
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Length", fmt.Sprint(len(payload)+1))
+		_, _ = io.WriteString(w, payload)
+	}))
+	t.Cleanup(s.Close)
+	client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: s.URL}), ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses})
+	resp, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("go")})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err=%v, want a transport read error", err)
+	}
+	if calls := resp.ToolCalls(); len(calls) != 1 || calls[0].ID != "call" || calls[0].Input != `{}` {
+		t.Errorf("calls=%+v, want the received tool call and arguments", calls)
+	}
+}
+
 // reasoner is a model with a reasoning ladder, which is what earns a request
 // the encrypted reasoning back.
 var reasoner = ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses, Reasoning: []ai.ReasoningLevel{{Effort: ai.EffortHigh}}}

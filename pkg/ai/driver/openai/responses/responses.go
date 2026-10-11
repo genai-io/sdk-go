@@ -80,7 +80,9 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		// stop reason would otherwise overwrite the refusal.
 		refused := false
 		complete := false
+		var terminalErr error
 
+	events:
 		for stream.Next() {
 			event := stream.Current()
 
@@ -178,8 +180,8 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					if !yield(finished(resp, ai.StopError), nil) {
 						return
 					}
-					yield(ai.Delta{}, d.responseError(string(resp.Error.Code), resp.Error.Message))
-					return
+					terminalErr = d.responseError(string(resp.Error.Code), resp.Error.Message)
+					break events
 				case wire.ResponseStatusCompleted, "":
 					if !yield(finished(resp, endOfTurn(refused, len(calls) > 0)), nil) {
 						return
@@ -204,23 +206,14 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				if !yield(finished(resp, ai.StopError), nil) {
 					return
 				}
-				yield(ai.Delta{}, d.responseError(string(resp.Error.Code), resp.Error.Message))
-				return
+				terminalErr = d.responseError(string(resp.Error.Code), resp.Error.Message)
+				break events
 
 			case "error":
 				e := event.AsError()
-				yield(ai.Delta{}, d.responseError(e.Code, e.Message))
-				return
+				terminalErr = d.responseError(e.Code, e.Message)
+				break events
 			}
-		}
-
-		if err := stream.Err(); err != nil {
-			yield(ai.Delta{}, fail.WrapStream(err))
-			return
-		}
-		if !complete {
-			yield(ai.Delta{}, fail.WrapStream(io.ErrUnexpectedEOF))
-			return
 		}
 
 		for _, id := range slices.SortedFunc(maps.Keys(calls), func(a, b string) int { return order[a] - order[b] }) {
@@ -230,6 +223,14 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			if !yield(ai.Delta{Block: ai.ToolCallBlock(*calls[id])}, nil) {
 				return
 			}
+		}
+		switch {
+		case terminalErr != nil:
+			yield(ai.Delta{}, terminalErr)
+		case stream.Err() != nil:
+			yield(ai.Delta{}, fail.WrapStream(stream.Err()))
+		case !complete:
+			yield(ai.Delta{}, fail.WrapStream(io.ErrUnexpectedEOF))
 		}
 	}
 }

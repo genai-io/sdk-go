@@ -217,6 +217,33 @@ func TestResolveStorePrefersWhatItIsGiven(t *testing.T) {
 	}
 }
 
+func TestFileStoresForOnePathShareRefreshAndWriteLocks(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	defer withDefaultStore(t, nil)()
+	first, err := resolveStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := resolveStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("default clients got independent stores for the same credentials file")
+	}
+	path, err := DefaultStorePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit != first {
+		t.Error("explicit and default handles for one path do not share a store")
+	}
+}
+
 // newTestFileStore returns a store under the test's own directory, so nothing
 // here can read or write the developer's real credentials.
 func newTestFileStore(t *testing.T) *FileStore {

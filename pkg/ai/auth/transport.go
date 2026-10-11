@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,13 @@ type transport struct {
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Redirects must not reintroduce credentials stripped by http.Client.
+	if previous := req.Response; previous != nil && previous.Request != nil {
+		origin := previous.Request.URL
+		if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
+			return nil, fmt.Errorf("auth: refusing a redirect to a different origin")
+		}
+	}
 	token, err := t.source.token(req.Context())
 	if err != nil {
 		return nil, err
@@ -90,7 +98,7 @@ func sharedSource(vendorID string, f Flow, store Store, c Credential) *tokenSour
 	}
 	// A Store whose type cannot be a map key — a struct holding a map, passed
 	// by value — gets a source of its own rather than a panic.
-	if store != nil && !reflect.TypeOf(store).Comparable() {
+	if store == nil || !reflect.TypeOf(store).Comparable() {
 		return fresh()
 	}
 

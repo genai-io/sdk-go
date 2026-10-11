@@ -20,6 +20,8 @@ type FileStore struct {
 	mu   sync.Mutex
 }
 
+var fileStores sync.Map // absolute path -> *FileStore; shares writes and refreshes
+
 // NewFileStore returns a store backed by path. An empty path uses
 // DefaultStorePath.
 func NewFileStore(path string) (*FileStore, error) {
@@ -29,7 +31,12 @@ func NewFileStore(path string) (*FileStore, error) {
 			return nil, err
 		}
 	}
-	return &FileStore{path: path}, nil
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	store, _ := fileStores.LoadOrStore(path, &FileStore{path: path})
+	return store.(*FileStore), nil
 }
 
 // DefaultStorePath is where FileStore writes when given no path: under

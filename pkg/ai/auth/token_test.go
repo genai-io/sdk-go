@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -213,6 +214,77 @@ func TestATokenWithNoStatedLifetimeIsMintedOnce(t *testing.T) {
 	}
 }
 
+func TestClientsWithoutAStoreKeepTheirOwnCredentials(t *testing.T) {
+	withTokenHook(t, nil)
+	presented := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		presented <- r.Header.Get("Authorization")
+	}))
+	defer server.Close()
+	for _, token := range []string{"account-a", "account-b"} {
+		client, err := HTTPClient(stubVendor, Credential{Access: token}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if got := <-presented; got != "Bearer "+token {
+			t.Fatalf("presented %q, want account's own token %q", got, token)
+		}
+	}
+}
+
+func TestAuthenticatedRedirectsStayOnTheOriginalOrigin(t *testing.T) {
+	withTokenHook(t, nil)
+	var visited atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		visited.Store(true)
+	}))
+	defer target.Close()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/same":
+			http.Redirect(w, r, "/done", http.StatusFound)
+		case "/other":
+			http.Redirect(w, r, target.URL, http.StatusFound)
+		case "/downgrade":
+			http.Redirect(w, r, "http://"+r.Host+"/done", http.StatusFound)
+		default:
+			if r.Header.Get("Authorization") != "Bearer secret" {
+				t.Error("same-origin redirect lost its credential")
+			}
+		}
+	}))
+	defer server.Close()
+	checks := 0
+	base := server.Client()
+	base.CheckRedirect = func(*http.Request, []*http.Request) error {
+		checks++
+		return nil
+	}
+	client, err := HTTPClient(stubVendor, Credential{Access: "secret"}, nil, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/same", "/other", "/downgrade"} {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
+		res, err := client.Do(req)
+		if res != nil {
+			_ = res.Body.Close()
+		}
+		if (err != nil) != (path != "/same") {
+			t.Errorf("%s: err = %v", path, err)
+		}
+	}
+	if visited.Load() || checks != 3 {
+		t.Errorf("cross-origin visited=%v; existing redirect checks=%d, want false and 3", visited.Load(), checks)
+	}
+}
+
 // TestTwoClientsShareOneRenewal is the race this package had: a refresh token
 // rotates, so two clients for one vendor renewing independently means the
 // second renewal is refused and one of them is left signed out.
@@ -236,7 +308,11 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	store := &memStore{}
+	store := newTestFileStore(t)
+	otherHandle, err := NewFileStore(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := Credential{Vendor: rotateVendor, Access: "a", Refresh: "r1"}
 	if err := store.Save(start); err != nil {
 		t.Fatal(err)
@@ -246,7 +322,7 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := HTTPClient(rotateVendor, start, store, nil)
+	second, err := HTTPClient(rotateVendor, start, otherHandle, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

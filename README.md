@@ -53,7 +53,7 @@ loop around it.
 go get github.com/genai-io/sdk-go
 ```
 
-Requires Go 1.26 or later.
+Requires Go 1.26.9 or later.
 
 ## The client — `pkg/ai`
 

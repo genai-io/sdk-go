@@ -20,10 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The go directive in go.mod, and the current release. A library has to
-        # build on the version it claims to support. golang.org/x/oauth2 v0.37.0
-        # declares go 1.26.0, so those are the same version for now.
-        go: ['1.26']
+        # Test the minimum supported patch; it contains the HTTP/2 security fix.
+        go: ['1.26.9']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

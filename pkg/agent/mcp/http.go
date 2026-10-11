@@ -1,6 +1,10 @@
 package mcp
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"strings"
+)
 
 // withHeaders is a client that adds the same headers to every request — a
 // gateway token, a tenant tag. The MCP transports take an *http.Client and
@@ -21,6 +25,16 @@ type headerTransport struct {
 }
 
 func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Redirects must not reintroduce credentials stripped by http.Client.
+	if previous := req.Response; previous != nil {
+		if previous.Request == nil || previous.Request.URL == nil {
+			return nil, fmt.Errorf("mcp: refusing a redirect with an unknown origin")
+		}
+		origin := previous.Request.URL
+		if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
+			return nil, fmt.Errorf("mcp: refusing a redirect to a different origin")
+		}
+	}
 	inner := t.inner
 	if inner == nil {
 		inner = http.DefaultTransport

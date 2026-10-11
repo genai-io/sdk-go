@@ -28,11 +28,11 @@ func checkValue(schema map[string]any, value any, path string) error {
 	if err := checkType(schema, value, path); err != nil {
 		return err
 	}
-	if value == nil {
-		return nil
-	}
 	if allowed, ok := schema["enum"].([]any); ok && !inEnum(allowed, value) {
 		return fmt.Errorf("%s must be one of %s", at(path), joinValues(allowed))
+	}
+	if value == nil {
+		return nil
 	}
 	switch v := value.(type) {
 	case map[string]any:

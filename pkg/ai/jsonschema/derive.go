@@ -301,6 +301,9 @@ func nullable(schema map[string]any) map[string]any {
 			schema["type"] = append(t, "null")
 		}
 	}
+	if members, ok := schema["enum"].([]any); ok && !slices.Contains(members, any(nil)) {
+		schema["enum"] = append(members, nil)
+	}
 	return schema
 }
 
@@ -315,7 +318,39 @@ func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[
 	// Empty rather than nil: two drivers forward this map to the endpoint
 	// verbatim, and a struct with no fields would send "required": null.
 	required := []any{}
-	collectFields(t, seen, where, properties, &required)
+	fields := map[string]schemaField{}
+	var names []string
+	collectFields(t, seen, where, 0, fields, &names)
+	for _, name := range names {
+		chosen := fields[name]
+		if chosen.ambiguous {
+			continue
+		}
+		field := chosen.field
+		_, optional, _ := jsonFieldName(field)
+		at := where + "." + field.Name
+		if _, options, _ := strings.Cut(field.Tag.Get("json"), ","); slices.Contains(strings.Split(options, ","), "string") {
+			// encoding/json ignores this option for non-scalar fields.
+			typ := field.Type
+			if typ.Name() == "" && typ.Kind() == reflect.Pointer {
+				typ = typ.Elem()
+			}
+			switch typ.Kind() {
+			case reflect.Bool, reflect.String,
+				reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+				reflect.Float32, reflect.Float64:
+				panic(fmt.Sprintf("jsonschema: %s uses json:\",string\", which requires a custom schema", at))
+			}
+		}
+		schema := schemaForType(field.Type, seen, at)
+		applyTags(field, schema, field.Type, at)
+		if optional || slices.Contains(typeNames(schema["type"]), "null") {
+			schema = nullable(schema)
+		}
+		properties[name] = schema
+		required = append(required, name)
+	}
 
 	return map[string]any{
 		"type":                 "object",
@@ -325,11 +360,17 @@ func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[
 	}
 }
 
+type schemaField struct {
+	field     reflect.StructField
+	depth     int
+	ambiguous bool
+}
+
 // collectFields walks one struct level, following embedded structs so their
 // fields land in the parent — which is what encoding/json does, and what a
 // hand-rolled walk most often gets wrong.
-func collectFields(t reflect.Type, seen map[reflect.Type]bool, where string,
-	properties map[string]any, required *[]any) {
+func collectFields(t reflect.Type, seen map[reflect.Type]bool, where string, depth int,
+	fields map[string]schemaField, names *[]string) {
 	for i := range t.NumField() {
 		field := t.Field(i)
 
@@ -343,26 +384,33 @@ func collectFields(t reflect.Type, seen map[reflect.Type]bool, where string,
 				embedded = embedded.Elem()
 			}
 			if embedded.Kind() == reflect.Struct {
-				collectFields(embedded, seen, where, properties, required)
+				if seen[embedded] {
+					panic(fmt.Sprintf("jsonschema: %s refers to itself; a recursive type has no finite schema", where))
+				}
+				seen[embedded] = true
+				collectFields(embedded, seen, where, depth+1, fields, names)
+				delete(seen, embedded)
 				continue
 			}
 		}
 
-		name, optional, skip := jsonFieldName(field)
+		name, _, skip := jsonFieldName(field)
 		if skip || !field.IsExported() {
 			continue
 		}
 
-		at := where + "." + field.Name
-		schema := schemaForType(field.Type, seen, at)
-		applyTags(field, schema, field.Type, at)
-		if optional {
-			schema = nullable(schema)
+		previous, exists := fields[name]
+		if !exists {
+			*names = append(*names, name)
 		}
-		properties[name] = schema
-		// Every field is required, optional ones included. Strict structured
-		// output demands it, and "may be null" is what optional means there.
-		*required = append(*required, name)
+		tagged, wasTagged := namedByTag(field), namedByTag(previous.field)
+		switch {
+		case !exists, depth < previous.depth, depth == previous.depth && tagged && !wasTagged:
+			fields[name] = schemaField{field: field, depth: depth}
+		case depth == previous.depth && tagged == wasTagged:
+			previous.ambiguous = true
+			fields[name] = previous
+		}
 	}
 }
 

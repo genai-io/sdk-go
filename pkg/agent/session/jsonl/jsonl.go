@@ -38,9 +38,7 @@ type Store struct {
 	live map[string]*openSession
 }
 
-// openSession is what a session costs to keep appending to: where it lives,
-// the entries file held open, and the sequence number of the last entry
-// written to it.
+// openSession keeps a session's append lock and last sequence number.
 //
 // meta.json is deliberately not on this path: Entries and UpdatedAt only cache
 // what the entries file already knows, and rewriting a file atomically once
@@ -48,7 +46,6 @@ type Store struct {
 type openSession struct {
 	dir     string // validated when the session was opened
 	mu      sync.Mutex
-	file    *os.File
 	seq     int64
 	updated time.Time
 	unsaved int64 // entries appended since meta.json last agreed
@@ -91,7 +88,7 @@ func (s *Store) Create(_ context.Context, meta session.Meta) (session.Meta, erro
 }
 
 // Append writes entries, assigning each a sequence number.
-func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) error {
+func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) (err error) {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -104,7 +101,12 @@ func (s *Store) Append(_ context.Context, id string, entries ...session.Entry) e
 	open.mu.Lock()
 	defer open.mu.Unlock()
 
-	w := bufio.NewWriter(open.file)
+	f, err := os.OpenFile(filepath.Join(open.dir, entriesFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+	w := bufio.NewWriter(f)
 	now := time.Now().UTC()
 	for _, e := range entries {
 		open.seq++
@@ -158,13 +160,20 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 		}
 		defer func() { _ = f.Close() }() // read-only: nothing is lost by closing it
 
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		reader := bufio.NewReaderSize(f, 64*1024)
 		// A line that does not parse is held until the next one says which it
 		// was: as the last line the session just ends; otherwise it is a hole.
 		var torn error
 		n := 0
-		for scanner.Scan() {
+		for {
+			line, err := reader.ReadBytes('\n')
+			if err != nil && err != io.EOF {
+				yield(session.Entry{}, err)
+				return
+			}
+			if len(line) == 0 {
+				return
+			}
 			n++
 			if err := ctx.Err(); err != nil {
 				yield(session.Entry{}, err)
@@ -174,7 +183,7 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 				yield(session.Entry{}, torn)
 				return
 			}
-			line := scanner.Bytes()
+			line = bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))
 			if len(line) == 0 {
 				continue
 			}
@@ -186,9 +195,6 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 			if !yield(e, nil) {
 				return
 			}
-		}
-		if err := scanner.Err(); err != nil {
-			yield(session.Entry{}, err)
 		}
 	}
 }
@@ -225,9 +231,9 @@ func (s *Store) List(_ context.Context) ([]session.Meta, error) {
 	return out, nil
 }
 
-// Close saves what was appended and releases the files. Not closing loses no
-// entry, only how up to date meta.json looks from outside — and, since nothing
-// here fsyncs, the tail of a session on a machine that loses power.
+// Close saves pending metadata and releases cached session state. Not closing
+// loses no entry, only how up to date meta.json looks from outside — and, since
+// nothing here fsyncs, the tail of a session on a machine that loses power.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	live := s.live
@@ -250,15 +256,13 @@ func (s *Store) dir(id string) (string, error) {
 	return filepath.Join(s.root, id), nil
 }
 
-// open returns the session's live state, opening the entries file and
-// recovering its sequence number the first time it is asked for.
+// open recovers a session's sequence number the first time it is asked for.
 func (s *Store) open(id string) (*openSession, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if live, ok := s.live[id]; ok {
-		s.mu.Unlock()
 		return live, nil
 	}
-	s.mu.Unlock()
 
 	dir, err := s.dir(id)
 	if err != nil {
@@ -275,18 +279,7 @@ func (s *Store) open(id string) (*openSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if live, ok := s.live[id]; ok { // somebody opened it while this one read
-		_ = f.Close() // nothing was written through it
-		return live, nil
-	}
-	live := &openSession{dir: dir, file: f, seq: seq}
+	live := &openSession{dir: dir, seq: seq}
 	s.live[id] = live
 	return live, nil
 }
@@ -322,11 +315,7 @@ func (o *openSession) save() error {
 func (o *openSession) close() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	err := o.save()
-	if closeErr := o.file.Close(); err == nil {
-		err = closeErr
-	}
-	return err
+	return o.save()
 }
 
 // saveAll brings every open session's metadata up to date, so whoever is about

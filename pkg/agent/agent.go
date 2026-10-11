@@ -354,7 +354,7 @@ func (a *Agent) SetSystem(prompt string) {
 // inference is the call this agent would make. One lock, not three: a prompt
 // read before SetTools and a toolset read after it would describe an agent
 // that never existed.
-func (a *Agent) inference() *Inference {
+func (a *Agent) inference() (*Inference, []Tool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -363,7 +363,7 @@ func (a *Agent) inference() *Inference {
 		System:   a.system,
 		Messages: slices.Clone(a.messages),
 		Tools:    a.definitions(),
-	}
+	}, slices.Clone(a.tools)
 }
 
 // toolNamed finds a tool by the name the model used, in the set the batch is

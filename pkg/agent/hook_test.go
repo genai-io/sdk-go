@@ -166,6 +166,31 @@ func TestHooksChainTheirRewrites(t *testing.T) {
 	}
 }
 
+func TestRewrittenArgumentsStillSatisfyTheToolSchema(t *testing.T) {
+	tool := agent.ToolFunc("bounded", "Run a bounded operation.",
+		func(context.Context, struct {
+			Count int `json:"count" maximum:"10"`
+		}) (agent.Result, error) {
+			t.Error("tool ran with an out-of-bounds rewrite")
+			return agent.TextResult("ran"), nil
+		})
+	a := newAgent(t, aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "c1", Name: "bounded", Input: `{"count":1}`}),
+		aitest.Says("done"),
+	), agent.WithTools(tool), agent.WithHooks(agent.Hook{
+		PreTool: func(context.Context, agent.PreToolContext) (agent.Decision, error) {
+			return agent.Decision{Arguments: `{"count":100}`}, nil
+		},
+	}))
+	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
+		t.Fatal(err)
+	}
+	results := a.Messages()[2].ToolResults()
+	if len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Text(), "10") {
+		t.Errorf("rewritten argument violation was not returned to the model: %+v", results)
+	}
+}
+
 // PreInfer runs at the top of every step, not once per turn — a hook that
 // prunes history has to see the history each time it grew.
 func TestPreInferRunsOnEveryStep(t *testing.T) {

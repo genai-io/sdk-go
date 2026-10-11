@@ -13,6 +13,7 @@ package responses
 import (
 	"context"
 	"fmt"
+	"io"
 	"iter"
 	"maps"
 	"slices"
@@ -78,7 +79,10 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		// A refusal is finished off by an ordinary response.completed, whose
 		// stop reason would otherwise overwrite the refusal.
 		refused := false
+		complete := false
+		var terminalErr error
 
+	events:
 		for stream.Next() {
 			event := stream.Current()
 
@@ -164,6 +168,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "response.completed":
 				resp := event.AsResponseCompleted().Response
+				complete = true
 				// A Responses-compatible endpoint that emits only this event
 				// says which outcome it means in the status.
 				switch resp.Status {
@@ -172,8 +177,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 						return
 					}
 				case wire.ResponseStatusFailed:
-					yield(ai.Delta{}, d.responseError(string(resp.Error.Code), resp.Error.Message))
-					return
+					if !yield(finished(resp, ai.StopError), nil) {
+						return
+					}
+					terminalErr = d.responseError(string(resp.Error.Code), resp.Error.Message)
+					break events
 				case wire.ResponseStatusCompleted, "":
 					if !yield(finished(resp, endOfTurn(refused, len(calls) > 0)), nil) {
 						return
@@ -185,6 +193,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				}
 
 			case "response.incomplete":
+				complete = true
 				// Incomplete and failed are event types of their own, not a
 				// status inside response.completed.
 				resp := event.AsResponseIncomplete().Response
@@ -194,19 +203,17 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "response.failed":
 				resp := event.AsResponseFailed().Response
-				yield(ai.Delta{}, d.responseError(string(resp.Error.Code), resp.Error.Message))
-				return
+				if !yield(finished(resp, ai.StopError), nil) {
+					return
+				}
+				terminalErr = d.responseError(string(resp.Error.Code), resp.Error.Message)
+				break events
 
 			case "error":
 				e := event.AsError()
-				yield(ai.Delta{}, d.responseError(e.Code, e.Message))
-				return
+				terminalErr = d.responseError(e.Code, e.Message)
+				break events
 			}
-		}
-
-		if err := stream.Err(); err != nil {
-			yield(ai.Delta{}, fail.WrapStream(err))
-			return
 		}
 
 		for _, id := range slices.SortedFunc(maps.Keys(calls), func(a, b string) int { return order[a] - order[b] }) {
@@ -216,6 +223,14 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			if !yield(ai.Delta{Block: ai.ToolCallBlock(*calls[id])}, nil) {
 				return
 			}
+		}
+		switch {
+		case terminalErr != nil:
+			yield(ai.Delta{}, terminalErr)
+		case stream.Err() != nil:
+			yield(ai.Delta{}, fail.WrapStream(stream.Err()))
+		case !complete:
+			yield(ai.Delta{}, fail.WrapStream(io.ErrUnexpectedEOF))
 		}
 	}
 }
@@ -325,7 +340,8 @@ func extractReasoningItem(item wire.ResponseOutputItemUnion) (ai.ReasoningItem, 
 		summary.WriteString(part.Text)
 	}
 	return ai.ReasoningItem{
-		ID: r.ID, EncryptedContent: r.EncryptedContent, Summary: summary.String(),
+		API: ai.APIOpenAIResponses,
+		ID:  r.ID, EncryptedContent: r.EncryptedContent, Summary: summary.String(),
 	}, true
 }
 

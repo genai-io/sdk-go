@@ -49,6 +49,23 @@ func create(t *testing.T, s *jsonl.Store) session.Meta {
 	return meta
 }
 
+func TestEntriesStillAcceptBlankCRLFLines(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	meta := create(t, s)
+	line, err := json.Marshal(msg("restored"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, meta.ID, "entries.jsonl"), []byte("\r\n"+string(line)+"\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries := read(t, s, meta.ID)
+	if len(entries) != 1 || entries[0].Message.Content.Text() != "restored" {
+		t.Fatalf("CRLF entries = %+v", entries)
+	}
+}
+
 func read(t *testing.T, s *jsonl.Store, id string) []session.Entry {
 	t.Helper()
 	var out []session.Entry
@@ -330,6 +347,67 @@ func TestASessionCarriesOnPastAVeryLongEntry(t *testing.T) {
 	}
 	if last != 2 {
 		t.Errorf("last Seq = %d, want 2", last)
+	}
+}
+
+func TestSuccessfullySavedLargeEntriesCanBeRestored(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	meta := create(t, s)
+	text := strings.Repeat("x", 16*1024*1024)
+	if err := s.Append(ctx(), meta.ID, msg(text)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := open(t, dir)
+	if err := reopened.Append(ctx(), meta.ID, msg("next")); err != nil {
+		t.Fatal(err)
+	}
+	_, messages, err := session.Open(ctx(), reopened, meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].Text() != text || messages[1].Text() != "next" {
+		t.Fatal("large saved entry did not survive restoration and another append")
+	}
+}
+
+func TestIdleSessionsDoNotKeepAppendFilesOpen(t *testing.T) {
+	var fdDir string
+	for _, path := range []string{"/proc/self/fd", "/dev/fd"} {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			fdDir = path
+			break
+		}
+	}
+	if fdDir == "" {
+		t.Skip("file descriptor listing is unavailable")
+	}
+	s := store(t)
+	count := func() int {
+		t.Helper()
+		f, err := os.Open(fdDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, err := f.Readdirnames(-1)
+		_ = f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(names)
+	}
+	before := count()
+	for range 256 {
+		meta := create(t, s)
+		if err := s.Append(ctx(), meta.ID, msg("saved")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := count(); after > before+16 {
+		t.Errorf("idle sessions retained file handles: before=%d, after=%d", before, after)
 	}
 }
 

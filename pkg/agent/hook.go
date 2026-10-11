@@ -175,7 +175,8 @@ type Decision struct {
 	Block  bool
 	Reason string
 
-	// Arguments, when non-empty, replaces what the model sent.
+	// Arguments, when non-empty, replaces what the model sent. The final
+	// rewrite must still satisfy the tool's schema before it runs.
 	Arguments string
 
 	// Terminate votes to end the turn after this batch, blocked or not — see

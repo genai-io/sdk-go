@@ -416,6 +416,7 @@ func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
 				_, _ = r.Body.Read(raw)
 				_ = json.Unmarshal(raw, &body)
 				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 			}))
 			defer server.Close()
 
@@ -466,9 +467,9 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"1","choices":[{"index":0,"message":{"role":"assistant",` +
-			`"content":"ok"},"finish_reason":"stop"}]}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: "+`{"id":"1","choices":[{"index":0,"delta":{`+
+			`"content":"ok"},"finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n")
 	}))
 	t.Cleanup(server.Close)
 

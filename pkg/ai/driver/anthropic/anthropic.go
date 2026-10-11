@@ -15,6 +15,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"iter"
 	"strings"
 
@@ -159,6 +160,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		// Tool input is kept per content-block index: a compatible endpoint
 		// may interleave two calls' fragments, which Anthropic itself never does.
 		tools := map[int64]*toolBlock{}
+		complete := false
 
 		for stream.Next() {
 			event := stream.Current()
@@ -190,6 +192,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 					// Thinking the safety classifier withheld: unreadable, but
 					// the API rejects a tool-use turn whose history drops it.
 					if !yield(ai.Delta{Block: ai.ReasoningBlock(ai.ReasoningItem{
+						API:              d.api,
 						EncryptedContent: block.ContentBlock.Data,
 					})}, nil) {
 						return
@@ -238,6 +241,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "message_delta":
 				md := event.AsMessageDelta()
+				complete = complete || md.Delta.StopReason != ""
 				// Every figure here is the running total for the call. Input
 				// tokens repeat what message_start already sent, but some
 				// compatible endpoints (SenseNova) send them only here.
@@ -252,11 +256,17 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				}, nil) {
 					return
 				}
+			case "message_stop":
+				complete = true
 			}
 		}
 
 		if err := stream.Err(); err != nil {
 			yield(ai.Delta{}, d.fail.WrapStream(err))
+			return
+		}
+		if !complete {
+			yield(ai.Delta{}, d.fail.WrapStream(io.ErrUnexpectedEOF))
 		}
 	}
 }

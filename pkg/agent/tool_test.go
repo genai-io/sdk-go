@@ -387,6 +387,132 @@ func TestAToolsetChangedMidBatchStillAnswersTheBatch(t *testing.T) {
 	}
 }
 
+func TestAToolReplacedDuringInferenceRunsItsOfferedImplementation(t *testing.T) {
+	var ran []string
+	before := agent.ToolFunc("action", "old implementation",
+		func(context.Context, struct{}) (agent.Result, error) {
+			ran = append(ran, "old")
+			return agent.TextResult("old"), nil
+		})
+	after := agent.ToolFunc("action", "new implementation",
+		func(context.Context, struct{}) (agent.Result, error) {
+			ran = append(ran, "new")
+			return agent.TextResult("new"), nil
+		})
+	d := aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "first", Name: "action", Input: `{}`}),
+		aitest.Asks(ai.ToolCall{ID: "second", Name: "action", Input: `{}`}),
+		aitest.Says("done"),
+	)
+	a := newAgent(t, d, agent.WithTools(before))
+	replaced := false
+	for event, err := range a.Run(t.Context(), ai.UserMessage("go")) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := event.(agent.MessageStart); ok && !replaced {
+			a.SetTools(after)
+			replaced = true
+		}
+	}
+	if !slices.Equal(ran, []string{"old", "new"}) {
+		t.Errorf("ran %v, want the offered implementation for each inference", ran)
+	}
+	if sent := d.Sent(); sent[0].Tools[0].Schema.Description != "old implementation" || sent[1].Tools[0].Schema.Description != "new implementation" {
+		t.Error("SetTools did not take effect on the next inference")
+	}
+}
+
+func TestPreInferBindsTheOfferedToolImplementation(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		replace     bool
+		override    bool
+		description string
+		want        string
+	}{
+		{"replace definitions", true, false, "new", "new"},
+		{"replace through options", true, true, "new", "new"},
+		{"same schema", true, false, "old", "new"},
+		{"keep offered definitions", false, false, "new", "old"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ran := ""
+			before := agent.ToolFunc("action", "old", func(context.Context, struct{}) (agent.Result, error) {
+				ran = "old"
+				return agent.TextResult(ran), nil
+			})
+			after := agent.ToolFunc("action", tc.description, func(context.Context, struct{}) (agent.Result, error) {
+				ran = "new"
+				return agent.TextResult(ran), nil
+			})
+			d := aitest.New(aitest.Asks(ai.ToolCall{ID: "call", Name: "action", Input: `{}`}), aitest.Says("done"))
+			var a *agent.Agent
+			a = newAgent(t, d, agent.WithTools(before), agent.WithHooks(agent.Hook{
+				PreInfer: func(_ context.Context, inf *agent.Inference) error {
+					a.SetTools(after)
+					if tc.replace {
+						defs := []ai.Tool{{Schema: after.Schema()}}
+						if tc.override {
+							inf.Tools = nil
+							inf.Options = append(inf.Options, ai.WithTools(defs...))
+						} else {
+							inf.Tools = defs
+						}
+					}
+					return nil
+				},
+			}))
+			if _, err := collect(t, a, ai.UserMessage("go")); err != nil {
+				t.Fatal(err)
+			}
+			if ran != tc.want {
+				t.Errorf("ran %q, want %q", ran, tc.want)
+			}
+			wantDescription := "old"
+			if tc.replace {
+				wantDescription = tc.description
+			}
+			if got := d.Sent()[0].Tools[0].Schema.Description; got != wantDescription {
+				t.Errorf("offered %q, want %q", got, wantDescription)
+			}
+		})
+	}
+}
+
+func TestPreInferHiddenToolsCannotRun(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		ran := false
+		hidden := agent.ToolFunc("hidden", "Hidden for this call.", func(context.Context, struct{}) (agent.Result, error) {
+			ran = true
+			return agent.TextResult("ran"), nil
+		})
+		d := aitest.New(aitest.Asks(ai.ToolCall{ID: "call", Name: "hidden", Input: `{}`}), aitest.Says("done"))
+		a := newAgent(t, d, agent.WithTools(hidden), agent.WithHooks(agent.Hook{
+			PreInfer: func(_ context.Context, inf *agent.Inference) error {
+				if override {
+					inf.Options = append(inf.Options, ai.WithTools())
+				} else {
+					inf.Tools = nil
+				}
+				return nil
+			},
+		}))
+		events, err := collect(t, a, ai.UserMessage("go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ran || len(d.Sent()[0].Tools) != 0 {
+			t.Errorf("options override=%v: hidden tool ran=%v", override, ran)
+		}
+		for _, event := range events {
+			if end, ok := event.(agent.ToolEnd); ok && end.Err == nil {
+				t.Error("the unavailable tool call should produce a tool error")
+			}
+		}
+	}
+}
+
 // A report is droppable rather than something a tool can be held up by: it
 // goes if the exchange is listening and is dropped if it is not, without ever
 // blocking the tool or panicking — a report that arrives late included.

@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"net/url"
@@ -113,6 +114,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		// Gemini finishes a turn that called a function with STOP, and the call
 		// may arrive in an earlier chunk than the finish.
 		called := false
+		complete := false
+		emit := func(delta ai.Delta, err error) bool {
+			complete = complete || delta.StopReason != ""
+			return yield(delta, err)
+		}
 		for chunk, err := range sseEvents(res.Body) {
 			if err != nil {
 				yield(ai.Delta{}, d.fail.WrapStream(err))
@@ -123,9 +129,12 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				yield(ai.Delta{}, d.fail.WrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
 				return
 			}
-			if !d.emit(out, &called, yield) {
+			if !d.emit(out, &called, emit) {
 				return
 			}
+		}
+		if !complete {
+			yield(ai.Delta{}, d.fail.WrapStream(io.ErrUnexpectedEOF))
 		}
 	}
 }

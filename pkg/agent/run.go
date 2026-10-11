@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"reflect"
 	"runtime/debug"
 	"slices"
 	"time"
@@ -290,7 +291,7 @@ const never = time.Duration(math.MaxInt64)
 // reason asks the model what to do next: one call, retrying a stream that
 // failed retryably. It returns the response and not its message, because the
 // caller needs both halves — what the model said, and why it stopped.
-func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.Usage, error) {
+func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.Usage, []Tool, error) {
 	var spent ai.Usage
 	// lastErr rides to the next attempt on Inference.LastErr, which is how a
 	// hook routes away from an endpoint that just failed.
@@ -302,11 +303,27 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 
 	for attempt := 1; ; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit.
-		inf := a.inference()
+		inf, tools := a.inference()
 		inf.LastErr = lastErr
 		if err := a.preInfer(ctx, inf); err != nil {
-			return nil, spent, err
+			return nil, spent, nil, err
 		}
+		registered := a.Tools()
+		// Bind the final request once; Options can replace the offered tools too.
+		inf.Options = append(inf.Options, func(req *ai.Request) {
+			var offered []Tool
+			for _, definition := range req.Tools {
+				tool, ok := toolNamed(registered, definition.Schema.Name)
+				if !ok || !reflect.DeepEqual(tool.Schema(), definition.Schema) {
+					// SetTools without editing this call belongs to the next inference.
+					tool, ok = toolNamed(tools, definition.Schema.Name)
+				}
+				if ok {
+					offered = append(offered, tool)
+				}
+			}
+			tools = offered
+		})
 		emit(MessageStart{Turn: a.turnNow(), Attempt: attempt, Inference: inf})
 
 		resp, err := a.stream(ctx, emit, inf)
@@ -321,7 +338,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 			// that saw it open has not gone anywhere.
 			emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 				Response: resp, Err: ctx.Err()})
-			return nil, spent, ctx.Err()
+			return nil, spent, nil, ctx.Err()
 		}
 
 		// Read before PostInfer can overwrite err: a failed call earns another
@@ -335,12 +352,12 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 			Response: resp, Err: err})
 
 		if err == nil {
-			return resp, spent, nil
+			return resp, spent, tools, nil
 		}
 		if callErr == nil {
 			// PostInfer objected to an answer that arrived. Neither budget
 			// below is for that, and neither is the hook.
-			return nil, spent, err
+			return nil, spent, nil, err
 		}
 		lastErr = err
 
@@ -349,7 +366,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		if ai.IsRetryable(err) && replays < a.retryAttempts {
 			replays++
 			if perr := pause(ctx, wait, err); perr != nil {
-				return nil, spent, perr
+				return nil, spent, nil, perr
 			}
 			wait *= 2
 			continue
@@ -359,10 +376,10 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		// the failure when there is none.
 		again, hookErr := a.onInferError(ctx, emit, inf, err, attempt)
 		if hookErr != nil {
-			return nil, spent, hookErr
+			return nil, spent, nil, hookErr
 		}
 		if again == nil {
-			return nil, spent, err
+			return nil, spent, nil, err
 		}
 		replays, wait = 1, a.retryBackoff
 	}
@@ -461,12 +478,9 @@ type call struct {
 // act runs the tools a model asked for: vet the batch, run what survives,
 // close each as it lands, reply. A hook that failed is returned as the third
 // value and ends the exchange; nothing else here does.
-func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) ([]ai.ToolResult, bool, error) {
+func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, tools []Tool) ([]ai.ToolResult, bool, error) {
 	batch := make([]call, len(calls))
 	messages := a.Messages()
-	// Read once: a call already asked for is answered by the toolset that
-	// offered it, not by whatever SetTools has left since.
-	tools := a.Tools()
 
 	// hookErr is a hook that could not do its job — infrastructure, not the
 	// model's business — so the batch stops and the exchange ends with it.
@@ -526,6 +540,9 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall) 
 		}
 		if hookErr != nil {
 			break
+		}
+		if c.err == nil && c.Input != calls[i].Input {
+			c.err = tool.Schema().Validate(c.Input)
 		}
 	}
 
@@ -744,7 +761,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			return out.failed(err)
 		}
 
-		resp, spent, err := a.reason(turnCtx, emit)
+		resp, spent, tools, err := a.reason(turnCtx, emit)
 		out.Usage.Add(spent)
 		switch {
 		case turnCtx.Err() != nil:
@@ -778,7 +795,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			return out.stopped(endedBecause(resp.StopReason))
 		}
 
-		results, terminate, err := a.act(turnCtx, emit, calls)
+		results, terminate, err := a.act(turnCtx, emit, calls, tools)
 		if err != nil {
 			// A hook failed: nothing is answered to the model, and the
 			// unanswered call is ai.Repair's to tidy on the next use.

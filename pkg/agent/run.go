@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"reflect"
 	"runtime/debug"
 	"slices"
 	"time"
@@ -307,6 +308,22 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		if err := a.preInfer(ctx, inf); err != nil {
 			return nil, spent, nil, err
 		}
+		registered := a.Tools()
+		// Bind the final request once; Options can replace the offered tools too.
+		inf.Options = append(inf.Options, func(req *ai.Request) {
+			var offered []Tool
+			for _, definition := range req.Tools {
+				tool, ok := toolNamed(registered, definition.Schema.Name)
+				if !ok || !reflect.DeepEqual(tool.Schema(), definition.Schema) {
+					// SetTools without editing this call belongs to the next inference.
+					tool, ok = toolNamed(tools, definition.Schema.Name)
+				}
+				if ok {
+					offered = append(offered, tool)
+				}
+			}
+			tools = offered
+		})
 		emit(MessageStart{Turn: a.turnNow(), Attempt: attempt, Inference: inf})
 
 		resp, err := a.stream(ctx, emit, inf)

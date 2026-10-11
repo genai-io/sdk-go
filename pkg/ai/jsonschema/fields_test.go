@@ -105,6 +105,29 @@ func TestStringJSONTagsRequireACustomSchema(t *testing.T) {
 	}]()
 }
 
+func TestIgnoredStringJSONTagsMatchJSON(t *testing.T) {
+	type Nested struct {
+		Count int `json:"count"`
+	}
+	for _, value := range []any{[]string{"a"}, [1]string{"b"}, map[string]string{"key": "value"}, Nested{1}, &Nested{2}} {
+		// Construct the ignored tags at runtime; staticcheck rejects them in source.
+		typ := reflect.StructOf([]reflect.StructField{{Name: "Value", Type: reflect.TypeOf(value), Tag: `json:"value,string"`}})
+		field := reflect.New(typ).Elem()
+		field.Field(0).Set(reflect.ValueOf(value))
+		raw, err := json.Marshal(field.Interface())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var encoded any
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			t.Fatal(err)
+		}
+		if err := jsonschema.Check(jsonschema.ForType(typ), encoded); err != nil {
+			t.Errorf("schema rejected encoding/json output %s: %v", raw, err)
+		}
+	}
+}
+
 func TestNullableEnumsIncludeNullAfterFieldTags(t *testing.T) {
 	schema := jsonschema.For[struct {
 		Mode    string  `json:"mode,omitempty" enum:"on|off"`

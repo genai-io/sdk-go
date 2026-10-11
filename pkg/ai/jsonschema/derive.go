@@ -330,7 +330,18 @@ func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[
 		_, optional, _ := jsonFieldName(field)
 		at := where + "." + field.Name
 		if _, options, _ := strings.Cut(field.Tag.Get("json"), ","); slices.Contains(strings.Split(options, ","), "string") {
-			panic(fmt.Sprintf("jsonschema: %s uses json:\",string\", which requires a custom schema", at))
+			// encoding/json ignores this option for non-scalar fields.
+			typ := field.Type
+			if typ.Name() == "" && typ.Kind() == reflect.Pointer {
+				typ = typ.Elem()
+			}
+			switch typ.Kind() {
+			case reflect.Bool, reflect.String,
+				reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+				reflect.Float32, reflect.Float64:
+				panic(fmt.Sprintf("jsonschema: %s uses json:\",string\", which requires a custom schema", at))
+			}
 		}
 		schema := schemaForType(field.Type, seen, at)
 		applyTags(field, schema, field.Type, at)

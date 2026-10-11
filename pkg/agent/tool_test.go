@@ -387,6 +387,42 @@ func TestAToolsetChangedMidBatchStillAnswersTheBatch(t *testing.T) {
 	}
 }
 
+func TestAToolReplacedDuringInferenceRunsItsOfferedImplementation(t *testing.T) {
+	var ran []string
+	before := agent.ToolFunc("action", "old implementation",
+		func(context.Context, struct{}) (agent.Result, error) {
+			ran = append(ran, "old")
+			return agent.TextResult("old"), nil
+		})
+	after := agent.ToolFunc("action", "new implementation",
+		func(context.Context, struct{}) (agent.Result, error) {
+			ran = append(ran, "new")
+			return agent.TextResult("new"), nil
+		})
+	d := aitest.New(
+		aitest.Asks(ai.ToolCall{ID: "first", Name: "action", Input: `{}`}),
+		aitest.Asks(ai.ToolCall{ID: "second", Name: "action", Input: `{}`}),
+		aitest.Says("done"),
+	)
+	a := newAgent(t, d, agent.WithTools(before))
+	replaced := false
+	for event, err := range a.Run(t.Context(), ai.UserMessage("go")) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := event.(agent.MessageStart); ok && !replaced {
+			a.SetTools(after)
+			replaced = true
+		}
+	}
+	if !slices.Equal(ran, []string{"old", "new"}) {
+		t.Errorf("ran %v, want the offered implementation for each inference", ran)
+	}
+	if sent := d.Sent(); sent[0].Tools[0].Schema.Description != "old implementation" || sent[1].Tools[0].Schema.Description != "new implementation" {
+		t.Error("SetTools did not take effect on the next inference")
+	}
+}
+
 // A report is droppable rather than something a tool can be held up by: it
 // goes if the exchange is listening and is dropped if it is not, without ever
 // blocking the tool or panicking — a report that arrives late included.

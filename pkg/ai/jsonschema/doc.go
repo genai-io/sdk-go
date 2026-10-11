@@ -27,6 +27,7 @@
 // its own Go type writes. A MarshalText is knowable — encoding/json quotes it,
 // so the type is a string — but a MarshalJSON is not, so a type carrying one
 // that this package does not know is refused rather than guessed at.
+// A json:",string" field also needs a custom schema and is refused.
 //
 // # The tags
 //

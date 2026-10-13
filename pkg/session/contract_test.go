@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/session"
 )
 
 // The Store contract, run against every implementation. An interface with one

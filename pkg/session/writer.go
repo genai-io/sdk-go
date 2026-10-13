@@ -11,13 +11,13 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Recorder turns an agent's events into stored entries.
+// Writer turns an agent's events into stored entries.
 //
 // It holds no state machine. Every event says which turn it belongs to and
 // carries what opened it, so recording one is a translation and not a
 // reconstruction — which is also why Handle must not be called concurrently
 // for a session and needs no lock to say so.
-type Recorder struct {
+type Writer struct {
 	store Store
 	id    string
 
@@ -34,11 +34,11 @@ type Recorder struct {
 	err error
 }
 
-// newRecorder returns a recorder writing into one session. Unexported because
+// newWriter returns a Writer writing into one session. Unexported because
 // Open is the way in: without what Open read back it would number turns from
 // one again and re-record the history it was resumed from.
-func newRecorder(store Store, id string) *Recorder {
-	return &Recorder{store: store, id: id}
+func newWriter(store Store, id string) *Writer {
+	return &Writer{store: store, id: id}
 }
 
 // Handle records one event. Call it from your event loop, in order, before
@@ -49,7 +49,7 @@ func newRecorder(store Store, id string) *Recorder {
 // hole in it is not a shorter conversation but a broken one — drop the message
 // carrying a tool call and the results answering it are orphaned — so stopping
 // leaves a prefix that still folds where carrying on would not.
-func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
+func (r *Writer) Handle(ctx context.Context, e agent.Event) {
 	if r.Err() != nil {
 		return
 	}
@@ -73,6 +73,9 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 	case agent.MessageEnd:
 		rec := Inference{Attempt: v.Attempt}
 		if v.Inference != nil {
+			if v.Inference.Client != nil {
+				rec.Model = v.Inference.Client.Model().ID
+			}
 			rec.System = v.Inference.System
 			for _, t := range v.Inference.Tools {
 				rec.Tools = append(rec.Tools, t.Schema.Name)
@@ -116,7 +119,7 @@ func (r *Recorder) Handle(ctx context.Context, e agent.Event) {
 // turn is the exchange it happened in, or zero for something between them. A
 // value that will not marshal is dropped and the entry still written; one with
 // no kind is not written at all.
-func (r *Recorder) Record(ctx context.Context, turn int, kind string, v any) {
+func (r *Writer) Record(ctx context.Context, turn int, kind string, v any) {
 	if r.Err() != nil || kind == "" {
 		return
 	}
@@ -128,7 +131,7 @@ func (r *Recorder) Record(ctx context.Context, turn int, kind string, v any) {
 }
 
 // Err reports the write that stopped recording, if one did.
-func (r *Recorder) Err() error {
+func (r *Writer) Err() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.err
@@ -138,7 +141,7 @@ func (r *Recorder) Err() error {
 // said it, rather than when a slow store got round to it. The agent numbers
 // turns from one on every run; that mapping happens here, once, rather than at
 // each of the five call sites where forgetting it would be silent.
-func (r *Recorder) write(ctx context.Context, turn int, e Entry) {
+func (r *Writer) write(ctx context.Context, turn int, e Entry) {
 	e.Turn = r.turnsBefore + turn
 	e.At = time.Now().UTC()
 	if err := r.store.Append(ctx, r.id, e); err != nil {
@@ -151,4 +154,4 @@ func (r *Recorder) write(ctx context.Context, turn int, e Entry) {
 }
 
 // ID reports which session this records into.
-func (r *Recorder) ID() string { return r.id }
+func (r *Writer) ID() string { return r.id }

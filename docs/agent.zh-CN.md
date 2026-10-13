@@ -399,7 +399,7 @@ for e, err := range a.Run(ctx, msg) {
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["你的循环"]
     loop --> ui["你的界面"]
-    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
@@ -442,7 +442,7 @@ rec.Record(ctx, turn, "permission.decided", decision)
 
 `Data` 存进去、原样交回来、从不解读:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
 
-`Record` 放在 `Recorder` 上,而不是让你直接 `store.Append`(你本来就能调),因为条目属于第几轮是**从会话开头**数的,而那个偏移量在 recorder 手里。
+`Record` 放在 `Writer` 上,而不是让你直接 `store.Append`(你本来就能调),因为条目属于第几轮是**从会话开头**数的,而那个偏移量在 writer 手里。
 
 ### 读出来什么
 
@@ -459,7 +459,7 @@ seq   1         2         3          4         5         6
 
 除 `message` 和 `snapshot` 之外的记录**不参与恢复** —— 它们是用来解释和计费的。每条上面的轮次号是**会话自己的**,不是 agent 的:agent 每次运行都从 1 开始数,`session.Open` 把会话已有的轮数加上去,两边才对得齐。
 
-**换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——recorder 把它存成折叠的新起点:
+**换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——writer 把它存成折叠的新起点:
 
 ```go
 summary := compact(a.Messages())
@@ -481,6 +481,8 @@ type Store interface {
 
 列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,`jsonl.Store` 多给了一个 `List`,一个会话就是一个目录,复制、删除都由应用自己来。**接口只需要写出这个包自己会调的东西。**
 
+JSONL store 在调用之间不持有文件资源。每次追加在会话文件锁内读取日志末尾的序号、序列化整批条目、写入并释放锁，因此多个实例或进程不会分配重复序号。`Meta` 和 `List` 从日志计算数量和更新时间，不需要 `Close` 或退出时刷新元数据。追加前会修复末尾未完成的片段，缺少换行的完整条目会保留；已经换行但损坏的条目会报错。返回后写入可见，但没有通过 `fsync` 承诺断电持久性。
+
 ## 包结构
 
 ```
@@ -491,8 +493,12 @@ pkg/agent/
   hook.go      4 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   mcp/         MCP 服务器的工具,变成这个包自己的
-  session/     事件 → 持久条目,以及折回来
-    jsonl/     文件系统上的 store,一个会话一个目录
+pkg/session/  事件 → 持久条目,以及折回来
+  entry.go    原生消息和审计条目
+  store.go    持久化接口
+  writer.go   事件写入
+  restore.go  恢复会话
+  jsonl/      文件系统 store,一个会话一个目录
 ```
 
 ## 它不做的事

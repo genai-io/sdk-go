@@ -9,6 +9,22 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Changed
+
+- Move session persistence to `pkg/session` and `pkg/session/jsonl`.
+  Rename `session.Recorder` to `session.Writer`. Update imports and type names;
+  the old package and aliases are removed.
+- JSONL stores serialize appends across store instances and processes. Sequence
+  numbers and listing counts come from the log, with no shutdown flush or
+  `Store.Close` required.
+
+### Fixed
+
+- Resumed sessions continue after incomplete turns without reusing turn numbers.
+- Complete final records missing a newline survive the next append; terminated
+  corrupt records are reported instead of hidden.
+- Failed batch encoding does not append a partial batch or consume sequence numbers.
+
 ## [0.8.0] - 2026-10-01
 
 ### Added

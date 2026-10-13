@@ -1,19 +1,9 @@
-// Package session persists what an agent did, and restores it.
-//
-// # Where things live
-//
-//	session.go   the store contract, what an entry is, and how a session opens
-//	recorder.go  the handler that turns events into entries
-//	jsonl        a store on the filesystem: a directory per session
+// Package session persists native agent messages and ordered events, and restores conversations.
 package session
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"iter"
-	"slices"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -24,7 +14,7 @@ import (
 var ErrNotFound = errors.New("session: not found")
 
 // Meta is what a session is, apart from what happened in it. Small on purpose:
-// it has to be listable without reading any session's entries.
+// stores can derive Entries and UpdatedAt from their authoritative log.
 type Meta struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -104,7 +94,7 @@ func (e Entry) payload() bool {
 // and so is the question it answers. Namespace Kind ("permission.decided"), so
 // a store holding more than one application's sessions stays legible.
 //
-// Written through [Recorder.Record], which knows what turn to file it under.
+// Written through [Writer.Record], which knows what turn to file it under.
 type Custom struct {
 	Kind string          `json:"kind"`
 	Data json.RawMessage `json:"data,omitempty"`
@@ -171,92 +161,3 @@ func (m Meta) Created(at time.Time) Meta {
 // ByRecency orders sessions the way a list of them is read: most recently
 // updated first.
 func ByRecency(a, b Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) }
-
-// Store is what a recorder writes to and a session is restored from — nothing
-// more. Listing, renaming, forking and deleting are the application's business
-// with the store it chose: an interface only has to name what this package
-// calls.
-type Store interface {
-	// Create starts a session. A blank Meta.ID means the store assigns one.
-	Create(ctx context.Context, meta Meta) (Meta, error)
-
-	// Append writes entries in order, assigning Seq to any that lack one.
-	Append(ctx context.Context, id string, entries ...Entry) error
-
-	// Entries reads a session from the beginning. The iterator ends on the
-	// first error.
-	Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
-
-	// Meta reads one session's metadata, or ErrNotFound.
-	Meta(ctx context.Context, id string) (Meta, error)
-}
-
-// fold reads a session once and answers both questions asked of it: what the
-// conversation is, and how many exchanges it has held. The second is not
-// derivable from the first — a snapshot resets the conversation and not the
-// history — and reading the entries twice to learn it would be reading them
-// twice.
-func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error) {
-	var msgs []ai.Message
-	var turns int
-	for entry, err := range store.Entries(ctx, id) {
-		if err != nil {
-			return nil, 0, err
-		}
-		if !entry.payload() {
-			return nil, 0, fmt.Errorf("session: %s entry %d says %q and carries nothing",
-				id, entry.Seq, entry.Type)
-		}
-		switch entry.Type {
-		case EntrySnapshot:
-			msgs = slices.Clone(entry.Snapshot)
-		case EntryMessage:
-			msgs = append(msgs, *entry.Message)
-		case EntryOutcome:
-			turns++
-		}
-		// EntryCustom and EntryInference and EntryToolRun are not the
-		// conversation: they explain it. A fold walks past them.
-	}
-	return msgs, turns, nil
-}
-
-// Open starts a session or resumes one, returning a Recorder to feed events to
-// and the conversation folded back out of what was stored. Pass an empty id for
-// a new session; the id it was given is on the Recorder.
-//
-//	rec, history, _ := session.Open(ctx, store, "")   // or an existing id
-//	a.SetMessages(history)
-//	for e, err := range a.Run(ctx, ai.UserMessage(line)) {
-//	    rec.Handle(ctx, e)
-//	    render(e)
-//	}
-func Open(ctx context.Context, store Store, id string) (*Recorder, []ai.Message, error) {
-	if id == "" {
-		meta, err := store.Create(ctx, Meta{})
-		if err != nil {
-			return nil, nil, err
-		}
-		return newRecorder(store, meta.ID), nil, nil
-	}
-
-	if _, err := store.Meta(ctx, id); err != nil {
-		return nil, nil, err
-	}
-	msgs, turns, err := fold(ctx, store, id)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	rec := newRecorder(store, id)
-	// The agent numbers turns from one every time it runs, because what came
-	// back from storage was someone else's counting. The session is the one
-	// place that knows both numbers, so it is where they are reconciled —
-	// without which a resumed session holds two exchanges both called turn 1.
-	rec.turnsBefore = turns
-	// And this is the history the agent is about to be handed. It will
-	// announce it as replaced, correctly and unavoidably; recording it would
-	// write a copy of what was just read, once per resume, forever.
-	rec.restored = msgs
-	return rec, msgs, nil
-}

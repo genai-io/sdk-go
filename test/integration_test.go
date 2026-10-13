@@ -1089,7 +1089,7 @@ func censusTool() ai.Tool {
 func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
 	prefix := "dep"
 	tools := []ai.Tool{ai.ToolFunc("recorder", "records a note",
-		func(_ context.Context, a RecorderArgs) (string, error) {
+		func(_ context.Context, a WriterArgs) (string, error) {
 			return prefix + ":" + a.Note, nil
 		})}
 
@@ -1114,7 +1114,7 @@ func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
 	}
 }
 
-type RecorderArgs struct {
+type WriterArgs struct {
 	Note string `json:"note" description:"anything"`
 }
 

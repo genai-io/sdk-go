@@ -12,9 +12,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/genai-io/sdk-go/pkg/agent/session"
-	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/session"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 )
 
 func ctx() context.Context { return context.Background() }
@@ -25,11 +25,6 @@ func open(t *testing.T, dir string) *jsonl.Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Errorf("Close: %v", err)
-		}
-	})
 	return s
 }
 
@@ -231,9 +226,6 @@ func TestASessionSurvivesReopening(t *testing.T) {
 	if err := s.Append(ctx(), meta.ID, msg("written before the restart")); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
 
 	entries := read(t, open(t, dir), meta.ID)
 	if len(entries) != 1 {
@@ -358,9 +350,6 @@ func TestSuccessfullySavedLargeEntriesCanBeRestored(t *testing.T) {
 	if err := s.Append(ctx(), meta.ID, msg(text)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
 	reopened := open(t, dir)
 	if err := reopened.Append(ctx(), meta.ID, msg("next")); err != nil {
 		t.Fatal(err)
@@ -431,9 +420,6 @@ func BenchmarkAppendOneEntry(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer func() {
-		if err := s.Close(); err != nil {
-			b.Error(err)
-		}
 	}()
 	meta, err := s.Create(context.Background(), session.Meta{})
 	if err != nil {
@@ -506,9 +492,6 @@ func TestAnAppendAfterATornTailIsReadableAndNumbered(t *testing.T) {
 	if err := first.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	if err := first.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
 
 	path := filepath.Join(dir, meta.ID, "entries.jsonl")
 	raw, err := os.ReadFile(path)
@@ -550,9 +533,6 @@ func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
 	meta := create(t, s)
 	if err := s.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
 		t.Fatalf("Append: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
 	}
 
 	path := filepath.Join(dir, meta.ID, "entries.jsonl")

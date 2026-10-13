@@ -489,7 +489,7 @@ agent. Your loop feeds it; the agent never learns storage exists.
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["your loop"]
     loop --> ui["your interface"]
-    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent

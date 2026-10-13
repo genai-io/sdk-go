@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/genai-io/sdk-go/pkg/agent/session"
+	"github.com/genai-io/sdk-go/pkg/session"
 )
 
 // memStore keeps sessions in memory: the second implementation of

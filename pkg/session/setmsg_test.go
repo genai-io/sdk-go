@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/session"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/aitest"
+	"github.com/genai-io/sdk-go/pkg/session"
 )
 
 // Compaction replaces the conversation, and a session that only folded what
 // was appended would restore what the agent threw away. Nothing here says so:
-// replacing the conversation is an event like any other, and the recorder
+// replacing the conversation is an event like any other, and the writer
 // consuming the stream already has it. That is the point of the test — a
 // caller who forgets a step cannot exist if there is no step to forget.
 func TestCompactionSurvivesARestore(t *testing.T) {

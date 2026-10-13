@@ -2,7 +2,7 @@
 // and the second run remembers the first.
 //
 // The agent knows nothing about storage, and the store knows nothing about
-// agents. What joins them is the event stream: a Recorder consumes the same
+// agents. What joins them is the event stream: a Writer consumes the same
 // events you draw from, and session.Open folds what was recorded back into a
 // conversation to hand the agent. Three lines carry the whole thing —
 //
@@ -31,10 +31,10 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/session"
-	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
+	"github.com/genai-io/sdk-go/pkg/session"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -58,18 +58,11 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	ctx := context.Background()
 
 	// A store is a directory. Nothing about it is agent-specific: it holds
-	// entries, and Close is what flushes the metadata it keeps in memory.
+	// entries; metadata is derived from the log whenever it is read.
 	store, err := jsonl.Open(dir)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		// Close is what writes the metadata a later listing reads, so losing
-		// its error loses the session index.
-		if cerr := store.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
 
 	if list {
 		return listSessions(ctx, store)
@@ -151,7 +144,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 // compact throws most of the conversation away, and tells the session nothing
 // — there is nothing to tell it. Replacing a conversation is an event like any
 // other: the agent reports it as MessagesReplaced at the start of the next
-// exchange, and the recorder stores it as the point a fold starts from. Get
+// exchange, and the writer stores it as the point a fold starts from. Get
 // this wrong and the next restore hands back everything you just discarded,
 // which is why it is not something a caller is asked to remember.
 func compact(a *agent.Agent, keep int) {

@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/session"
-	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
+	"github.com/genai-io/sdk-go/pkg/session"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/anthropic"
 )
@@ -83,12 +83,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() {
-		// Close writes the metadata a later listing reads.
-		if err := store.Close(); err != nil {
-			log.Print(err)
-		}
-	}()
 
 	// Resume the most recent session, or start one. What comes back is the
 	// history to seed the agent with — the agent itself knows nothing about

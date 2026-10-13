@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
-	"github.com/genai-io/sdk-go/pkg/agent/session"
-	"github.com/genai-io/sdk-go/pkg/agent/session/jsonl"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/aitest"
+	"github.com/genai-io/sdk-go/pkg/session"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 )
 
 func newAgent(t *testing.T, history []ai.Message, turns ...aitest.Turn) *agent.Agent {
@@ -28,8 +28,8 @@ func newAgent(t *testing.T, history []ai.Message, turns ...aitest.Turn) *agent.A
 
 // converse drives an agent through several exchanges, recording as it goes. It
 // is the whole shape of using this package with a session: your loop, your
-// recorder call, and the agent knowing nothing about either.
-func converse(t *testing.T, a *agent.Agent, rec *session.Recorder, msgs ...ai.Message) {
+// writer call, and the agent knowing nothing about either.
+func converse(t *testing.T, a *agent.Agent, rec *session.Writer, msgs ...ai.Message) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -59,11 +59,6 @@ func jsonlStore(t *testing.T) *jsonl.Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Errorf("Close: %v", err)
-		}
-	})
 	return s
 }
 
@@ -233,9 +228,6 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	}
 	converse(t, a, rec, ai.UserMessage("hello"))
 	id := rec.ID()
-	if err := first.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
 
 	// A new process: nothing survives but the directory.
 	second, err := jsonl.Open(dir)
@@ -243,9 +235,6 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() {
-		if err := second.Close(); err != nil {
-			t.Errorf("Close: %v", err)
-		}
 	}()
 
 	// Finding it the way a program would, rather than by remembering the id.

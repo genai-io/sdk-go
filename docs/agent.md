@@ -594,7 +594,7 @@ the screen that is not in the file.
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["your loop"]
     loop --> ui["your interface"]
-    loop -->|"rec.Handle(ctx, e)"| rec["Recorder"]
+    loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
@@ -658,9 +658,9 @@ your vocabulary too — namespace it, so a store holding more than one
 application's sessions stays legible. A fold walks past these: they explain the
 conversation, they are not it.
 
-`Record` is on the `Recorder` rather than left to `store.Append`, which you can
+`Record` is on the `Writer` rather than left to `store.Append`, which you can
 already call, because the turn an entry belongs to is numbered from the
-session's beginning and the offset is the recorder's.
+session's beginning and the offset is the writer's.
 
 ### What is read
 
@@ -685,7 +685,7 @@ the session already held so the two agree.
 history, and a fold over `MessageAdded` alone would hand back what was thrown
 away. So `SetMessages` is announced — as `MessagesReplaced`, at the start of
 the next exchange, which is when the agent next has anywhere to say it — and
-the recorder stores it as the point a fold starts from:
+the writer stores it as the point a fold starts from:
 
 ```go
 summary := compact(a.Messages())
@@ -713,6 +713,14 @@ store it chose — `jsonl.Store` adds `List`, and a session is a directory the
 application can copy or remove. An interface only has to name what this package
 calls.
 
+The JSONL store holds no open resources between calls. Each append locks its
+session file, reads the last committed sequence, serializes the batch, and writes
+it before releasing the lock. `Meta` and `List` derive counts and modification
+time from the log; no `Close` or deferred metadata flush is needed. A torn final
+fragment is repaired before append, while a complete record without a newline
+is retained. An invalid terminated record is an error. Appends are visible after
+returning; the store does not promise power-loss durability via `fsync`.
+
 ## Package layout
 
 ```
@@ -723,8 +731,12 @@ pkg/agent/
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   mcp/         an MCP server's tools, as this package's own
-  session/     events → durable entries, and back
-    jsonl/     a store on the filesystem, a directory per session
+pkg/session/  events → durable entries, and back
+  entry.go    native message and audit entry contracts
+  store.go    persistence interface
+  writer.go   event handler
+  restore.go  resume fold
+  jsonl/      filesystem store, a directory per session
 ```
 
 ## What it does not do

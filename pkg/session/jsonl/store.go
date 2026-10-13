@@ -86,10 +86,11 @@ func (s *Store) Append(ctx context.Context, id string, entries ...session.Entry)
 	if err = trimTornTail(path); err != nil {
 		return err
 	}
-	seq, err := lastSeq(path)
+	position, err := lastPosition(path)
 	if err != nil {
 		return err
 	}
+	seq := position.Seq
 	now := time.Now().UTC()
 	var data bytes.Buffer
 	for _, e := range entries {
@@ -133,16 +134,15 @@ func (s *Store) Meta(ctx context.Context, id string) (session.Meta, error) {
 	}
 	defer func() { _ = lock.Close() }()
 	path := filepath.Join(dir, entriesFile)
-	count, err := lastSeq(path)
+	position, err := lastPosition(path)
 	if err != nil {
 		return session.Meta{}, err
 	}
-	meta.Entries = count
-	if info, err := os.Stat(path); err == nil {
-		meta.UpdatedAt = info.ModTime().UTC()
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return session.Meta{}, err
+	meta.Entries = position.Seq
+	if !position.At.IsZero() {
+		meta.UpdatedAt = position.At
 	}
+
 	return meta, nil
 }
 

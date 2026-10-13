@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/session"
@@ -314,7 +315,7 @@ func TestASessionCarriesOnFromWhatWasWrittenNotFromTheMetadata(t *testing.T) {
 	}
 }
 
-// An entry longer than the tail block lastSeq reads first must still be found.
+// An entry longer than the tail block lastPosition reads first must still be found.
 func TestASessionCarriesOnPastAVeryLongEntry(t *testing.T) {
 	dir := t.TempDir()
 	first := open(t, dir)
@@ -561,5 +562,37 @@ func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
 	}
 	if _, _, err := session.Open(ctx(), reopened, meta.ID); err == nil {
 		t.Error("the fold returned a conversation with a hole in it")
+	}
+}
+
+func TestListUsesLogTimeWithCoarseFileTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	first := create(t, s)
+	second := create(t, s)
+	entry := msg("touches the older session")
+	entry.At = second.CreatedAt.Add(time.Nanosecond)
+	if err := s.Append(ctx(), first.ID, entry); err != nil {
+		t.Fatal(err)
+	}
+	// Filesystems can round an append's mtime below the newer session's creation time.
+	coarse := second.CreatedAt.Truncate(time.Second)
+	if err := os.Chtimes(filepath.Join(dir, first.ID, "entries.jsonl"), coarse, coarse); err != nil {
+		t.Fatal(err)
+	}
+	fresh := open(t, dir)
+	meta, err := fresh.Meta(ctx(), first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !meta.UpdatedAt.Equal(entry.At) {
+		t.Fatalf("UpdatedAt=%s, want logged time %s", meta.UpdatedAt, entry.At)
+	}
+	list, err := fresh.List(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != first.ID {
+		t.Fatalf("wrong recency order: %+v", list)
 	}
 }

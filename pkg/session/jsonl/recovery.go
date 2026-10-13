@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"time"
 )
 
 // trimTornTail removes an incomplete tail and preserves a complete record without its newline.
@@ -52,24 +53,21 @@ func trimTornTail(path string) (err error) {
 	}
 }
 
-// lastSeq recovers the number to carry on from by reading the end of the
-// entries file. The file is the record, so this is the one count that cannot
-// be wrong — meta.json can be behind, and after a crash it will be. It reads a
-// block from the tail rather than the whole file, growing it only for an entry
-// too long to fit.
-func lastSeq(path string) (int64, error) {
+// lastPosition reads the committed sequence and event time from the log tail.
+// It grows the tail window only when a record does not fit.
+func lastPosition(path string) (logPosition, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return 0, nil
+			return logPosition{}, nil
 		}
-		return 0, err
+		return logPosition{}, err
 	}
 	defer func() { _ = f.Close() }() // read-only: nothing is lost by closing it
 
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil || size == 0 {
-		return 0, err
+		return logPosition{}, err
 	}
 	for window := int64(8 * 1024); ; window *= 4 {
 		if window > size {
@@ -77,7 +75,7 @@ func lastSeq(path string) (int64, error) {
 		}
 		buf := make([]byte, window)
 		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
-			return 0, err
+			return logPosition{}, err
 		}
 		// Back over whole lines until one parses: the count carries on from
 		// where the readable part ended.
@@ -88,31 +86,35 @@ func lastSeq(path string) (int64, error) {
 			if i < 0 {
 				break
 			}
-			if seq, ok := seqOf(trimmed[i+1:]); ok {
-				return seq, nil
+			if position, ok := positionOf(trimmed[i+1:]); ok {
+				return position, nil
 			}
 			if complete {
-				return 0, fmt.Errorf("jsonl: corrupt final record")
+				return logPosition{}, fmt.Errorf("jsonl: corrupt final record")
 			}
 			trimmed = trimmed[:i]
 			complete = true
 		}
 		if window == size { // the whole file is one line, or none
-			seq, ok := seqOf(trimmed)
+			position, ok := positionOf(trimmed)
 			if !ok && complete {
-				return 0, fmt.Errorf("jsonl: corrupt final record")
+				return logPosition{}, fmt.Errorf("jsonl: corrupt final record")
 			}
-			return seq, nil
+			return position, nil
 		}
 	}
 }
 
-func seqOf(line []byte) (int64, bool) {
-	var e struct {
-		Seq int64 `json:"seq"`
+// logPosition is the ordering and event time of the last committed entry.
+type logPosition struct {
+	Seq int64     `json:"seq"`
+	At  time.Time `json:"at"`
+}
+
+func positionOf(line []byte) (logPosition, bool) {
+	var p logPosition
+	if json.Unmarshal(line, &p) != nil {
+		return logPosition{}, false
 	}
-	if json.Unmarshal(line, &e) != nil {
-		return 0, false
-	}
-	return e.Seq, true
+	return p, true
 }

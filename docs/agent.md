@@ -715,8 +715,8 @@ calls.
 
 The JSONL store holds no open resources between calls. Each append locks its
 session file, reads the last committed sequence, serializes the batch, and writes
-it before releasing the lock. `Meta` and `List` derive counts and modification
-time from the log; no `Close` or deferred metadata flush is needed. A torn final
+it before releasing the lock. `Meta` and `List` derive counts and event timestamps
+from the log, independently of filesystem timestamp precision; no `Close` or deferred metadata flush is needed. A torn final
 fragment is repaired before append, while a complete record without a newline
 is retained. An invalid terminated record is an error. Appends are visible after
 returning; the store does not promise power-loss durability via `fsync`.

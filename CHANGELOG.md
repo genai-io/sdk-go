@@ -20,6 +20,10 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Fixed
 
+- Session recency comes from the last logged event timestamp, so coarse
+  filesystem modification times cannot put a recently active session behind
+  a newer empty session.
+
 - Resumed sessions continue after incomplete turns without reusing turn numbers.
 - Complete final records missing a newline survive the next append; terminated
   corrupt records are reported instead of hidden.

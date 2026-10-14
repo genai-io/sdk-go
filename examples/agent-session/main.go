@@ -2,13 +2,14 @@
 // and the second run remembers the first.
 //
 // The agent knows nothing about storage, and the store knows nothing about
-// agents. What joins them is the event stream: a Writer consumes the same
+// agents. What joins them is the event stream: a Session consumes the same
 // events you draw from, and session.Open folds what was recorded back into a
 // conversation to hand the agent. Three lines carry the whole thing —
 //
 //	rec, history, _ := session.Open(ctx, store, id)   // restore
+//	defer func() { _ = rec.Close() }()
 //	a.SetMessages(history)                            // seed
-//	rec.Handle(ctx, e)                                     // record, in your loop
+//	rec.RecordAgentEvent(ctx, e)                                     // record, in your loop
 //
 // — and nothing more, compaction included: replacing the conversation is an
 // event too, so a session that consumed the stream already knows. See compact
@@ -71,7 +72,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		return fmt.Errorf("usage: agent-session [flags] <prompt>")
 	}
 
-	// Which session to continue. An empty id tells session.Open to start one.
+	// Which session to continue. An empty id selects session.Create.
 	if !fresh && resume == "" {
 		sessions, err := store.List(ctx) // most recently updated first
 		if err != nil {
@@ -88,10 +89,17 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	// Restore. What comes back is the conversation, folded out of the entries
 	// that were recorded — the agent is handed a plain []ai.Message and never
 	// learns where it came from.
-	rec, history, err := session.Open(ctx, store, resume)
+	var rec *session.Session
+	var history []ai.Message
+	if resume == "" {
+		rec, err = session.Create(ctx, store, session.Meta{})
+	} else {
+		rec, history, err = session.Open(ctx, store, resume)
+	}
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rec.Close() }()
 	if len(history) > 0 {
 		fmt.Printf("\033[2mcontinuing %s · %d messages\033[0m\n", rec.ID(), len(history))
 	} else {
@@ -115,7 +123,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		compact(a, keep)
 	}
 
-	// One loop, and it owns the order: record first, then draw. Handle is
+	// One loop, and it owns the order: record first, then draw. RecordAgentEvent is
 	// synchronous and sits on this goroutine by design — a program that cannot
 	// afford that forwards to a buffer of its own.
 	var end agent.TurnEnd
@@ -125,7 +133,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 			// TurnEnd.
 			return err
 		}
-		rec.Handle(ctx, e)
+		rec.RecordAgentEvent(ctx, e)
 		render(e)
 		if v, ok := e.(agent.TurnEnd); ok {
 			end = v

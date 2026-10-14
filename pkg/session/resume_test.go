@@ -24,8 +24,9 @@ func TestResumeContinuesAfterAnIncompleteTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Handle(ctx, agent.MessagesReplaced{Turn: 1, Messages: history})
-	w.Handle(ctx, agent.MessageAdded{Turn: 1, Message: ai.UserMessage("continue")})
+	t.Cleanup(func() { _ = w.Close() })
+	w.RecordAgentEvent(ctx, agent.MessagesReplaced{Turn: 1, Messages: history})
+	w.RecordAgentEvent(ctx, agent.MessageAdded{Turn: 1, Message: ai.UserMessage("continue")})
 	if err := w.Err(); err != nil {
 		t.Fatal(err)
 	}

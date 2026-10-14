@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/session"
@@ -112,6 +113,9 @@ func (s *Store) Append(ctx context.Context, id string, entries ...session.Entry)
 		return err
 	}
 	_, writeErr := f.Write(data.Bytes())
+	if writeErr == nil {
+		writeErr = f.Sync()
+	}
 	if err = errors.Join(writeErr, f.Close()); err != nil {
 		return err
 	}
@@ -225,4 +229,25 @@ func newID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return time.Now().UTC().Format("20060102-150405") + "-" + hex.EncodeToString(b[:4])
+}
+
+// Claim holds the session ownership lock independently of individual appends.
+func (s *Store) Claim(ctx context.Context, id string) (func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dir, err := s.dir(id)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.readMeta(id); err != nil {
+		return nil, err
+	}
+	lock, err := lockFile(ctx, filepath.Join(dir, ".session.lock"), false)
+	if err != nil {
+		return nil, fmt.Errorf("jsonl: claim session %s: %w", id, err)
+	}
+	var once sync.Once
+	var closeErr error
+	return func() error { once.Do(func() { closeErr = lock.Close() }); return closeErr }, nil
 }

@@ -29,10 +29,10 @@ const (
 	// EntryMessage is something that entered the conversation. Folding these
 	// is what restores a session.
 	EntryMessage EntryType = "message"
-	// EntrySnapshot is the conversation after being replaced — compaction, or
+	// EntryConversationReplaced contains the conversation after replacement — compaction, or
 	// a history handed in from elsewhere. A fold starts from the last one,
 	// because everything before it was thrown away.
-	EntrySnapshot EntryType = "snapshot"
+	EntryConversationReplaced EntryType = "conversation.replaced"
 	// EntryInference is one model call. Not needed to resume; needed to
 	// explain and to bill.
 	EntryInference EntryType = "inference"
@@ -56,7 +56,7 @@ type Entry struct {
 	Type EntryType `json:"type"`
 
 	Message   *ai.Message  `json:"message,omitempty"`
-	Snapshot  []ai.Message `json:"snapshot,omitempty"`
+	Messages  []ai.Message `json:"messages,omitempty"`
 	Inference *Inference   `json:"inference,omitempty"`
 	ToolRun   *ToolRun     `json:"tool,omitempty"`
 	Outcome   *Outcome     `json:"outcome,omitempty"`
@@ -70,7 +70,7 @@ func (e Entry) payload() bool {
 	switch e.Type {
 	case EntryMessage:
 		return e.Message != nil
-	case EntrySnapshot:
+	case EntryConversationReplaced:
 		// An empty one is a conversation cleared, which is a state a session
 		// has to be able to hold and come back from.
 		return true
@@ -94,7 +94,7 @@ func (e Entry) payload() bool {
 // and so is the question it answers. Namespace Kind ("permission.decided"), so
 // a store holding more than one application's sessions stays legible.
 //
-// Written through [Writer.Record], which knows what turn to file it under.
+// Written through [Session.Append] as an EntryCustom with an explicit turn.
 type Custom struct {
 	Kind string          `json:"kind"`
 	Data json.RawMessage `json:"data,omitempty"`

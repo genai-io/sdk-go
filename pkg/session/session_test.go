@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -29,7 +30,7 @@ func newAgent(t *testing.T, history []ai.Message, turns ...aitest.Turn) *agent.A
 // converse drives an agent through several exchanges, recording as it goes. It
 // is the whole shape of using this package with a session: your loop, your
 // writer call, and the agent knowing nothing about either.
-func converse(t *testing.T, a *agent.Agent, rec *session.Writer, msgs ...ai.Message) {
+func converse(t *testing.T, a *agent.Agent, rec *session.Session, msgs ...ai.Message) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -38,7 +39,7 @@ func converse(t *testing.T, a *agent.Agent, rec *session.Writer, msgs ...ai.Mess
 			if err != nil {
 				t.Fatalf("stream: %v", err)
 			}
-			rec.Handle(ctx, e)
+			rec.RecordAgentEvent(ctx, e)
 		}
 	}
 }
@@ -68,22 +69,25 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 	ctx := context.Background()
 
 	first := newAgent(t, nil, aitest.Says("the capital of France is Paris"))
-	rec, history, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if history != nil {
-		t.Fatalf("a new session came back with %d messages", len(history))
-	}
+	t.Cleanup(func() { _ = rec.Close() })
+
 	converse(t, first, rec, ai.UserMessage("what is the capital of France?"))
 	if err := rec.Err(); err != nil {
 		t.Fatalf("recording failed: %v", err)
 	}
 
+	if err := rec.Close(); err != nil {
+		t.Fatal(err)
+	}
 	resumed, history, err := session.Open(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
+	t.Cleanup(func() { _ = resumed.Close() })
 	second := newAgent(t, history, aitest.Says("it has about two million people"))
 
 	msgs := second.Messages()
@@ -116,10 +120,11 @@ func TestFragmentsAreNotPersistedButTheSpansThatCloseThemAre(t *testing.T) {
 	ctx := context.Background()
 
 	a := newAgent(t, nil, aitest.Says("hello"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hi"))
 
 	counts := map[session.EntryType]int{}
@@ -153,10 +158,11 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 		Usage:      ai.Usage{Input: 120, Output: 8},
 		StopReason: ai.StopEndTurn,
 	}))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hi"))
 
 	var found *session.Inference
@@ -191,10 +197,11 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 // the session handle instead.
 func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 	a := newAgent(t, nil, aitest.Says("still working"))
-	rec, _, err := session.Open(context.Background(), &flaky{Store: &memStore{}, failOn: 1}, "")
+	rec, err := session.Create(context.Background(), &flaky{Store: &memStore{}, failOn: 1}, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 
 	converse(t, a, rec, ai.UserMessage("hi"))
 
@@ -219,13 +226,11 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	a := newAgent(t, nil, aitest.Says("morning"), aitest.Says("afternoon"))
-	rec, history, err := session.Open(ctx, first, "")
+	rec, err := session.Create(ctx, first, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if len(history) != 0 {
-		t.Fatalf("a new session restored %d messages", len(history))
-	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hello"))
 	id := rec.ID()
 
@@ -246,10 +251,14 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 		t.Fatalf("List = %+v, want the one session just written", sessions)
 	}
 
+	if err := rec.Close(); err != nil {
+		t.Fatal(err)
+	}
 	rec2, restored, err := session.Open(ctx, second, id)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec2.Close() })
 	if len(restored) != len(a.Messages()) {
 		t.Fatalf("restored %d messages, the first process ended holding %d",
 			len(restored), len(a.Messages()))
@@ -301,10 +310,11 @@ func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 	a := newAgent(t, nil,
 		aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"}),
 		aitest.Says("done"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("go"))
 
 	if rec.Err() == nil {
@@ -334,18 +344,23 @@ func TestTurnsAreNumberedFromTheSessionsBeginning(t *testing.T) {
 	st := store(t)
 
 	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
 
 	// A second run, resuming: the agent starts counting at one again.
 	b := newAgent(t, nil, aitest.Says("three"))
+	if err := rec.Close(); err != nil {
+		t.Fatal(err)
+	}
 	rec2, history, err := session.Open(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec2.Close() })
 	b.SetMessages(history)
 	converse(t, b, rec2, ai.UserMessage("third"))
 
@@ -371,20 +386,28 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 	st := store(t)
 
 	a := newAgent(t, nil, aitest.Says("one"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("first"))
 
 	for range 5 {
 		b := newAgent(t, nil, aitest.Says("again"))
+		if err := rec.Close(); err != nil {
+			t.Fatal(err)
+		}
 		rec2, history, err := session.Open(ctx, st, rec.ID())
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = rec2.Close() })
 		b.SetMessages(history)
 		converse(t, b, rec2, ai.UserMessage("more"))
+		if err := rec2.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	snapshots := 0
@@ -392,7 +415,7 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if e.Type == session.EntrySnapshot {
+		if e.Type == session.EntryConversationReplaced {
 			snapshots++
 		}
 	}
@@ -413,10 +436,11 @@ func TestEveryEntryCarriesItsTurn(t *testing.T) {
 		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
 		aitest.Says("first done"),
 		aitest.Says("second done"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("one"), ai.UserMessage("two"))
 
 	seen := map[session.EntryType]bool{}
@@ -455,10 +479,11 @@ func TestNamesSurviveTheRoundTrip(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	rec, _, err := session.Open(context.Background(), st, "")
+	rec, err := session.Create(context.Background(), st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hello"))
 
 	// A compaction, so the fold has to come back through a snapshot too.
@@ -511,20 +536,26 @@ func TestAnApplicationsOwnEventsInterleaveWithTheLoops(t *testing.T) {
 	a := newAgent(t, nil,
 		aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"}),
 		aitest.Says("done"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 
 	for e, err := range a.Run(ctx, ai.UserMessage("go")) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
 		if v, ok := e.(agent.ToolStart); ok {
-			rec.Record(ctx, v.Turn, "permission.decided",
-				map[string]string{"tool": v.Name, "decision": "permit"})
+			data, err := json.Marshal(map[string]string{"tool": v.Name, "decision": "permit"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rec.Append(ctx, session.Entry{Turn: v.Turn, Type: session.EntryCustom, Custom: &session.Custom{Kind: "permission.decided", Data: data}}); err != nil {
+				t.Fatal(err)
+			}
 		}
-		rec.Handle(ctx, e)
+		rec.RecordAgentEvent(ctx, e)
 	}
 	if err := rec.Err(); err != nil {
 		t.Fatalf("recording: %v", err)
@@ -568,13 +599,18 @@ func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
 	st := store(t)
 
 	a := newAgent(t, nil, aitest.Says("hello"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hi"))
-	rec.Record(ctx, 1, "skill.state.changed", map[string]string{"skill": "review"})
-	rec.Record(ctx, 0, "session.renamed", nil)
+	if err := rec.Append(ctx, session.Entry{Turn: 1, Type: session.EntryCustom, Custom: &session.Custom{Kind: "skill.state.changed", Data: json.RawMessage(`{"skill":"review"}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rec.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &session.Custom{Kind: "session.renamed"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := rec.Err(); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
@@ -590,10 +626,14 @@ func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
 	// And it does not count as an exchange, or resuming would number the next
 	// turn past the end.
 	b := newAgent(t, msgs, aitest.Says("still one exchange in"))
+	if err := rec.Close(); err != nil {
+		t.Fatal(err)
+	}
 	rec2, _, err := session.Open(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rec2.Close() })
 	converse(t, b, rec2, ai.UserMessage("again"))
 
 	var turns []int
@@ -608,41 +648,107 @@ func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
 	}
 }
 
-// The kind is the fact that something happened and the data is the detail.
-// Losing the fact because the detail would not encode is the wrong way round.
-func TestARecordSurvivesAValueThatWillNotEncode(t *testing.T) {
+func TestAppendRejectsMalformedCustomEvents(t *testing.T) {
 	ctx := context.Background()
 	st := store(t)
-
-	rec, _, err := session.Open(ctx, st, "")
+	opened, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec.Record(ctx, 1, "hook.fired", make(chan int)) // channels do not marshal
-	rec.Record(ctx, 1, "", "no kind, no entry")
-	if err := rec.Err(); err != nil {
-		t.Fatalf("recording: %v", err)
-	}
-
-	var kinds []string
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		if e.Type == session.EntryCustom {
-			kinds = append(kinds, e.Custom.Kind)
-			if len(e.Custom.Data) != 0 {
-				t.Errorf("data = %s, want none — it did not encode", e.Custom.Data)
-			}
+	defer func() { _ = opened.Close() }()
+	for _, custom := range []session.Custom{{}, {Kind: "hook.fired", Data: []byte("invalid json")}} {
+		if err := opened.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &custom}); err == nil {
+			t.Fatal("invalid custom event accepted")
 		}
 	}
-	if len(kinds) != 1 || kinds[0] != "hook.fired" {
-		t.Errorf("kinds = %v, want just the one that had a kind", kinds)
+	if err := opened.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &session.Custom{Kind: "hook.fired"}}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := st.Meta(ctx, opened.ID())
+	if err != nil || meta.Entries != 1 {
+		t.Fatalf("invalid events entered the log: %+v, %v", meta, err)
 	}
 }
 
 // messages reads a session's conversation back without recording into it.
 func messages(ctx context.Context, st session.Store, id string) ([]ai.Message, error) {
-	_, msgs, err := session.Open(ctx, st, id)
-	return msgs, err
+	return session.Read(ctx, st, id)
+}
+
+func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
+	for _, create := range []struct {
+		name  string
+		store func(*testing.T) session.Store
+	}{
+		{"memory", func(t *testing.T) session.Store { return &memStore{} }},
+		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
+	} {
+		t.Run(create.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := create.store(t)
+			opened, err := session.Create(ctx, st, session.Meta{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			msg := ai.UserMessage("saved")
+			if err := opened.Append(ctx, session.Entry{Turn: 1, Type: session.EntryMessage, Message: &msg}); err != nil {
+				t.Fatal(err)
+			}
+			if competing, _, err := session.Open(ctx, st, opened.ID()); err == nil {
+				_ = competing.Close()
+				t.Fatal("active session opened twice")
+			}
+			if err := opened.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !errors.Is(opened.Err(), session.ErrClosed) {
+				t.Fatalf("closed session Err: %v", opened.Err())
+			}
+			reopened, history, err := session.Open(ctx, st, opened.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = reopened.Close() }()
+			if len(history) != 1 || history[0].Text() != "saved" {
+				t.Fatal(history)
+			}
+			if err := opened.Append(ctx, session.Entry{Type: session.EntryMessage, Message: &msg}); !errors.Is(err, session.ErrClosed) {
+				t.Fatalf("closed append: %v", err)
+			}
+			opened.RecordAgentEvent(ctx, agent.MessageAdded{Message: ai.UserMessage("late")})
+			if err := opened.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if competing, _, err := session.Open(ctx, st, reopened.ID()); err == nil {
+				_ = competing.Close()
+				t.Fatal("old Close released the newer claim")
+			}
+			meta, err := st.Meta(ctx, reopened.ID())
+			if err != nil || meta.Entries != 1 {
+				t.Fatalf("late event wrote an entry: %+v, %v", meta, err)
+			}
+		})
+	}
+}
+
+func TestOpenFailureReleasesItsClaim(t *testing.T) {
+	ctx := context.Background()
+	st := store(t)
+	meta, err := st.Create(ctx, session.Meta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(ctx, meta.ID, session.Entry{Type: session.EntryMessage}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := session.Open(ctx, st, meta.ID); err == nil {
+		t.Fatal("malformed history opened")
+	}
+	release, err := st.Claim(ctx, meta.ID)
+	if err != nil {
+		t.Fatalf("failed Open leaked claim: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -23,6 +23,7 @@ type memStore struct {
 type held struct {
 	meta    session.Meta
 	entries []session.Entry
+	claimed bool
 }
 
 var _ session.Store = (*memStore)(nil)
@@ -120,7 +121,7 @@ func cloneEntry(e session.Entry) session.Entry {
 		msg.Content = slices.Clone(e.Message.Content)
 		e.Message = &msg
 	}
-	e.Snapshot = slices.Clone(e.Snapshot)
+	e.Messages = slices.Clone(e.Messages)
 	if e.Inference != nil {
 		inf := *e.Inference
 		inf.Tools = slices.Clone(e.Inference.Tools)
@@ -135,4 +136,22 @@ func cloneEntry(e session.Entry) session.Entry {
 		e.Outcome = &out
 	}
 	return e
+}
+
+func (s *memStore) Claim(ctx context.Context, id string) (func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, ok := s.sessions[id]
+	if !ok {
+		return nil, fmt.Errorf("memory: %s: %w", id, session.ErrNotFound)
+	}
+	if held.claimed {
+		return nil, fmt.Errorf("memory: session %s already claimed", id)
+	}
+	held.claimed = true
+	var once sync.Once
+	return func() error { once.Do(func() { s.mu.Lock(); defer s.mu.Unlock(); held.claimed = false }); return nil }, nil
 }

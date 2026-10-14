@@ -18,14 +18,12 @@ type Session struct {
 	store Store
 	id    string
 
-	// turnsBefore is how many exchanges this session already held when it was
-	// opened. The agent counts from one per run; entries are numbered from
-	// the session's beginning.
-	turnsBefore int
+	// turnOffset maps agent-local turn numbers to durable session turn numbers.
+	turnOffset int
 
-	// restored is the conversation Open handed back, held until the agent
-	// announces it, so that resuming does not record a copy of what it read.
-	restored []ai.Message
+	// resumeSnapshot owns the restored messages used to skip the initial replay.
+	// A successful conversation write or matching replacement clears it.
+	resumeSnapshot []ai.Message
 
 	mu      sync.Mutex
 	err     error
@@ -42,28 +40,20 @@ type Session struct {
 // hole in it is not a shorter conversation but a broken one — drop the message
 // carrying a tool call and the results answering it are orphaned — so stopping
 // leaves a prefix that still folds where carrying on would not.
-func (r *Session) RecordEvent(ctx context.Context, e agent.Event) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.err != nil || r.closed {
+func (s *Session) RecordEvent(ctx context.Context, e agent.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil || s.closed {
 		return
 	}
 
 	switch v := e.(type) {
 	case agent.MessageAdded:
 		msg := v.Message
-		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryMessage, Message: &msg})
+		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryMessage, Message: &msg})
 
 	case agent.MessagesReplaced:
-		// The one Open handed over is not news: it was read from here.
-		if r.restored != nil {
-			same := reflect.DeepEqual(r.restored, v.Messages)
-			r.restored = nil
-			if same {
-				return
-			}
-		}
-		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryConversationReplaced, Messages: v.Messages})
+		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryConversationReplaced, Messages: v.Messages})
 
 	case agent.MessageEnd:
 		rec := Inference{Attempt: v.Attempt}
@@ -87,7 +77,7 @@ func (r *Session) RecordEvent(ctx context.Context, e agent.Event) {
 		if v.Err != nil {
 			rec.Error = v.Err.Error()
 		}
-		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryInference, Inference: &rec})
+		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryInference, Inference: &rec})
 
 	case agent.ToolEnd:
 		// The readable part of what the model was told, from the same pair of
@@ -97,31 +87,31 @@ func (r *Session) RecordEvent(ctx context.Context, e agent.Event) {
 			ID: v.ID, Name: v.Name, Args: v.Args,
 			Content: agent.ResultText(v.Result, v.Err), IsError: v.Err != nil,
 		}
-		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryToolRun, ToolRun: &run})
+		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryToolRun, ToolRun: &run})
 
 	case agent.TurnEnd:
 		rec := Outcome{StopReason: v.StopReason, Usage: v.Usage}
 		if v.Err != nil {
 			rec.Err = v.Err.Error()
 		}
-		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryOutcome, Outcome: &rec})
+		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryOutcome, Outcome: &rec})
 	}
 }
 
 // Append persists one typed entry. Turn is relative to the current agent run;
 // the session applies the restored exchange offset exactly once.
-func (r *Session) Append(ctx context.Context, entry Entry) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.appendLocked(ctx, entry)
+func (s *Session) Append(ctx context.Context, entry Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendLocked(ctx, entry)
 }
 
-func (r *Session) appendLocked(ctx context.Context, entry Entry) error {
-	if r.closed {
+func (s *Session) appendLocked(ctx context.Context, entry Entry) error {
+	if s.closed {
 		return ErrClosed
 	}
-	if r.err != nil {
-		return r.err
+	if s.err != nil {
+		return s.err
 	}
 	if !entry.payload() {
 		return fmt.Errorf("session: %q entry has no payload", entry.Type)
@@ -134,13 +124,20 @@ func (r *Session) appendLocked(ctx context.Context, entry Entry) error {
 			return fmt.Errorf("session: custom event data is not valid JSON")
 		}
 	}
-	entry.Turn += r.turnsBefore
+	if entry.Type == EntryConversationReplaced && s.resumeSnapshot != nil && reflect.DeepEqual(s.resumeSnapshot, entry.Messages) {
+		s.resumeSnapshot = nil
+		return nil
+	}
+	entry.Turn += s.turnOffset
 	if entry.At.IsZero() {
 		entry.At = time.Now().UTC()
 	}
-	if err := r.store.Append(ctx, r.id, entry); err != nil {
-		r.err = err
+	if err := s.store.Append(ctx, s.id, entry); err != nil {
+		s.err = err
 		return err
+	}
+	if entry.Type == EntryMessage || entry.Type == EntryConversationReplaced {
+		s.resumeSnapshot = nil
 	}
 	return nil
 }
@@ -148,31 +145,31 @@ func (r *Session) appendLocked(ctx context.Context, entry Entry) error {
 var ErrClosed = errors.New("session: closed")
 
 // Close releases the opened session after any in-flight append.
-func (r *Session) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
+func (s *Session) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
 		return nil
 	}
-	r.closed = true
-	if r.release == nil {
+	s.closed = true
+	if s.release == nil {
 		return nil
 	}
-	return r.release()
+	return s.release()
 }
 
 // Err reports the persistence failure, or ErrClosed after resource retirement.
-func (r *Session) Err() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.err != nil {
-		return r.err
+func (s *Session) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
 	}
-	if r.closed {
+	if s.closed {
 		return ErrClosed
 	}
 	return nil
 }
 
 // ID reports which session this records into.
-func (r *Session) ID() string { return r.id }
+func (s *Session) ID() string { return s.id }

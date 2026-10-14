@@ -15,8 +15,8 @@ import (
 // history — and reading the entries twice to learn it would be reading them
 // twice.
 func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error) {
-	var msgs []ai.Message
-	var turns int
+	var messages []ai.Message
+	var lastTurn int
 	for entry, err := range store.Entries(ctx, id) {
 		if err != nil {
 			return nil, 0, err
@@ -25,18 +25,18 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 			return nil, 0, fmt.Errorf("session: %s entry %d says %q and carries nothing",
 				id, entry.Seq, entry.Type)
 		}
-		turns = max(turns, entry.Turn)
+		lastTurn = max(lastTurn, entry.Turn)
 		switch entry.Type {
 		case EntryConversationReplaced:
-			msgs = slices.Clone(entry.Messages)
+			messages = slices.Clone(entry.Messages)
 		case EntryMessage:
-			msgs = append(msgs, *entry.Message)
+			messages = append(messages, *entry.Message)
 		case EntryOutcome:
 		}
 		// EntryCustom and EntryInference and EntryToolRun are not the
 		// conversation: they explain it. A fold walks past them.
 	}
-	return msgs, turns, nil
+	return messages, lastTurn, nil
 }
 
 // Create starts a new opened session. Close it when its writer is retired.
@@ -58,22 +58,26 @@ func Open(ctx context.Context, store Store, id string) (*Session, []ai.Message, 
 	if err != nil {
 		return nil, nil, err
 	}
-	msgs, turns, err := fold(ctx, store, id)
+	messages, lastTurn, err := fold(ctx, store, id)
 	if err != nil {
 		return nil, nil, errors.Join(err, release())
 	}
 
-	rec := &Session{store: store, id: id, release: release}
+	s := &Session{store: store, id: id, release: release}
 	// The agent numbers turns from one every time it runs, because what came
 	// back from storage was someone else's counting. The session is the one
 	// place that knows both numbers, so it is where they are reconciled —
 	// without which a resumed session holds two exchanges both called turn 1.
-	rec.turnsBefore = turns
+	s.turnOffset = lastTurn
 	// And this is the history the agent is about to be handed. It will
 	// announce it as replaced, correctly and unavoidably; recording it would
 	// write a copy of what was just read, once per resume, forever.
-	rec.restored = msgs
-	return rec, msgs, nil
+	// Own the snapshot so edits to returned history remain visible.
+	s.resumeSnapshot = slices.Clone(messages)
+	for i := range s.resumeSnapshot {
+		s.resumeSnapshot[i].Content = messages[i].Content.Clone()
+	}
+	return s, messages, nil
 }
 
 // Read restores the native conversation without opening a writer lease.

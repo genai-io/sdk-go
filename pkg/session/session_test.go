@@ -39,7 +39,7 @@ func converse(t *testing.T, a *agent.Agent, rec *session.Session, msgs ...ai.Mes
 			if err != nil {
 				t.Fatalf("stream: %v", err)
 			}
-			rec.RecordAgentEvent(ctx, e)
+			rec.RecordEvent(ctx, e)
 		}
 	}
 }
@@ -555,7 +555,7 @@ func TestAnApplicationsOwnEventsInterleaveWithTheLoops(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		rec.RecordAgentEvent(ctx, e)
+		rec.RecordEvent(ctx, e)
 	}
 	if err := rec.Err(); err != nil {
 		t.Fatalf("recording: %v", err)
@@ -715,7 +715,7 @@ func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
 			if err := opened.Append(ctx, session.Entry{Type: session.EntryMessage, Message: &msg}); !errors.Is(err, session.ErrClosed) {
 				t.Fatalf("closed append: %v", err)
 			}
-			opened.RecordAgentEvent(ctx, agent.MessageAdded{Message: ai.UserMessage("late")})
+			opened.RecordEvent(ctx, agent.MessageAdded{Message: ai.UserMessage("late")})
 			if err := opened.Close(); err != nil {
 				t.Fatal(err)
 			}

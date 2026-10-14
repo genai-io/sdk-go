@@ -115,7 +115,7 @@ func main() {
 			// on TurnEnd, below.
 			log.Fatalf("\n%v", err)
 		}
-		rec.RecordAgentEvent(ctx, e)
+		rec.RecordEvent(ctx, e)
 		render(e)
 		switch v := e.(type) {
 		case agent.MessageStart:

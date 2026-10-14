@@ -33,15 +33,16 @@ type Session struct {
 	release func() error
 }
 
-// RecordAgentEvent adapts one native agent event to the shared Append path. Call it from your event loop, in order, before
-// anything slow. The context is the store's: one that is not the local
-// filesystem can block, and this sits on the loop delivering events.
+// RecordEvent adapts a native agent event to the shared Append path. Call it
+// from your event loop, in order, before anything slow. The context is the
+// store's: one that is not the local filesystem can block, and this sits on
+// the loop delivering events.
 //
 // After the first failed write it does nothing, and Err says so. A fold with a
 // hole in it is not a shorter conversation but a broken one — drop the message
 // carrying a tool call and the results answering it are orphaned — so stopping
 // leaves a prefix that still folds where carrying on would not.
-func (r *Session) RecordAgentEvent(ctx context.Context, e agent.Event) {
+func (r *Session) RecordEvent(ctx context.Context, e agent.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil || r.closed {

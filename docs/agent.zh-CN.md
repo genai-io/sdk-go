@@ -389,7 +389,7 @@ defer rec.Close()
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.RecordAgentEvent(ctx, e)   // 先写盘
+    rec.RecordEvent(ctx, e)   // 先写盘
     render(e)       // 再画屏
 }
 ```
@@ -400,7 +400,7 @@ for e, err := range a.Run(ctx, msg) {
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["你的循环"]
     loop --> ui["你的界面"]
-    loop -->|"rec.RecordAgentEvent(ctx, e)"| rec["Session"]
+    loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
@@ -412,7 +412,7 @@ flowchart LR
 
 `Store` 管理多份持久化会话，提供创建、读取、追加、元数据和独占写锁。
 `Session` 是已打开的一份固定身份，在恢复前取得写锁，直到 `Close` 才释放。
-`Append` 写入有类型的记录；`RecordAgentEvent` 只将原生 Agent 事件适配到同一实现。
+`Append` 写入有类型的记录；`RecordEvent` 只将原生 Agent 事件适配到同一实现。
 Agent 自己管理运行和实时原生消息。恢复返回的 `[]ai.Message` 是数据，没有独立生命周期。
 
 `session.Create` 创建新会话；`session.Open` 恢复已有会话；
@@ -463,7 +463,7 @@ err = rec.Append(ctx, session.Entry{
 `Data` 存进去、原样交回来、从不解读:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
 
 `Session.Append` 是有类型记录的统一持久化入口，负责应用恢复后的轮次偏移。
-`RecordAgentEvent` 只把原生 Agent 事件适配到这个入口。无效的自定义数据会返回错误。
+`RecordEvent` 只把原生 Agent 事件适配到这个入口。无效的自定义数据会返回错误。
 
 ### 读出来什么
 

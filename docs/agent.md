@@ -685,7 +685,10 @@ application's sessions stays legible. A fold walks past these: they explain the
 conversation, they are not it.
 
 `Session.Append` is the shared persistence entrance for typed entries. It applies
-the restored turn offset once. `RecordEvent` only adapts native agent events
+the restored turn offset once. Open retains an independent snapshot for suppressing
+the agent's initial unchanged replacement. Editing the returned history is a real
+replacement; any successful conversation append ends this resume deduplication.
+`RecordEvent` only adapts native agent events
 to that entrance. Invalid custom payloads return an error rather than losing data.
 
 ### What is read

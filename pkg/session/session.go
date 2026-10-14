@@ -55,14 +55,6 @@ func (r *Session) RecordEvent(ctx context.Context, e agent.Event) {
 		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryMessage, Message: &msg})
 
 	case agent.MessagesReplaced:
-		// The one Open handed over is not news: it was read from here.
-		if r.restored != nil {
-			same := reflect.DeepEqual(r.restored, v.Messages)
-			r.restored = nil
-			if same {
-				return
-			}
-		}
 		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryConversationReplaced, Messages: v.Messages})
 
 	case agent.MessageEnd:
@@ -134,6 +126,10 @@ func (r *Session) appendLocked(ctx context.Context, entry Entry) error {
 			return fmt.Errorf("session: custom event data is not valid JSON")
 		}
 	}
+	if entry.Type == EntryConversationReplaced && r.restored != nil && reflect.DeepEqual(r.restored, entry.Messages) {
+		r.restored = nil
+		return nil
+	}
 	entry.Turn += r.turnsBefore
 	if entry.At.IsZero() {
 		entry.At = time.Now().UTC()
@@ -141,6 +137,9 @@ func (r *Session) appendLocked(ctx context.Context, entry Entry) error {
 	if err := r.store.Append(ctx, r.id, entry); err != nil {
 		r.err = err
 		return err
+	}
+	if entry.Type == EntryMessage || entry.Type == EntryConversationReplaced {
+		r.restored = nil
 	}
 	return nil
 }

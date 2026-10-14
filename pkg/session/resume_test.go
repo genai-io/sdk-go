@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -39,5 +40,81 @@ func TestResumeContinuesAfterAnIncompleteTurn(t *testing.T) {
 	}
 	if len(entries) != 2 || entries[1].Turn != 4 {
 		t.Fatalf("entries=%+v", entries)
+	}
+}
+
+func TestResumeSnapshotDoesNotAliasReturnedMessages(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprint(nested), func(t *testing.T) {
+			ctx := context.Background()
+			st := jsonlStore(t)
+			s, err := session.Create(ctx, st, session.Meta{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			msg := ai.UserMessage("before")
+			if err := s.Append(ctx, session.Entry{Type: session.EntryMessage, Message: &msg}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			opened, history, err := session.Open(ctx, st, s.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = opened.Close() }()
+			if nested {
+				history[0].Content[0].Text = "edited"
+			} else {
+				history[0] = ai.UserMessage("edited")
+			}
+			opened.RecordEvent(ctx, agent.MessagesReplaced{Turn: 1, Messages: history})
+			if err := opened.Err(); err != nil {
+				t.Fatal(err)
+			}
+			got, err := session.Read(ctx, st, s.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got[0].Text() != "edited" {
+				t.Fatalf("replacement lost: %q", got[0].Text())
+			}
+		})
+	}
+}
+
+func TestResumeDeduplicationEndsAfterAppendingMessage(t *testing.T) {
+	ctx := context.Background()
+	st := jsonlStore(t)
+	s, err := session.Create(ctx, st, session.Meta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := ai.UserMessage("original")
+	if err := s.Append(ctx, session.Entry{Type: session.EntryMessage, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	opened, history, err := session.Open(ctx, st, s.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	msg = ai.UserMessage("discard this")
+	if err := opened.Append(ctx, session.Entry{Type: session.EntryMessage, Message: &msg}); err != nil {
+		t.Fatal(err)
+	}
+	if err := opened.Append(ctx, session.Entry{Type: session.EntryConversationReplaced, Messages: history}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := session.Read(ctx, st, s.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text() != "original" {
+		t.Fatalf("replacement ignored: %+v", got)
 	}
 }

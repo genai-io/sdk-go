@@ -72,7 +72,11 @@ func Open(ctx context.Context, store Store, id string) (*Session, []ai.Message, 
 	// And this is the history the agent is about to be handed. It will
 	// announce it as replaced, correctly and unavoidably; recording it would
 	// write a copy of what was just read, once per resume, forever.
-	rec.restored = msgs
+	// Own the snapshot so edits to returned history remain visible.
+	rec.restored = slices.Clone(msgs)
+	for i := range rec.restored {
+		rec.restored[i].Content = msgs[i].Content.Clone()
+	}
 	return rec, msgs, nil
 }
 

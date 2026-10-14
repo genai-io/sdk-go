@@ -583,7 +583,7 @@ defer rec.Close()
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.RecordAgentEvent(ctx, e)   // write first
+    rec.RecordEvent(ctx, e)   // write first
     render(e)       // then paint
 }
 ```
@@ -595,7 +595,7 @@ the screen that is not in the file.
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["your loop"]
     loop --> ui["your interface"]
-    loop -->|"rec.RecordAgentEvent(ctx, e)"| rec["Session"]
+    loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
@@ -609,7 +609,7 @@ the agent: it is handed a `[]ai.Message` and never learns where it came from.
 `Store` manages persisted sessions and implements create, read, append, metadata,
 and exclusive claims. `Session` is one opened identity: it holds the claim before
 restoration and keeps it until `Close`, including while idle. `Append` writes typed
-entries; `RecordAgentEvent` adapts the native stream to the same implementation.
+entries; `RecordEvent` adapts the native stream to the same implementation.
 `Err` reports a write failure. All later recording stops after a storage failure.
 
 The agent owns its live native messages and execution. The restored `[]ai.Message`
@@ -685,7 +685,7 @@ application's sessions stays legible. A fold walks past these: they explain the
 conversation, they are not it.
 
 `Session.Append` is the shared persistence entrance for typed entries. It applies
-the restored turn offset once. `RecordAgentEvent` only adapts native agent events
+the restored turn offset once. `RecordEvent` only adapts native agent events
 to that entrance. Invalid custom payloads return an error rather than losing data.
 
 ### What is read

@@ -9,7 +9,7 @@
 //	rec, history, _ := session.Open(ctx, store, id)   // restore
 //	defer func() { _ = rec.Close() }()
 //	a.SetMessages(history)                            // seed
-//	rec.RecordAgentEvent(ctx, e)                                     // record, in your loop
+//	rec.RecordEvent(ctx, e)                          // record, in your loop
 //
 // — and nothing more, compaction included: replacing the conversation is an
 // event too, so a session that consumed the stream already knows. See compact
@@ -123,7 +123,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		compact(a, keep)
 	}
 
-	// One loop, and it owns the order: record first, then draw. RecordAgentEvent is
+	// One loop, and it owns the order: record first, then draw. RecordEvent is
 	// synchronous and sits on this goroutine by design — a program that cannot
 	// afford that forwards to a buffer of its own.
 	var end agent.TurnEnd
@@ -133,7 +133,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 			// TurnEnd.
 			return err
 		}
-		rec.RecordAgentEvent(ctx, e)
+		rec.RecordEvent(ctx, e)
 		render(e)
 		if v, ok := e.(agent.TurnEnd); ok {
 			end = v

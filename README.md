@@ -432,6 +432,8 @@ for batch := range myMessages {
 
 `AddMessages` puts something into the turn already running; `Interrupt`, or
 simply breaking out of the range, ends it.
+Queued input enters the conversation before `TurnEnd`, including on failure or
+cancellation, so recording the events and restoring `Messages()` retain it.
 
 ### Everything is an event
 

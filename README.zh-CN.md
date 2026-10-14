@@ -361,6 +361,8 @@ for batch := range myMessages {
 ```
 
 `AddMessages` 把消息塞进**正在跑的那一轮**，`Interrupt`（或者直接 `break` 出 range）结束它。
+即使这一轮失败或被取消，排队的输入也会在 `TurnEnd` 前进入对话，确保事件记录和
+`Messages()` 恢复都保留这些输入。
 
 ### 一切皆事件
 

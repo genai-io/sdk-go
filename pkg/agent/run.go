@@ -731,6 +731,8 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		if out.StopReason == "" {
 			return
 		}
+		// Failed and interrupted turns must leave accepted input in the history too.
+		a.settle(emit)
 		out.Turn = a.turnNow()
 		emit(out)
 	}()

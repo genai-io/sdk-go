@@ -2,7 +2,6 @@ package session_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -45,7 +44,7 @@ func TestResumeContinuesAfterAnIncompleteTurn(t *testing.T) {
 
 func TestResumeSnapshotDoesNotAliasReturnedMessages(t *testing.T) {
 	for _, nested := range []bool{false, true} {
-		t.Run(fmt.Sprint(nested), func(t *testing.T) {
+		t.Run(map[bool]string{false: "replace_message", true: "edit_content"}[nested], func(t *testing.T) {
 			ctx := context.Background()
 			st := jsonlStore(t)
 			s, err := session.Create(ctx, st, session.Meta{})

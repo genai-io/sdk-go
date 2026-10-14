@@ -578,11 +578,12 @@ The agent knows nothing about storage. Recording happens in the application's
 own event loop:
 
 ```go
-rec, history, err := session.Open(ctx, store, resume)   // "" starts a new one
+rec, history, err := session.Open(ctx, store, resume)   // an existing session
+defer rec.Close()
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.Handle(ctx, e)   // write first
+    rec.RecordAgentEvent(ctx, e)   // write first
     render(e)       // then paint
 }
 ```
@@ -594,7 +595,7 @@ the screen that is not in the file.
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["your loop"]
     loop --> ui["your interface"]
-    loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
+    loop -->|"rec.RecordAgentEvent(ctx, e)"| rec["Session"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
@@ -602,6 +603,25 @@ flowchart LR
 
 Solid arrows are the write path, dotted the read path. They meet nowhere inside
 the agent: it is handed a `[]ai.Message` and never learns where it came from.
+
+### Session responsibilities
+
+`Store` manages persisted sessions and implements create, read, append, metadata,
+and exclusive claims. `Session` is one opened identity: it holds the claim before
+restoration and keeps it until `Close`, including while idle. `Append` writes typed
+entries; `RecordAgentEvent` adapts the native stream to the same implementation.
+`Err` reports a write failure. All later recording stops after a storage failure.
+
+The agent owns its live native messages and execution. The restored `[]ai.Message`
+is data handed to the agent, with no independent save method or lifecycle.
+`session.Create` opens a new identity; `session.Open` restores an existing one.
+`session.Read` reads without opening a writer. `session.Open` returns an owned
+Session, so close it before reopening the same identity. Custom stores implement
+`Claim`; the returned release must be idempotent. Raw storage operations are the
+implementation contract and callers must respect session ownership when writing.
+
+There are no `Writer`, `Handle`, `Record`, or callback-factory compatibility aliases.
+Conversation replacements are `EntryConversationReplaced` with native `Messages`.
 
 ### Naming the turns
 
@@ -633,7 +653,7 @@ all.
 | event | entry | why |
 | --- | --- | --- |
 | `MessageAdded` | `message` | the conversation, one message at a time |
-| `MessagesReplaced` | `snapshot` | the conversation, thrown away and replaced |
+| `MessagesReplaced` | `conversation.replaced` | the conversation, thrown away and replaced |
 | `MessageEnd` | `inference` | one model call: what was asked, what it cost |
 | `ToolEnd` | `tool` | one tool execution |
 | `TurnEnd` | `outcome` | how the turn ended, and why |
@@ -649,7 +669,13 @@ permission was granted between the third tool call and the fourth is the fact;
 two logs cannot state it.
 
 ```go
-rec.Record(ctx, turn, "permission.decided", decision)
+data, err := json.Marshal(decision)
+if err != nil { return err }
+err = rec.Append(ctx, session.Entry{
+    Turn: turn,
+    Type: session.EntryCustom,
+    Custom: &session.Custom{Kind: "permission.decided", Data: data},
+})
 ```
 
 `Data` is stored and handed back and never read: the value is yours, and so is
@@ -658,25 +684,24 @@ your vocabulary too — namespace it, so a store holding more than one
 application's sessions stays legible. A fold walks past these: they explain the
 conversation, they are not it.
 
-`Record` is on the `Writer` rather than left to `store.Append`, which you can
-already call, because the turn an entry belongs to is numbered from the
-session's beginning and the offset is the writer's.
+`Session.Append` is the shared persistence entrance for typed entries. It applies
+the restored turn offset once. `RecordAgentEvent` only adapts native agent events
+to that entrance. Invalid custom payloads return an error rather than losing data.
 
 ### What is read
 
-Restoring folds the entries back. Messages append; **a snapshot starts the fold
-over**, because everything announced before one is what the agent discarded:
+Restoring folds the entries back. Messages append; **a conversation replacement starts the fold over**, because everything announced before one is what the agent discarded:
 
 ```
 seq   1         2         3          4         5         6
-      message   message   snapshot   message   message   outcome
+      message   message   conversation.replaced   message   message   outcome
                           ▲
                           └─ the fold starts here. 1 and 2 are gone:
                              reading them back would hand the agent
                              the history compaction just removed.
 ```
 
-Entries other than `message` and `snapshot` are not read to restore — they are
+Entries other than `message` and `conversation.replaced` are not read to restore — they are
 there to explain and to bill. The turn number on each is the session's own, not
 the agent's: an agent counts from one on every run, and `session.Open` adds what
 the session already held so the two agree.
@@ -685,7 +710,7 @@ the session already held so the two agree.
 history, and a fold over `MessageAdded` alone would hand back what was thrown
 away. So `SetMessages` is announced — as `MessagesReplaced`, at the start of
 the next exchange, which is when the agent next has anywhere to say it — and
-the writer stores it as the point a fold starts from:
+the opened session stores it as the point a fold starts from:
 
 ```go
 summary := compact(a.Messages())
@@ -697,10 +722,11 @@ than at the call means a process that dies between the two restores the
 conversation as it stood before compaction — which is a lost optimisation, not
 a broken history.
 
-`Store` is four methods, and deliberately no more:
+`Store` supplies the persistence and ownership operations:
 
 ```go
 type Store interface {
+    Claim(ctx context.Context, id string) (func() error, error)
     Create(ctx context.Context, meta Meta) (Meta, error)
     Append(ctx context.Context, id string, entries ...Entry) error
     Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
@@ -713,13 +739,12 @@ store it chose — `jsonl.Store` adds `List`, and a session is a directory the
 application can copy or remove. An interface only has to name what this package
 calls.
 
-The JSONL store holds no open resources between calls. Each append locks its
-session file, reads the last committed sequence, serializes the batch, and writes
-it before releasing the lock. `Meta` and `List` derive counts and event timestamps
-from the log, independently of filesystem timestamp precision; no `Close` or deferred metadata flush is needed. A torn final
-fragment is repaired before append, while a complete record without a newline
-is retained. An invalid terminated record is an error. Appends are visible after
-returning; the store does not promise power-loss durability via `fsync`.
+An opened Session holds a `.session.lock` across restoration and all appends.
+Each JSONL append also locks `.lock` while assigning sequence numbers and syncing
+the batch to disk. Close releases the ownership claim; the Store remains reusable.
+Meta and List derive counts and event timestamps from the log. No deferred metadata
+flush is needed. A torn final fragment is repaired before append; a complete record
+without a newline is retained. An invalid terminated record is an error.
 
 ## Package layout
 
@@ -734,7 +759,7 @@ pkg/agent/
 pkg/session/  events → durable entries, and back
   entry.go    native message and audit entry contracts
   store.go    persistence interface
-  writer.go   event handler
+  session.go   event handler
   restore.go  resume fold
   jsonl/      filesystem store, a directory per session
 ```

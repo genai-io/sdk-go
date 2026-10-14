@@ -91,10 +91,17 @@ func main() {
 	if list, err := store.List(ctx); err == nil && len(list) > 0 {
 		resume = list[0].ID
 	}
-	rec, history, err := session.Open(ctx, store, resume)
+	var rec *session.Session
+	var history []ai.Message
+	if resume == "" {
+		rec, err = session.Create(ctx, store, session.Meta{})
+	} else {
+		rec, history, err = session.Open(ctx, store, resume)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() { _ = rec.Close() }()
 	a.SetMessages(history)
 
 	// One loop, and it owns the order: record first, then paint. A longer
@@ -108,7 +115,7 @@ func main() {
 			// on TurnEnd, below.
 			log.Fatalf("\n%v", err)
 		}
-		rec.Handle(ctx, e)
+		rec.RecordAgentEvent(ctx, e)
 		render(e)
 		switch v := e.(type) {
 		case agent.MessageStart:

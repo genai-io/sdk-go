@@ -20,10 +20,11 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 	ctx := context.Background()
 
 	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"), aitest.Says("three"))
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
 
 	summary := []ai.Message{ai.UserMessage("(summary of the above)")}
@@ -68,10 +69,11 @@ func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("go"))
 
 	restored, err := messages(ctx, st, rec.ID())
@@ -114,10 +116,11 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	rec, _, err := session.Open(ctx, st, "")
+	rec, err := session.Create(ctx, st, session.Meta{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("go"))
 
 	var snapshot, after int
@@ -127,7 +130,7 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 			t.Fatalf("Entries: %v", err)
 		}
 		switch {
-		case e.Type == session.EntrySnapshot:
+		case e.Type == session.EntryConversationReplaced:
 			snapshot = int(e.Seq)
 		case e.Type == session.EntryMessage && snapshot >= 0:
 			after++
@@ -167,21 +170,26 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 			st := impl.open(t)
 			ctx := context.Background()
 
-			rec, history, err := session.Open(ctx, st, "")
+			rec, err := session.Create(ctx, st, session.Meta{})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
+			t.Cleanup(func() { _ = rec.Close() })
 			first := newAgent(t, nil, aitest.Says("hello"))
-			first.SetMessages(history) // what the examples do, verbatim
+			first.SetMessages(nil) // a new session has no prior conversation
 			converse(t, first, rec, ai.UserMessage("hi"))
 			if err := rec.Err(); err != nil {
 				t.Fatalf("recording failed: %v", err)
 			}
 
+			if err := rec.Close(); err != nil {
+				t.Fatal(err)
+			}
 			rec2, restored, err := session.Open(ctx, st, rec.ID())
 			if err != nil {
 				t.Fatalf("the session the first run wrote will not reopen: %v", err)
 			}
+			t.Cleanup(func() { _ = rec2.Close() })
 			if len(restored) != 2 {
 				t.Fatalf("restored %d messages, want the 2 that were recorded", len(restored))
 			}
@@ -217,10 +225,11 @@ func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 			ctx := context.Background()
 
 			a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
-			rec, _, err := session.Open(ctx, st, "")
+			rec, err := session.Create(ctx, st, session.Meta{})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
+			t.Cleanup(func() { _ = rec.Close() })
 			converse(t, a, rec, ai.UserMessage("first"))
 
 			a.SetMessages(nil)

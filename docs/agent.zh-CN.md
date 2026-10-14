@@ -384,11 +384,12 @@ a, err := agent.New(client, agent.WithTools(tools...))
 **agent 完全不知道存储这回事。** 记录发生在应用自己的事件循环里:
 
 ```go
-rec, history, err := session.Open(ctx, store, resume)   // "" 表示新开一个
+rec, history, err := session.Open(ctx, store, resume)   // 恢复已有会话
+defer rec.Close()
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.Handle(ctx, e)   // 先写盘
+    rec.RecordAgentEvent(ctx, e)   // 先写盘
     render(e)       // 再画屏
 }
 ```
@@ -399,13 +400,26 @@ for e, err := range a.Run(ctx, msg) {
 flowchart LR
     agent(["agent"]) -->|"Event"| loop["你的循环"]
     loop --> ui["你的界面"]
-    loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
+    loop -->|"rec.RecordAgentEvent(ctx, e)"| rec["Session"]
     rec -->|"Entry"| store[("Store")]
     store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
 ```
 
 实线是写路径,虚线是读路径。**两条路在 agent 内部没有任何交点**:它拿到的只是一个 `[]ai.Message`,从头到尾不知道它从哪来。
+
+### 会话职责
+
+`Store` 管理多份持久化会话，提供创建、读取、追加、元数据和独占写锁。
+`Session` 是已打开的一份固定身份，在恢复前取得写锁，直到 `Close` 才释放。
+`Append` 写入有类型的记录；`RecordAgentEvent` 只将原生 Agent 事件适配到同一实现。
+Agent 自己管理运行和实时原生消息。恢复返回的 `[]ai.Message` 是数据，没有独立生命周期。
+
+`session.Create` 创建新会话；`session.Open` 恢复已有会话；
+`session.Read` 是普通读取；`session.Open` 返回需要关闭的会话。恢复同一 ID 前先关闭
+旧句柄。自定义 Store 必须实现 `Claim`，释放函数必须幂等。底层存储操作属于实现约定，
+写入时必须遵守会话所有权。`Writer`、`Handle`、`Record` 和回调工厂均无兼容别名。
+对话替换明确命名为 `EntryConversationReplaced`，载荷保留原生 `Messages`。
 
 ### 给每一轮起名字
 
@@ -426,7 +440,7 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 | 事件 | 记录 | 为什么 |
 | --- | --- | --- |
 | `MessageAdded` | `message` | 对话,一次一条 |
-| `MessagesReplaced` | `snapshot` | 对话被整体扔掉换了一份 |
+| `MessagesReplaced` | `conversation.replaced` | 对话被整体扔掉换了一份 |
 | `MessageEnd` | `inference` | 一次模型调用:问了什么、花了多少 |
 | `ToolEnd` | `tool` | 一次工具执行 |
 | `TurnEnd` | `outcome` | 这一轮怎么结束的,以及为什么 |
@@ -437,29 +451,36 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 上面那五种条目,是 agent 循环产生的东西。应用有它**自己的**事件也该记在旁边——一次权限的询问与回答、一个 hook 触发了、有人中途加了个工具——而它们值得记在这里而不是另起一条日志,原因是**顺序**:「权限是在第三次工具调用和第四次之间批的」这件事,两条日志说不出来。
 
 ```go
-rec.Record(ctx, turn, "permission.decided", decision)
+data, err := json.Marshal(decision)
+if err != nil { return err }
+err = rec.Append(ctx, session.Entry{
+    Turn: turn,
+    Type: session.EntryCustom,
+    Custom: &session.Custom{Kind: "permission.decided", Data: data},
+})
 ```
 
 `Data` 存进去、原样交回来、从不解读:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
 
-`Record` 放在 `Writer` 上,而不是让你直接 `store.Append`(你本来就能调),因为条目属于第几轮是**从会话开头**数的,而那个偏移量在 writer 手里。
+`Session.Append` 是有类型记录的统一持久化入口，负责应用恢复后的轮次偏移。
+`RecordAgentEvent` 只把原生 Agent 事件适配到这个入口。无效的自定义数据会返回错误。
 
 ### 读出来什么
 
-恢复就是把这些记录折回去。消息往后追加,**遇到 snapshot 则从头开始折**——因为在它之前播报过的一切,都是 agent 已经丢弃的:
+恢复就是把这些记录折回去。消息往后追加,**遇到 conversation.replaced 则从头开始折**——因为在它之前播报过的一切,都是 agent 已经丢弃的:
 
 ```
 seq   1         2         3          4         5         6
-      message   message   snapshot   message   message   outcome
+      message   message   conversation.replaced   message   message   outcome
                           ▲
                           └─ 折叠从这里开始。1 和 2 已经没了:
                              把它们读回来,等于把压缩掉的历史
                              又塞回给 agent。
 ```
 
-除 `message` 和 `snapshot` 之外的记录**不参与恢复** —— 它们是用来解释和计费的。每条上面的轮次号是**会话自己的**,不是 agent 的:agent 每次运行都从 1 开始数,`session.Open` 把会话已有的轮数加上去,两边才对得齐。
+除 `message` 和 `conversation.replaced` 之外的记录**不参与恢复** —— 它们是用来解释和计费的。每条上面的轮次号是**会话自己的**,不是 agent 的:agent 每次运行都从 1 开始数,`session.Open` 把会话已有的轮数加上去,两边才对得齐。
 
-**换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——writer 把它存成折叠的新起点:
+**换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——opened session 把它存成折叠的新起点:
 
 ```go
 summary := compact(a.Messages())
@@ -468,10 +489,11 @@ a.SetMessages(summary)   // 就这一行
 
 **没有第二行可以忘。** 之所以推迟到下一轮而不是当场播报:进程如果死在这两者之间,恢复出来的是压缩前的那份对话——那是丢了一次优化,不是坏了一段历史。
 
-`Store` 只有四个方法,而且是刻意的:
+`Store` 提供持久化与所有权操作:
 
 ```go
 type Store interface {
+    Claim(ctx context.Context, id string) (func() error, error)
     Create(ctx context.Context, meta Meta) (Meta, error)
     Append(ctx context.Context, id string, entries ...Entry) error
     Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
@@ -481,7 +503,10 @@ type Store interface {
 
 列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,`jsonl.Store` 多给了一个 `List`,一个会话就是一个目录,复制、删除都由应用自己来。**接口只需要写出这个包自己会调的东西。**
 
-JSONL store 在调用之间不持有文件资源。每次追加在会话文件锁内读取日志末尾的序号、序列化整批条目、写入并释放锁，因此多个实例或进程不会分配重复序号。`Meta` 和 `List` 从日志条目读取数量和事件时间，不依赖文件修改时间的精度，不需要 `Close` 或退出时刷新元数据。追加前会修复末尾未完成的片段，缺少换行的完整条目会保留；已经换行但损坏的条目会报错。返回后写入可见，但没有通过 `fsync` 承诺断电持久性。
+已打开的 Session 在恢复和后续写入期间一直持有 `.session.lock`，直到 Close。
+每次 JSONL 追加还会取得 `.lock`，分配序号并同步整批记录到磁盘。Store 可以继续复用。
+Meta 与 List 从日志读取数量和事件时间，不需要退出时再刷新元数据。末尾未完成片段会
+在追加前修复；缺少换行的完整条目会保留；已经换行但损坏的条目会报错。
 
 ## 包结构
 
@@ -496,7 +521,7 @@ pkg/agent/
 pkg/session/  事件 → 持久条目,以及折回来
   entry.go    原生消息和审计条目
   store.go    持久化接口
-  writer.go   事件写入
+  session.go   事件写入
   restore.go  恢复会话
   jsonl/      文件系统 store,一个会话一个目录
 ```

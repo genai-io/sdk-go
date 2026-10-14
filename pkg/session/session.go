@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -11,13 +13,8 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Writer turns an agent's events into stored entries.
-//
-// It holds no state machine. Every event says which turn it belongs to and
-// carries what opened it, so recording one is a translation and not a
-// reconstruction — which is also why Handle must not be called concurrently
-// for a session and needs no lock to say so.
-type Writer struct {
+// Session is one opened durable identity. It owns its write lease until Close.
+type Session struct {
 	store Store
 	id    string
 
@@ -30,18 +27,13 @@ type Writer struct {
 	// announces it, so that resuming does not record a copy of what it read.
 	restored []ai.Message
 
-	mu  sync.Mutex
-	err error
+	mu      sync.Mutex
+	err     error
+	closed  bool
+	release func() error
 }
 
-// newWriter returns a Writer writing into one session. Unexported because
-// Open is the way in: without what Open read back it would number turns from
-// one again and re-record the history it was resumed from.
-func newWriter(store Store, id string) *Writer {
-	return &Writer{store: store, id: id}
-}
-
-// Handle records one event. Call it from your event loop, in order, before
+// RecordAgentEvent adapts one native agent event to the shared Append path. Call it from your event loop, in order, before
 // anything slow. The context is the store's: one that is not the local
 // filesystem can block, and this sits on the loop delivering events.
 //
@@ -49,15 +41,17 @@ func newWriter(store Store, id string) *Writer {
 // hole in it is not a shorter conversation but a broken one — drop the message
 // carrying a tool call and the results answering it are orphaned — so stopping
 // leaves a prefix that still folds where carrying on would not.
-func (r *Writer) Handle(ctx context.Context, e agent.Event) {
-	if r.Err() != nil {
+func (r *Session) RecordAgentEvent(ctx context.Context, e agent.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil || r.closed {
 		return
 	}
 
 	switch v := e.(type) {
 	case agent.MessageAdded:
 		msg := v.Message
-		r.write(ctx, v.Turn, Entry{Type: EntryMessage, Message: &msg})
+		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryMessage, Message: &msg})
 
 	case agent.MessagesReplaced:
 		// The one Open handed over is not news: it was read from here.
@@ -68,7 +62,7 @@ func (r *Writer) Handle(ctx context.Context, e agent.Event) {
 				return
 			}
 		}
-		r.write(ctx, v.Turn, Entry{Type: EntrySnapshot, Snapshot: v.Messages})
+		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryConversationReplaced, Messages: v.Messages})
 
 	case agent.MessageEnd:
 		rec := Inference{Attempt: v.Attempt}
@@ -92,7 +86,7 @@ func (r *Writer) Handle(ctx context.Context, e agent.Event) {
 		if v.Err != nil {
 			rec.Error = v.Err.Error()
 		}
-		r.write(ctx, v.Turn, Entry{Type: EntryInference, Inference: &rec})
+		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryInference, Inference: &rec})
 
 	case agent.ToolEnd:
 		// The readable part of what the model was told, from the same pair of
@@ -102,56 +96,82 @@ func (r *Writer) Handle(ctx context.Context, e agent.Event) {
 			ID: v.ID, Name: v.Name, Args: v.Args,
 			Content: agent.ResultText(v.Result, v.Err), IsError: v.Err != nil,
 		}
-		r.write(ctx, v.Turn, Entry{Type: EntryToolRun, ToolRun: &run})
+		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryToolRun, ToolRun: &run})
 
 	case agent.TurnEnd:
 		rec := Outcome{StopReason: v.StopReason, Usage: v.Usage}
 		if v.Err != nil {
 			rec.Err = v.Err.Error()
 		}
-		r.write(ctx, v.Turn, Entry{Type: EntryOutcome, Outcome: &rec})
+		_ = r.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryOutcome, Outcome: &rec})
 	}
 }
 
-// Record stores an application's own event in this session's log, in order with
-// the loop's. See [Custom].
-//
-// turn is the exchange it happened in, or zero for something between them. A
-// value that will not marshal is dropped and the entry still written; one with
-// no kind is not written at all.
-func (r *Writer) Record(ctx context.Context, turn int, kind string, v any) {
-	if r.Err() != nil || kind == "" {
-		return
-	}
-	rec := Custom{Kind: kind}
-	if raw, err := json.Marshal(v); err == nil && string(raw) != "null" {
-		rec.Data = raw
-	}
-	r.write(ctx, turn, Entry{Type: EntryCustom, Custom: &rec})
-}
-
-// Err reports the write that stopped recording, if one did.
-func (r *Writer) Err() error {
+// Append persists one typed entry. Turn is relative to the current agent run;
+// the session applies the restored exchange offset exactly once.
+func (r *Session) Append(ctx context.Context, entry Entry) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.err
+	return r.appendLocked(ctx, entry)
 }
 
-// write stores one entry, stamping the turn it belongs to and when the agent
-// said it, rather than when a slow store got round to it. The agent numbers
-// turns from one on every run; that mapping happens here, once, rather than at
-// each of the five call sites where forgetting it would be silent.
-func (r *Writer) write(ctx context.Context, turn int, e Entry) {
-	e.Turn = r.turnsBefore + turn
-	e.At = time.Now().UTC()
-	if err := r.store.Append(ctx, r.id, e); err != nil {
-		r.mu.Lock()
-		if r.err == nil {
-			r.err = err
-		}
-		r.mu.Unlock()
+func (r *Session) appendLocked(ctx context.Context, entry Entry) error {
+	if r.closed {
+		return ErrClosed
 	}
+	if r.err != nil {
+		return r.err
+	}
+	if !entry.payload() {
+		return fmt.Errorf("session: %q entry has no payload", entry.Type)
+	}
+	if entry.Type == EntryCustom {
+		if entry.Custom.Kind == "" {
+			return fmt.Errorf("session: custom event kind is required")
+		}
+		if len(entry.Custom.Data) > 0 && !json.Valid(entry.Custom.Data) {
+			return fmt.Errorf("session: custom event data is not valid JSON")
+		}
+	}
+	entry.Turn += r.turnsBefore
+	if entry.At.IsZero() {
+		entry.At = time.Now().UTC()
+	}
+	if err := r.store.Append(ctx, r.id, entry); err != nil {
+		r.err = err
+		return err
+	}
+	return nil
+}
+
+var ErrClosed = errors.New("session: closed")
+
+// Close releases the opened session after any in-flight append.
+func (r *Session) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	if r.release == nil {
+		return nil
+	}
+	return r.release()
+}
+
+// Err reports the persistence failure, or ErrClosed after resource retirement.
+func (r *Session) Err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return r.err
+	}
+	if r.closed {
+		return ErrClosed
+	}
+	return nil
 }
 
 // ID reports which session this records into.
-func (r *Writer) ID() string { return r.id }
+func (r *Session) ID() string { return r.id }

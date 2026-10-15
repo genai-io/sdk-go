@@ -10,7 +10,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/session"
-	"github.com/genai-io/sdk-go/pkg/session/jsonfile"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 )
 
 // memStore is the second implementation of session.Store, which is what keeps
@@ -61,8 +61,8 @@ func TestStoreContract(t *testing.T) {
 		open func(*testing.T) session.Store
 	}{
 		{"memory", func(*testing.T) session.Store { return &memStore{} }},
-		{"jsonfile", func(t *testing.T) session.Store {
-			s, err := jsonfile.Open(t.TempDir())
+		{"jsonl", func(t *testing.T) session.Store {
+			s, err := jsonl.Open(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}

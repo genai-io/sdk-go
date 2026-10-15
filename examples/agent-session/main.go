@@ -34,7 +34,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
 	"github.com/genai-io/sdk-go/pkg/session"
-	"github.com/genai-io/sdk-go/pkg/session/jsonfile"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -58,7 +58,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	ctx := context.Background()
 
 	// A store is a directory, one file per conversation.
-	store, err := jsonfile.Open(dir)
+	store, err := jsonl.Open(dir)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func compact(a *agent.Agent, keep int) {
 	fmt.Printf("\033[2mcompacted %d messages to %d\033[0m\n", len(msgs), len(kept))
 }
 
-func listSessions(ctx context.Context, store *jsonfile.Store) error {
+func listSessions(ctx context.Context, store *jsonl.Store) error {
 	sessions, err := store.List(ctx)
 	if err != nil {
 		return err

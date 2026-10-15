@@ -593,7 +593,8 @@ When to save is yours. After each `Run` is the usual answer. A program that
 must not lose a long run of tools to a crash saves on every `MessageAdded`,
 at the cost of writing the conversation each time.
 
-`jsonfile.Store` keeps one file per session, `<id>.json`, and writes each save
+`jsonl.Store` keeps one file per session, `<id>.jsonl`, one message per line,
+and writes each save
 beside the old one before renaming it into place, so a crash leaves one or the
 other and never half of either. `List` returns the sessions newest first.
 Renaming, forking and deleting a session are file operations on that
@@ -637,7 +638,7 @@ pkg/agent/
   mcp/         an MCP server's tools, as this package's own
 pkg/session/  Save and Load a conversation
   store.go    the Store interface
-  jsonfile/   a Store as one JSON file per session
+  jsonl/      a Store as one file per session, one message per line
 ```
 
 ## What it does not do

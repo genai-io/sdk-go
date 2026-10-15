@@ -1,11 +1,14 @@
-// Package jsonfile keeps sessions on the filesystem, one JSON file per session.
-package jsonfile
+// Package jsonl keeps sessions on the filesystem: one file per session, one
+// message per line.
+package jsonl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,7 +20,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/session"
 )
 
-const ext = ".json"
+const ext = ".jsonl"
 
 // Store keeps sessions in a directory.
 type Store struct{ root string }
@@ -27,7 +30,7 @@ var _ session.Store = (*Store)(nil)
 // Open returns a store rooted at dir, creating it if needed.
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("jsonfile: creating %s: %w", dir, err)
+		return nil, fmt.Errorf("jsonl: creating %s: %w", dir, err)
 	}
 	return &Store{root: dir}, nil
 }
@@ -42,16 +45,19 @@ func (s *Store) Save(ctx context.Context, id string, msgs []ai.Message) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(msgs)
-	if err != nil {
-		return fmt.Errorf("jsonfile: encoding %s: %w", id, err)
+	var data bytes.Buffer
+	enc := json.NewEncoder(&data)
+	for _, m := range msgs {
+		if err := enc.Encode(m); err != nil {
+			return fmt.Errorf("jsonl: encoding %s: %w", id, err)
+		}
 	}
 	tmp, err := os.CreateTemp(s.root, ".save-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }() // already renamed away on success
-	_, err = tmp.Write(data)
+	_, err = tmp.Write(data.Bytes())
 	if err == nil {
 		err = tmp.Sync()
 	}
@@ -70,18 +76,24 @@ func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("jsonfile: %s: %w", id, session.ErrNotFound)
+		return nil, fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = f.Close() }() // read-only
 	var msgs []ai.Message
-	if err := json.Unmarshal(data, &msgs); err != nil {
-		return nil, fmt.Errorf("jsonfile: reading %s: %w", id, err)
+	for dec := json.NewDecoder(f); ; {
+		var m ai.Message
+		if err := dec.Decode(&m); err == io.EOF {
+			return msgs, nil
+		} else if err != nil {
+			return nil, fmt.Errorf("jsonl: reading %s: %w", id, err)
+		}
+		msgs = append(msgs, m)
 	}
-	return msgs, nil
 }
 
 // Session is a saved session as List reports it.
@@ -119,7 +131,7 @@ func (s *Store) List(ctx context.Context) ([]Session, error) {
 // is not a plain file name is refused rather than joined onto the root.
 func (s *Store) path(id string) (string, error) {
 	if id == "" || strings.HasPrefix(id, ".") || strings.ContainsAny(id, `/\`) {
-		return "", fmt.Errorf("jsonfile: %q is not a session id", id)
+		return "", fmt.Errorf("jsonl: %q is not a session id", id)
 	}
 	return filepath.Join(s.root, id+ext), nil
 }

@@ -1,27 +1,28 @@
-package jsonfile_test
+package jsonl_test
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/session/jsonfile"
+	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 )
 
-func open(t *testing.T, dir string) *jsonfile.Store {
+func open(t *testing.T, dir string) *jsonl.Store {
 	t.Helper()
-	s, err := jsonfile.Open(dir)
+	s, err := jsonl.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s
 }
 
-func save(t *testing.T, s *jsonfile.Store, id string) {
+func save(t *testing.T, s *jsonl.Store, id string) {
 	t.Helper()
 	if err := s.Save(context.Background(), id, []ai.Message{ai.UserMessage(id)}); err != nil {
 		t.Fatal(err)
@@ -36,7 +37,7 @@ func TestListIsNewestFirst(t *testing.T) {
 	save(t, first, "older")
 	save(t, first, "newer")
 	past := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(filepath.Join(dir, "older.json"), past, past); err != nil {
+	if err := os.Chtimes(filepath.Join(dir, "older.jsonl"), past, past); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,7 +72,25 @@ func TestAnIdThatIsNotOneIsRefused(t *testing.T) {
 			}
 		})
 	}
-	if _, err := os.Stat(filepath.Join(root, "beside.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "beside.jsonl")); !os.IsNotExist(err) {
 		t.Errorf("a file outside the store was written: %v", err)
+	}
+}
+
+// One message per line is the format: a session can be tailed, grepped and
+// counted with the tools that read lines.
+func TestEachMessageIsOneLine(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	msgs := []ai.Message{ai.UserMessage("one\ntwo"), ai.UserMessage("three")}
+	if err := s.Save(context.Background(), "s", msgs); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "s.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); len(lines) != 2 {
+		t.Errorf("%d lines for 2 messages:\n%s", len(lines), data)
 	}
 }

@@ -11,12 +11,19 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
-- Move session persistence to `pkg/session` and `pkg/session/jsonl`.
-  Rename `session.Recorder` to `session.Writer`. Update imports and type names;
-  the old package and aliases are removed.
-- JSONL stores serialize appends across store instances and processes. Sequence
-  numbers and listing counts come from the log, with no shutdown flush or
-  `Store.Close` required.
+- **Sessions persist the conversation and nothing else**, and move to
+  `pkg/session` and `pkg/session/jsonl`. Update imports.
+  - `session.Open(ctx, store, "")` is now `session.Create(ctx, store)`.
+    `session.Open` restores an existing session. Both return a `*Session` that
+    is the session's only writer until `Close`.
+  - `Recorder.Handle` is `Session.RecordEvent`. It writes `MessageAdded` and
+    `MessagesReplaced`, and ignores every other event.
+  - An `Entry` is `At`, `Type` and `Messages`. A message entry carries its
+    message in `Messages`.
+  - `Store` is `Create(ctx) (id, error)`, `Claim`, `Append(ctx, id, entry)` and
+    `Entries`. Only the claim holder appends.
+  - `jsonl.Store.List` returns `jsonl.Meta{ID, UpdatedAt}`, read from the log.
+    There is no `meta.json`, no `Close`, and no flush.
 
 ### Removed
 
@@ -41,7 +48,11 @@ Each such change is listed under **Changed** with what to write instead.
 - `mcp.Client.Resources`, `Prompts` and `Alive`, the `Resource` and `Prompt`
   types, `Server.SSE`, and `mcp.Option`; set `Server.OnToolsChanged`.
 - `agent.Agent.System`.
-- `session.Read`, `Meta.Created`, `ByRecency`, and `Meta` from `session.Store`.
+- From sessions: the `inference`, `tool`, `outcome` and `custom` entries
+  (`Inference`, `ToolRun`, `Outcome`, `Custom`, `Recorder.Record`), `Entry.Seq`,
+  `Entry.Turn`, `Entry.Stamped`, `session.Meta`, `Meta.Created`, `ByRecency`,
+  `session.Read`, and `Store.Meta`. Read cost and outcome from `MessageEnd` and
+  `TurnEnd` in your event loop, and keep them with your own records.
 - `ai.ProtocolOptions`, `ai.WithProtocolOptions`, `ai.ProtocolOptionsAs`,
   `ai.RejectProtocolOptions`, `Request.ProtocolOptions`, `anthropic.Options` and
   `responses.Options`. Send an `anthropic-beta` header through `Config.Headers`;
@@ -53,14 +64,13 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Fixed
 
-- Session recency comes from the last logged event timestamp, so coarse
-  filesystem modification times cannot put a recently active session behind
-  a newer empty session.
-
-- Resumed sessions continue after incomplete turns without reusing turn numbers.
-- Complete final records missing a newline survive the next append; terminated
-  corrupt records are reported instead of hidden.
-- Failed batch encoding does not append a partial batch or consume sequence numbers.
+- Session recency comes from the last logged entry's time, so a coarse
+  filesystem mtime cannot put a recently active session behind a newer empty one.
+- Claiming a JSONL session repairs what a crash left at the end of its log:
+  a torn record is cut, and a complete one missing its newline keeps it. A
+  corrupt record anywhere else is reported instead of hidden.
+- Restoring a session with an entry type it does not know is an error rather
+  than a conversation with part of the log silently left out.
 
 ## [0.8.0] - 2026-10-01
 

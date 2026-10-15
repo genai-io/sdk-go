@@ -1,5 +1,5 @@
 // Command agent is a coding-assistant loop in about eighty lines: a model, one
-// tool, a system prompt, and a session that survives the process.
+// tool, a system prompt, and a gate on what it may run.
 //
 //	export ANTHROPIC_API_KEY=...
 //	go run ./examples/agent "how many Go files are in this directory?"
@@ -11,15 +11,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
-	"github.com/genai-io/sdk-go/pkg/session"
-	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/anthropic"
 )
@@ -79,34 +76,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	store, err := jsonl.Open(filepath.Join(os.TempDir(), "agent-example-sessions"))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Resume the most recent session, or start one. What comes back is the
-	// history to seed the agent with — the agent itself knows nothing about
-	// storage.
-	var resume string
-	if list, err := store.List(ctx); err == nil && len(list) > 0 {
-		resume = list[0].ID
-	}
-	var rec *session.Session
-	var history []ai.Message
-	if resume == "" {
-		rec, err = session.Create(ctx, store, session.Meta{})
-	} else {
-		rec, history, err = session.Open(ctx, store, resume)
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() { _ = rec.Close() }()
-	a.SetMessages(history)
-
-	// One loop, and it owns the order: record first, then paint. A longer
-	// programme would run this on its own goroutine and forward to a buffer
-	// of its own; a one-shot has nothing else to do.
+	// One loop. A longer programme would run this on its own goroutine and
+	// forward to a buffer of its own; a one-shot has nothing else to do.
 	var last agent.TurnEnd
 	steps := 0
 	for e, err := range a.Run(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
@@ -115,7 +86,6 @@ func main() {
 			// on TurnEnd, below.
 			log.Fatalf("\n%v", err)
 		}
-		rec.RecordEvent(ctx, e)
 		render(e)
 		switch v := e.(type) {
 		case agent.MessageStart:
@@ -127,13 +97,10 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n\n— %s · %d steps · %d tokens · session %s\n",
-		last.StopReason, steps, last.Usage.Total(), rec.ID())
+	fmt.Printf("\n\n— %s · %d steps · %d tokens\n",
+		last.StopReason, steps, last.Usage.Total())
 	if last.Err != nil {
 		fmt.Fprintf(os.Stderr, "the exchange failed: %v\n", last.Err)
-	}
-	if err := rec.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "session was not fully written: %v\n", err)
 	}
 }
 

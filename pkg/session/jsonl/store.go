@@ -1,8 +1,9 @@
-// Package jsonl stores sessions on the filesystem: a directory per session,
-// metadata in one file and entries in another, one JSON object per line.
+// Package jsonl stores sessions on the filesystem: a directory per session
+// holding its entries, one JSON object per line.
 package jsonl
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -10,24 +11,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"iter"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/session"
 )
 
 const (
-	metaFile    = "meta.json"
 	entriesFile = "entries.jsonl"
+	lockFile    = ".lock"
 )
 
 // Store is a session store rooted at a directory.
 type Store struct{ root string }
+
+var _ session.Store = (*Store)(nil)
 
 // Open returns a store rooted at dir, creating it if needed.
 func Open(dir string) (*Store, error) {
@@ -37,206 +41,19 @@ func Open(dir string) (*Store, error) {
 	return &Store{root: dir}, nil
 }
 
-var _ session.Store = (*Store)(nil)
-
-// Create starts a session, assigning an id when none was given.
-func (s *Store) Create(ctx context.Context, meta session.Meta) (session.Meta, error) {
-	if meta.ID == "" {
-		meta.ID = newID()
-	}
-	now := time.Now().UTC()
-	if meta.CreatedAt.IsZero() {
-		meta.CreatedAt = now
-	}
-	meta.UpdatedAt = now
-	meta.Entries = 0
-
-	dir, err := s.dir(meta.ID)
-	if err != nil {
-		return session.Meta{}, err
-	}
+// Create starts an empty session.
+func (s *Store) Create(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return session.Meta{}, err
+		return "", err
 	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		return session.Meta{}, err
-	}
-	if err := writeMeta(dir, meta); err != nil {
-		_ = os.RemoveAll(dir)
-		return session.Meta{}, err
-	}
-	return meta, nil
-}
-
-// Append writes entries, assigning each a sequence number.
-func (s *Store) Append(ctx context.Context, id string, entries ...session.Entry) (err error) {
-	if len(entries) == 0 {
-		return ctx.Err()
-	}
-	dir, err := s.dir(id)
-	if err != nil {
-		return err
-	}
-	if _, err = s.readMeta(id); err != nil {
-		return err
-	}
-	lock, err := lockFile(ctx, filepath.Join(dir, ".lock"), true)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, lock.Close()) }()
-	if err = ctx.Err(); err != nil {
-		return err
-	}
-	path := filepath.Join(dir, entriesFile)
-	if err = trimTornTail(path); err != nil {
-		return err
-	}
-	position, err := lastPosition(path)
-	if err != nil {
-		return err
-	}
-	seq := position.Seq
-	now := time.Now().UTC()
-	var data bytes.Buffer
-	for _, e := range entries {
-		next := seq + 1
-		if e.Seq != 0 && e.Seq != next {
-			return fmt.Errorf("jsonl: sequence %d, want %d", e.Seq, next)
-		}
-		e = e.Stamped(next, now)
-		line, err := json.Marshal(e)
-		if err != nil {
-			return fmt.Errorf("jsonl: encoding entry %d: %w", e.Seq, err)
-		}
-		data.Write(line)
-		data.WriteByte('\n')
-		seq = next
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return err
-	}
-	_, writeErr := f.Write(data.Bytes())
-	if writeErr == nil {
-		writeErr = f.Sync()
-	}
-	if err = errors.Join(writeErr, f.Close()); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Meta reads one session's metadata.
-func (s *Store) Meta(ctx context.Context, id string) (session.Meta, error) {
-	if err := ctx.Err(); err != nil {
-		return session.Meta{}, err
-	}
-	meta, err := s.readMeta(id)
-	if err != nil {
-		return session.Meta{}, err
-	}
-	dir, _ := s.dir(id)
-	lock, err := lockFile(ctx, filepath.Join(dir, ".lock"), true)
-	if err != nil {
-		return session.Meta{}, err
-	}
-	defer func() { _ = lock.Close() }()
-	path := filepath.Join(dir, entriesFile)
-	position, err := lastPosition(path)
-	if err != nil {
-		return session.Meta{}, err
-	}
-	meta.Entries = position.Seq
-	if !position.At.IsZero() {
-		meta.UpdatedAt = position.At
-	}
-
-	return meta, nil
-}
-
-// List returns every session, most recently updated first.
-func (s *Store) List(ctx context.Context) ([]session.Meta, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	dirs, err := os.ReadDir(s.root)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]session.Meta, 0, len(dirs))
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		meta, err := s.Meta(ctx, d.Name())
-		if err != nil {
-			continue // a directory that is not a session, or one being written
-		}
-		out = append(out, meta)
-	}
-	slices.SortFunc(out, func(a, b session.Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
-	return out, nil
-}
-
-// dir is where a session lives. Ids come from application input, so Join alone
-// would let "" name the store itself and ".." a neighbour.
-func (s *Store) dir(id string) (string, error) {
-	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
-		return "", fmt.Errorf("jsonl: %q is not a session id", id)
-	}
-	return filepath.Join(s.root, id), nil
-}
-
-func (s *Store) readMeta(id string) (session.Meta, error) {
-	dir, err := s.dir(id)
-	if err != nil {
-		return session.Meta{}, err
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, metaFile))
-	if errors.Is(err, fs.ErrNotExist) {
-		return session.Meta{}, fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound)
-	}
-	if err != nil {
-		return session.Meta{}, err
-	}
-	var meta session.Meta
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		return session.Meta{}, fmt.Errorf("jsonl: reading %s metadata: %w", id, err)
-	}
-	return meta, nil
-}
-
-// writeMeta replaces metadata by writing beside it and renaming, so a crash
-// leaves the previous version rather than a truncated one.
-func writeMeta(dir string, meta session.Meta) error {
-	raw, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, "meta-*.json")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }() // already renamed away on success
-
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close() // the write error is the one worth reporting
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, metaFile))
-}
-
-func newID() string {
-	var b [8]byte
+	var b [4]byte
 	_, _ = rand.Read(b[:])
-	return time.Now().UTC().Format("20060102-150405") + "-" + hex.EncodeToString(b[:4])
+	id := time.Now().UTC().Format("20060102-150405") + "-" + hex.EncodeToString(b[:])
+	return id, os.Mkdir(filepath.Join(s.root, id), 0o700)
 }
 
-// Claim holds the session ownership lock independently of individual appends.
+// Claim locks the session against every other writer, in this process or
+// another, and repairs a final record a crash left half-written.
 func (s *Store) Claim(ctx context.Context, id string) (func() error, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -245,12 +62,224 @@ func (s *Store) Claim(ctx context.Context, id string) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.readMeta(id); err != nil {
+	lock, err := os.OpenFile(filepath.Join(dir, lockFile), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
 		return nil, err
 	}
-	lock, err := lockFile(ctx, filepath.Join(dir, ".session.lock"), false)
-	if err != nil {
-		return nil, fmt.Errorf("jsonl: claim session %s: %w", id, err)
+	if err := tryLock(lock); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("jsonl: claiming session %s: %w", id, err)
 	}
-	return sync.OnceValue(lock.Close), nil
+	if err := repairTail(filepath.Join(dir, entriesFile)); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return lock.Close, nil
+}
+
+// Append writes one entry and syncs it to disk.
+func (s *Store) Append(ctx context.Context, id string, entry session.Entry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dir, err := s.dir(id)
+	if err != nil {
+		return err
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("jsonl: encoding entry: %w", err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, entriesFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(line, '\n'))
+	if err == nil {
+		err = f.Sync()
+	}
+	return errors.Join(err, f.Close())
+}
+
+// Entries reads the log. An incomplete final record — a crash mid-write, or a
+// writer still writing — ends it; a bad record anywhere else is an error.
+func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
+	return func(yield func(session.Entry, error) bool) {
+		dir, err := s.dir(id)
+		if err != nil {
+			yield(session.Entry{}, err)
+			return
+		}
+		f, err := os.Open(filepath.Join(dir, entriesFile))
+		if errors.Is(err, fs.ErrNotExist) {
+			return
+		}
+		if err != nil {
+			yield(session.Entry{}, err)
+			return
+		}
+		defer func() { _ = f.Close() }() // read-only
+		reader := bufio.NewReader(f)
+		for n := 1; ; n++ {
+			if err := ctx.Err(); err != nil {
+				yield(session.Entry{}, err)
+				return
+			}
+			line, readErr := reader.ReadBytes('\n')
+			if readErr != nil && readErr != io.EOF {
+				yield(session.Entry{}, readErr)
+				return
+			}
+			if readErr == io.EOF && len(line) > 0 && !json.Valid(line) {
+				return // torn
+			}
+			if len(bytes.TrimSpace(line)) > 0 {
+				var e session.Entry
+				if err := json.Unmarshal(line, &e); err != nil {
+					yield(session.Entry{}, fmt.Errorf("jsonl: %s: line %d does not parse: %w", id, n, err))
+					return
+				}
+				if !yield(e, nil) {
+					return
+				}
+			}
+			if readErr == io.EOF {
+				return
+			}
+		}
+	}
+}
+
+// Meta is a session as List reports it.
+type Meta struct {
+	ID string
+	// UpdatedAt is when the last entry was written, or when the session was
+	// created if it has none.
+	UpdatedAt time.Time
+}
+
+// List returns every session, most recently updated first.
+func (s *Store) List(ctx context.Context) ([]Meta, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dirs, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, err
+	}
+	var out []Meta
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		info, err := d.Info()
+		if err != nil {
+			continue // removed while listing
+		}
+		at, err := lastAt(filepath.Join(s.root, d.Name(), entriesFile))
+		if err != nil {
+			return nil, err
+		}
+		if at.IsZero() {
+			at = info.ModTime()
+		}
+		out = append(out, Meta{ID: d.Name(), UpdatedAt: at})
+	}
+	slices.SortFunc(out, func(a, b Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	return out, nil
+}
+
+// dir is where an existing session lives. Ids come from application input,
+// so Join alone would let "" name the store itself and ".." a neighbour.
+func (s *Store) dir(id string) (string, error) {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
+		return "", fmt.Errorf("jsonl: %q is not a session id", id)
+	}
+	dir := filepath.Join(s.root, id)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound)
+	}
+	return dir, nil
+}
+
+// repairTail makes the log end on a newline, so the next record starts on a
+// line of its own: a complete last record gets its newline, a torn one is cut.
+func repairTail(path string) (err error) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// A close that fails is a truncate that may not have landed.
+	defer func() { err = errors.Join(err, f.Close()) }()
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil || size == 0 {
+		return err
+	}
+	return readTail(f, size, func(buf []byte) (bool, error) {
+		i := bytes.LastIndexByte(buf, '\n')
+		switch {
+		case i == len(buf)-1:
+			return true, nil
+		case i < 0 && int64(len(buf)) < size:
+			return false, nil // the last line starts further back
+		case json.Valid(buf[i+1:]):
+			_, err := f.WriteAt([]byte{'\n'}, size)
+			return true, err
+		default:
+			return true, f.Truncate(size - int64(len(buf)-i-1))
+		}
+	})
+}
+
+// lastAt is the time of the last complete record, zero if there is none. It
+// reads from the end, so listing a long session costs no more than a short one.
+func lastAt(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil || size == 0 {
+		return time.Time{}, err
+	}
+	var at time.Time
+	err = readTail(f, size, func(buf []byte) (bool, error) {
+		lines := bytes.Split(buf, []byte{'\n'})
+		// The first line may be cut by the window, unless it is the file's start.
+		first := 1
+		if int64(len(buf)) == size {
+			first = 0
+		}
+		for i := len(lines) - 1; i >= first; i-- {
+			var e struct{ At time.Time }
+			if json.Unmarshal(lines[i], &e) == nil {
+				at = e.At
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	return at, err
+}
+
+// readTail hands fn the last bytes of a file, growing the window until fn is
+// done or the window is the whole file.
+func readTail(f *os.File, size int64, fn func(buf []byte) (done bool, err error)) error {
+	for window := int64(8 * 1024); ; window *= 4 {
+		window = min(window, size)
+		buf := make([]byte, window)
+		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
+			return err
+		}
+		if done, err := fn(buf); done || err != nil || window == size {
+			return err
+		}
+	}
 }

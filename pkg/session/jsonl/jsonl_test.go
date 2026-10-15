@@ -1,6 +1,7 @@
 package jsonl_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -32,134 +32,83 @@ func open(t *testing.T, dir string) *jsonl.Store {
 func store(t *testing.T) *jsonl.Store { return open(t, t.TempDir()) }
 
 func msg(text string) session.Entry {
-	m := ai.UserMessage(text)
-	return session.Entry{Type: session.EntryMessage, Message: &m}
+	return session.Entry{Type: session.EntryMessage, Messages: []ai.Message{ai.UserMessage(text)}}
 }
 
-func create(t *testing.T, s *jsonl.Store) session.Meta {
+func create(t *testing.T, s *jsonl.Store) string {
 	t.Helper()
-	meta, err := s.Create(ctx(), session.Meta{})
+	id, err := s.Create(ctx())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	return meta
+	return id
 }
 
-func TestEntriesStillAcceptBlankCRLFLines(t *testing.T) {
-	dir := t.TempDir()
-	s := open(t, dir)
-	meta := create(t, s)
-	line, err := json.Marshal(msg("restored"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, meta.ID, "entries.jsonl"), []byte("\r\n"+string(line)+"\r\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	entries := read(t, s, meta.ID)
-	if len(entries) != 1 || entries[0].Message.Content.Text() != "restored" {
-		t.Fatalf("CRLF entries = %+v", entries)
-	}
-}
-
-func read(t *testing.T, s *jsonl.Store, id string) []session.Entry {
+func appendAll(t *testing.T, s *jsonl.Store, id string, entries ...session.Entry) {
 	t.Helper()
-	var out []session.Entry
+	for _, e := range entries {
+		if err := s.Append(ctx(), id, e); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+}
+
+func texts(t *testing.T, s *jsonl.Store, id string) []string {
+	t.Helper()
+	var out []string
 	for e, err := range s.Entries(ctx(), id) {
 		if err != nil {
 			t.Fatalf("Entries: %v", err)
 		}
-		out = append(out, e)
+		out = append(out, e.Messages[0].Text())
 	}
 	return out
 }
 
-func TestCreateAssignsAnID(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if meta.ID == "" {
-		t.Fatal("Create left the ID blank")
+// claim is what a new process does before it writes.
+func claim(t *testing.T, s *jsonl.Store, id string) {
+	t.Helper()
+	release, err := s.Claim(ctx(), id)
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
 	}
-	if meta.CreatedAt.IsZero() {
-		t.Error("Create left CreatedAt zero")
-	}
-	if second := create(t, s); second.ID == meta.ID {
-		t.Error("two sessions were given the same ID")
+	if err := release(); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestAppendPreservesOrder(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
+func entriesPath(dir, id string) string { return filepath.Join(dir, id, "entries.jsonl") }
 
-	var got []string
-	for _, e := range read(t, s, meta.ID) {
-		got = append(got, e.Message.Text())
+func TestEntriesAcceptBlankCRLFLines(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := create(t, s)
+	line, err := json.Marshal(msg("restored"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if want := []string{"one", "two", "three"}; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("entries = %v, want %v", got, want)
+	if err := os.WriteFile(entriesPath(dir, id), []byte("\r\n"+string(line)+"\r\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// A batched append and single appends must number the same way.
-func TestSequenceNumbersRunFromOne(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("a"), msg("b")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if err := s.Append(ctx(), meta.ID, msg("c")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	for i, e := range read(t, s, meta.ID) {
-		if want := int64(i + 1); e.Seq != want {
-			t.Errorf("entry %d has Seq %d, want %d", i, e.Seq, want)
-		}
-	}
-}
-
-func TestMissingSessionIsNotFound(t *testing.T) {
-	s := store(t)
-	if _, err := s.Meta(ctx(), "nope"); !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("Meta of an absent session = %v, want ErrNotFound", err)
-	}
-	if err := s.Append(ctx(), "nope", msg("x")); !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("Append to an absent session = %v, want ErrNotFound", err)
+	if got := texts(t, s, id); !slices.Equal(got, []string{"restored"}) {
+		t.Fatalf("CRLF entries = %v", got)
 	}
 }
 
 func TestEmptySessionReadsAsEmpty(t *testing.T) {
 	s := store(t)
-	if got := read(t, s, create(t, s).ID); len(got) != 0 {
+	if got := texts(t, s, create(t, s)); len(got) != 0 {
 		t.Errorf("a fresh session holds %d entries", len(got))
 	}
 }
 
-// The fold is what restore is: only message entries become the conversation.
-func TestMessagesFoldsOnlyMessageEntries(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID,
-		msg("hello"),
-		session.Entry{Type: session.EntryInference, Turn: 1, Inference: &session.Inference{Attempt: 1}},
-		msg("again"),
-	); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	_, msgs, err := session.Open(ctx(), s, meta.ID)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if len(msgs) != 2 {
-		t.Fatalf("folded %d messages, want 2 — the inference entry is not one", len(msgs))
-	}
-	if msgs[0].Text() != "hello" || msgs[1].Text() != "again" {
-		t.Errorf("folded %q and %q", msgs[0].Text(), msgs[1].Text())
+func TestASessionSurvivesReopening(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := create(t, s)
+	appendAll(t, s, id, msg("written before the restart"))
+	if got := texts(t, open(t, dir), id); !slices.Equal(got, []string{"written before the restart"}) {
+		t.Fatalf("after reopening: %v", got)
 	}
 }
 
@@ -167,73 +116,41 @@ func TestListIsNewestFirst(t *testing.T) {
 	s := store(t)
 	first := create(t, s)
 	second := create(t, s)
-	if err := s.Append(ctx(), first.ID, msg("touches the older one")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
+	e := msg("touches the older one")
+	e.At = time.Now().Add(time.Hour)
+	appendAll(t, s, first, e)
 
 	list, err := s.List(ctx())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(list) != 2 {
-		t.Fatalf("listed %d sessions, want 2", len(list))
-	}
-	if list[0].ID != first.ID {
-		t.Errorf("first listed = %q, want the most recently updated %q", list[0].ID, first.ID)
-	}
-	if list[1].ID != second.ID {
-		t.Errorf("second listed = %q, want %q", list[1].ID, second.ID)
+	if len(list) != 2 || list[0].ID != first || list[1].ID != second {
+		t.Fatalf("List = %+v, want %s then %s", list, first, second)
 	}
 }
 
-// Seq is the store's to assign, so concurrent writers must not collide on one.
-func TestConcurrentAppendsKeepDistinctSequences(t *testing.T) {
-	s := store(t)
-	meta := create(t, s)
-
-	const writers, each = 8, 12
-	var wg sync.WaitGroup
-	for w := range writers {
-		wg.Add(1)
-		go func(w int) {
-			defer wg.Done()
-			for i := range each {
-				if err := s.Append(ctx(), meta.ID, msg(fmt.Sprintf("w%d-%d", w, i))); err != nil {
-					t.Errorf("Append: %v", err)
-					return
-				}
-			}
-		}(w)
-	}
-	wg.Wait()
-
-	entries := read(t, s, meta.ID)
-	if len(entries) != writers*each {
-		t.Fatalf("read %d entries, wrote %d — a concurrent append was lost", len(entries), writers*each)
-	}
-	seen := make(map[int64]bool, len(entries))
-	for _, e := range entries {
-		if seen[e.Seq] {
-			t.Fatalf("sequence %d was assigned twice", e.Seq)
-		}
-		seen[e.Seq] = true
-	}
-}
-
-func TestASessionSurvivesReopening(t *testing.T) {
+// Filesystems can round an append's mtime below a newer session's creation, so
+// recency is the logged time — read from the end, past an entry longer than
+// the first window.
+func TestListUsesTheLoggedTime(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("written before the restart")); err != nil {
-		t.Fatalf("Append: %v", err)
+	first := create(t, s)
+	second := create(t, s)
+	at := time.Now().Add(time.Hour).UTC()
+	long := msg(strings.Repeat("x", 64*1024))
+	long.At = at
+	appendAll(t, s, first, long)
+	coarse := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(entriesPath(dir, first), coarse, coarse); err != nil {
+		t.Fatal(err)
 	}
-
-	entries := read(t, open(t, dir), meta.ID)
-	if len(entries) != 1 {
-		t.Fatalf("after reopening, session holds %d entries, want 1", len(entries))
+	list, err := open(t, dir).List(ctx())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := entries[0].Message.Text(); !strings.Contains(got, "before the restart") {
-		t.Errorf("entry survived as %q", got)
+	if len(list) != 2 || list[0].ID != first || list[1].ID != second || !list[0].UpdatedAt.Equal(at) {
+		t.Fatalf("List = %+v, want %s first at %s", list, first, at)
 	}
 }
 
@@ -242,125 +159,107 @@ func TestASessionSurvivesReopening(t *testing.T) {
 func TestATornLastLineEndsTheSessionRatherThanFailingIt(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("first"), msg("second")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	path := filepath.Join(dir, meta.ID, "entries.jsonl")
-	raw, err := os.ReadFile(path)
+	id := create(t, s)
+	appendAll(t, s, id, msg("first"), msg("second"))
+	raw, err := os.ReadFile(entriesPath(dir, id))
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, raw[:len(raw)-12], 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	if err := os.WriteFile(entriesPath(dir, id), raw[:len(raw)-12], 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	got := read(t, s, meta.ID)
-	if len(got) != 1 {
-		t.Fatalf("read %d entries from a torn file, want the 1 complete one", len(got))
-	}
-	if got[0].Message.Text() != "first" {
-		t.Errorf("surviving entry = %q", got[0].Message.Text())
+	if got := texts(t, s, id); !slices.Equal(got, []string{"first"}) {
+		t.Fatalf("read %v from a torn file, want the one complete entry", got)
 	}
 }
 
-// meta.json is a cache of what the entries file already knows, and it is
-// allowed to be behind — which means it is behind whenever a process died
-// without closing the store. What must not happen is a second process
-// carrying on from the stale number and writing entries that share a sequence
-// with entries already there.
-func TestASessionCarriesOnFromWhatWasWrittenNotFromTheMetadata(t *testing.T) {
-	dir := t.TempDir()
-
-	first := open(t, dir)
-	meta, err := first.Create(ctx(), session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range 5 {
-		if err := first.Append(ctx(), meta.ID, msg(fmt.Sprintf("before %d", i))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// No Close: this is a process that died, so meta.json still says zero.
-	onDisk := readMetaFile(t, filepath.Join(dir, meta.ID, "meta.json"))
-	if onDisk.Entries != 0 {
-		t.Logf("meta.json says %d entries — the test is weaker than intended", onDisk.Entries)
-	}
-
-	second := open(t, dir)
-	if err := second.Append(ctx(), meta.ID, msg("after")); err != nil {
-		t.Fatal(err)
-	}
-
-	var seqs []int64
-	for e, err := range second.Entries(ctx(), meta.ID) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		seqs = append(seqs, e.Seq)
-	}
-	if want := []int64{1, 2, 3, 4, 5, 6}; !slices.Equal(seqs, want) {
-		t.Errorf("sequence numbers = %v, want %v — the new process reused numbers", seqs, want)
-	}
-
-	// And reading metadata through the store brings it up to date.
-	got, err := second.Meta(ctx(), meta.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Entries != 6 {
-		t.Errorf("Entries = %d, want 6", got.Entries)
-	}
-}
-
-// An entry longer than the tail block lastPosition reads first must still be found.
-func TestASessionCarriesOnPastAVeryLongEntry(t *testing.T) {
-	dir := t.TempDir()
-	first := open(t, dir)
-	meta, err := first.Create(ctx(), session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := first.Append(ctx(), meta.ID, msg(strings.Repeat("x", 64*1024))); err != nil {
-		t.Fatal(err)
-	}
-
-	second := open(t, dir)
-	if err := second.Append(ctx(), meta.ID, msg("next")); err != nil {
-		t.Fatal(err)
-	}
-	var last int64
-	for e, err := range second.Entries(ctx(), meta.ID) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		last = e.Seq
-	}
-	if last != 2 {
-		t.Errorf("last Seq = %d, want 2", last)
-	}
-}
-
-func TestSuccessfullySavedLargeEntriesCanBeRestored(t *testing.T) {
+// What a store that appended straight onto the wreckage would bury inside an
+// unreadable line is the next entry. A claim repairs the tail first.
+func TestAClaimRepairsATornTail(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	meta := create(t, s)
-	text := strings.Repeat("x", 16*1024*1024)
-	if err := s.Append(ctx(), meta.ID, msg(text)); err != nil {
-		t.Fatal(err)
-	}
-	reopened := open(t, dir)
-	if err := reopened.Append(ctx(), meta.ID, msg("next")); err != nil {
-		t.Fatal(err)
-	}
-	_, messages, err := session.Open(ctx(), reopened, meta.ID)
+	id := create(t, s)
+	appendAll(t, s, id, msg("one"), msg("two"), msg("three"))
+	raw, err := os.ReadFile(entriesPath(dir, id))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(entriesPath(dir, id), raw[:len(raw)-20], 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	second := open(t, dir)
+	claim(t, second, id)
+	appendAll(t, second, id, msg("after the crash"))
+	if got, want := texts(t, second, id), []string{"one", "two", "after the crash"}; !slices.Equal(got, want) {
+		t.Errorf("entries = %v, want %v", got, want)
+	}
+}
+
+// A record that was written whole but lost its newline is kept, not cut.
+func TestAClaimKeepsACompleteTailWithoutItsNewline(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := create(t, s)
+	appendAll(t, s, id, msg("first"))
+	raw, err := os.ReadFile(entriesPath(dir, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entriesPath(dir, id), bytes.TrimSuffix(raw, []byte{'\n'}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claim(t, s, id)
+	appendAll(t, s, id, msg("second"))
+	if got, want := texts(t, s, id), []string{"first", "second"}; !slices.Equal(got, want) {
+		t.Errorf("entries = %v, want %v", got, want)
+	}
+}
+
+// Only the last line is allowed to be unreadable, because that is a process
+// that was killed. One that ends in a newline is a hole, and a conversation
+// with a hole is not a shorter one — so it is reported.
+func TestACorruptRecordIsReported(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := create(t, s)
+	appendAll(t, s, id, msg("one"), msg("two"), msg("three"))
+	raw, err := os.ReadFile(entriesPath(dir, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	lines[1] = lines[1][:len(lines[1])/2]
+	if err := os.WriteFile(entriesPath(dir, id), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var failure error
+	for _, err := range s.Entries(ctx(), id) {
+		if err != nil {
+			failure = err
+		}
+	}
+	if failure == nil {
+		t.Fatal("the middle of the session is missing and nothing said so")
+	}
+	if _, _, err := session.Open(ctx(), s, id); err == nil {
+		t.Error("a conversation with a hole in it was restored")
+	}
+}
+
+func TestLargeEntriesCanBeRestored(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	id := create(t, s)
+	text := strings.Repeat("x", 16*1024*1024)
+	appendAll(t, s, id, msg(text), msg("next"))
+	opened, messages, err := session.Open(ctx(), open(t, dir), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
 	if len(messages) != 2 || messages[0].Text() != text || messages[1].Text() != "next" {
-		t.Fatal("large saved entry did not survive restoration and another append")
+		t.Fatal("a large entry did not survive restoration")
 	}
 }
 
@@ -375,7 +274,6 @@ func TestIdleSessionsDoNotKeepAppendFilesOpen(t *testing.T) {
 	if fdDir == "" {
 		t.Skip("file descriptor listing is unavailable")
 	}
-	s := store(t)
 	count := func() int {
 		t.Helper()
 		f, err := os.Open(fdDir)
@@ -389,79 +287,32 @@ func TestIdleSessionsDoNotKeepAppendFilesOpen(t *testing.T) {
 		}
 		return len(names)
 	}
+	s := store(t)
 	before := count()
 	for range 256 {
-		meta := create(t, s)
-		if err := s.Append(ctx(), meta.ID, msg("saved")); err != nil {
-			t.Fatal(err)
-		}
+		appendAll(t, s, create(t, s), msg("saved"))
 	}
 	if after := count(); after > before+16 {
 		t.Errorf("idle sessions retained file handles: before=%d, after=%d", before, after)
 	}
 }
 
-func readMetaFile(t *testing.T, path string) session.Meta {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m session.Meta
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatal(err)
-	}
-	return m
-}
-
-func BenchmarkAppendOneEntry(b *testing.B) {
-	dir := b.TempDir()
-	s, err := jsonl.Open(dir)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer func() {
-	}()
-	meta, err := s.Create(context.Background(), session.Meta{})
-	if err != nil {
-		b.Fatal(err)
-	}
-	e := msg("a line of the sort a recorder writes")
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := s.Append(context.Background(), meta.ID, e); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // Ids come from application input — a -resume flag, a request, a filename — so
 // one that is not a single path element is refused rather than joined onto the
-// root. Empty would name the store itself, and Delete removes what it is given.
+// root.
 func TestAnIdThatIsNotOneIsRefused(t *testing.T) {
 	root := t.TempDir()
-	beside := filepath.Join(root, "beside")
-	if err := os.MkdirAll(filepath.Join(beside, "sessions"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "beside"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	s := open(t, filepath.Join(root, "sessions"))
-	kept := create(t, s)
-	if err := s.Append(ctx(), kept.ID, msg("worth keeping")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
 	for _, id := range []string{"", ".", "..", "../beside", "a/b", `a\b`} {
 		t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
-			// Create is the one exception: a blank id is how a caller asks the
-			// store to name the session itself.
-			if _, err := s.Create(ctx(), session.Meta{ID: id}); err == nil && id != "" {
-				t.Error("Create accepted it")
+			if _, err := s.Claim(ctx(), id); err == nil {
+				t.Error("Claim accepted it")
 			}
 			if err := s.Append(ctx(), id, msg("x")); err == nil {
 				t.Error("Append accepted it")
-			}
-			if _, err := s.Meta(ctx(), id); err == nil {
-				t.Error("Meta accepted it")
 			}
 			var failed bool
 			for _, err := range s.Entries(ctx(), id) {
@@ -472,127 +323,38 @@ func TestAnIdThatIsNotOneIsRefused(t *testing.T) {
 			}
 		})
 	}
-
-	// Nothing was reached: not the directory beside the store, not the store
-	// itself, not the session in it.
-	if _, err := os.Stat(beside); err != nil {
-		t.Errorf("a directory outside the store was removed: %v", err)
-	}
-	if got := read(t, s, kept.ID); len(got) != 1 {
-		t.Errorf("the store holds %d entries for its one session, want 1", len(got))
+	if _, err := os.Stat(filepath.Join(root, "beside", "entries.jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a directory outside the store was written to: %v", err)
 	}
 }
 
-// A process killed mid-append leaves a half-written last line. That entry is
-// lost either way; what must not be lost is the next one, which a store that
-// appended straight onto the wreckage would bury inside an unreadable line.
-func TestAnAppendAfterATornTailIsReadableAndNumbered(t *testing.T) {
-	dir := t.TempDir()
-	first := open(t, dir)
-	meta := create(t, first)
-	if err := first.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
-		t.Fatalf("Append: %v", err)
+func TestACanceledAppendDoesNotWrite(t *testing.T) {
+	s := store(t)
+	id := create(t, s)
+	canceled, cancel := context.WithCancel(ctx())
+	cancel()
+	if err := s.Append(canceled, id, msg("canceled")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
 	}
-
-	path := filepath.Join(dir, meta.ID, "entries.jsonl")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	torn := raw[:len(raw)-20] // the third line, cut off mid-word
-	if err := os.WriteFile(path, torn, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// A new process, which is the only kind that meets a torn file.
-	second := open(t, dir)
-	if err := second.Append(ctx(), meta.ID, msg("after the crash")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	var seqs []int64
-	var texts []string
-	for _, e := range read(t, second, meta.ID) {
-		seqs = append(seqs, e.Seq)
-		texts = append(texts, e.Message.Text())
-	}
-	if want := []int64{1, 2, 3}; !slices.Equal(seqs, want) {
-		t.Errorf("sequence numbers = %v, want %v — numbering restarted or the torn line was counted",
-			seqs, want)
-	}
-	if want := []string{"one", "two", "after the crash"}; !slices.Equal(texts, want) {
-		t.Errorf("entries = %v, want %v", texts, want)
+	if got := texts(t, s, id); len(got) != 0 {
+		t.Fatalf("a canceled append wrote %v", got)
 	}
 }
 
-// Only the last line is allowed to be unreadable, because that is a process
-// that was killed. One in the middle is a hole, and a conversation with a hole
-// is not a shorter one — so it is reported rather than quietly cut short.
-func TestACorruptLineInTheMiddleIsReported(t *testing.T) {
-	dir := t.TempDir()
-	s := open(t, dir)
-	meta := create(t, s)
-	if err := s.Append(ctx(), meta.ID, msg("one"), msg("two"), msg("three")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	path := filepath.Join(dir, meta.ID, "entries.jsonl")
-	raw, err := os.ReadFile(path)
+func BenchmarkAppendOneEntry(b *testing.B) {
+	s, err := jsonl.Open(b.TempDir())
 	if err != nil {
-		t.Fatal(err)
+		b.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	lines[1] = lines[1][:len(lines[1])/2]
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	id, err := s.Create(context.Background())
+	if err != nil {
+		b.Fatal(err)
 	}
-
-	reopened := open(t, dir)
-	var read int
-	var failure error
-	for _, err := range reopened.Entries(ctx(), meta.ID) {
-		if err != nil {
-			failure = err
-			break
+	e := msg("a line of the sort a session writes")
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := s.Append(context.Background(), id, e); err != nil {
+			b.Fatal(err)
 		}
-		read++
-	}
-	if failure == nil {
-		t.Fatalf("the session read back as %d entries and said nothing; the middle of it is missing", read)
-	}
-	if _, _, err := session.Open(ctx(), reopened, meta.ID); err == nil {
-		t.Error("the fold returned a conversation with a hole in it")
-	}
-}
-
-func TestListUsesLogTimeWithCoarseFileTimestamp(t *testing.T) {
-	dir := t.TempDir()
-	s := open(t, dir)
-	first := create(t, s)
-	second := create(t, s)
-	entry := msg("touches the older session")
-	entry.At = second.CreatedAt.Add(time.Nanosecond)
-	if err := s.Append(ctx(), first.ID, entry); err != nil {
-		t.Fatal(err)
-	}
-	// Filesystems can round an append's mtime below the newer session's creation time.
-	coarse := second.CreatedAt.Truncate(time.Second)
-	if err := os.Chtimes(filepath.Join(dir, first.ID, "entries.jsonl"), coarse, coarse); err != nil {
-		t.Fatal(err)
-	}
-	fresh := open(t, dir)
-	meta, err := fresh.Meta(ctx(), first.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !meta.UpdatedAt.Equal(entry.At) {
-		t.Fatalf("UpdatedAt=%s, want logged time %s", meta.UpdatedAt, entry.At)
-	}
-	list, err := fresh.List(ctx())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 2 || list[0].ID != first.ID {
-		t.Fatalf("wrong recency order: %+v", list)
 	}
 }

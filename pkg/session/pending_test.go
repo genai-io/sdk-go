@@ -13,7 +13,7 @@ import (
 func TestPendingInputSurvivesFailedSessionResume(t *testing.T) {
 	ctx := context.Background()
 	st := jsonlStore(t)
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatal(err)
 	}

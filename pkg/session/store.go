@@ -7,13 +7,12 @@ import (
 
 // Store is what a Session appends to and a conversation is restored from.
 type Store interface {
-	// Claim obtains exclusive session ownership before restoration or writing.
-	// The returned release must be idempotent.
-	Claim(ctx context.Context, id string) (func() error, error)
-	// Create starts a session. A blank Meta.ID means the store assigns one.
-	Create(ctx context.Context, meta Meta) (Meta, error)
-	// Append writes entries in order, assigning Seq to any that lack one.
-	Append(ctx context.Context, id string, entries ...Entry) error
+	// Create starts an empty session and returns its id.
+	Create(ctx context.Context) (string, error)
+	// Claim makes the caller the session's only writer until release.
+	Claim(ctx context.Context, id string) (release func() error, err error)
+	// Append adds one entry to the end of a claimed session.
+	Append(ctx context.Context, id string, entry Entry) error
 	// Entries reads from the beginning and stops at the first error.
 	Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
 }

@@ -59,7 +59,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	ctx := context.Background()
 
 	// A store is a directory. Nothing about it is agent-specific: it holds
-	// entries; metadata is derived from the log whenever it is read.
+	// the conversation's entries, and listing reads recency from the log.
 	store, err := jsonl.Open(dir)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	var rec *session.Session
 	var history []ai.Message
 	if resume == "" {
-		rec, err = session.Create(ctx, store, session.Meta{})
+		rec, err = session.Create(ctx, store)
 	} else {
 		rec, history, err = session.Open(ctx, store, resume)
 	}
@@ -179,7 +179,7 @@ func listSessions(ctx context.Context, store *jsonl.Store) error {
 		return nil
 	}
 	for _, m := range sessions {
-		fmt.Printf("%s  %5d entries  %s\n", m.ID, m.Entries, m.UpdatedAt.Local().Format(time.RFC822))
+		fmt.Printf("%s  %s\n", m.ID, m.UpdatedAt.Local().Format(time.RFC822))
 	}
 	return nil
 }

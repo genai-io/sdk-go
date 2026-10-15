@@ -2,10 +2,10 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -13,138 +13,103 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Session is one opened durable identity. It owns its write lease until Close.
+// Session is one claimed session: its only writer until Close.
 type Session struct {
-	store Store
-	id    string
+	store   Store
+	id      string
+	release func() error
 
-	// turnOffset maps agent-local turn numbers to durable session turn numbers.
-	turnOffset int
-
-	// resumeSnapshot owns the restored messages used to skip the initial replay.
-	// A successful conversation write or matching replacement clears it.
-	resumeSnapshot []ai.Message
-
-	mu      sync.Mutex
+	mu sync.Mutex
+	// resumed is the history Open returned, until the conversation moves on.
+	// The agent announces it as replaced when it is handed it, and recording
+	// that would write a copy of what was just read, once per resume.
+	resumed []ai.Message
 	err     error
 	closed  bool
-	release func() error
 }
 
-// RecordEvent adapts a native agent event to the shared Append path. Call it
-// from your event loop, in order, before anything slow. The context is the
-// store's: one that is not the local filesystem can block, and this sits on
-// the loop delivering events.
+// Create starts a session and claims it.
+func Create(ctx context.Context, store Store) (*Session, error) {
+	id, err := store.Create(ctx)
+	if err != nil {
+		return nil, err
+	}
+	release, err := store.Claim(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &Session{store: store, id: id, release: release}, nil
+}
+
+// Open claims an existing session and restores its conversation.
+func Open(ctx context.Context, store Store, id string) (*Session, []ai.Message, error) {
+	release, err := store.Claim(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	messages, err := restore(ctx, store, id)
+	if err != nil {
+		return nil, nil, errors.Join(err, release())
+	}
+	// A copy, so editing the returned history is a real replacement.
+	resumed := slices.Clone(messages)
+	for i := range resumed {
+		resumed[i].Content = messages[i].Content.Clone()
+	}
+	return &Session{store: store, id: id, release: release, resumed: resumed}, messages, nil
+}
+
+// restore folds a session's entries into its conversation.
+func restore(ctx context.Context, store Store, id string) ([]ai.Message, error) {
+	var messages []ai.Message
+	for entry, err := range store.Entries(ctx, id) {
+		if err != nil {
+			return nil, err
+		}
+		switch entry.Type {
+		case EntryMessage:
+			messages = append(messages, entry.Messages...)
+		case EntryConversationReplaced:
+			messages = slices.Clone(entry.Messages)
+		default:
+			return nil, fmt.Errorf("session: %s: unknown entry type %q", id, entry.Type)
+		}
+	}
+	return messages, nil
+}
+
+// RecordEvent persists what an agent event does to the conversation and
+// ignores the rest. Call it from your event loop, in order, before rendering.
 //
-// After the first failed write it does nothing, and Err says so. A fold with a
-// hole in it is not a shorter conversation but a broken one — drop the message
-// carrying a tool call and the results answering it are orphaned — so stopping
-// leaves a prefix that still folds where carrying on would not.
+// After the first failed write it does nothing, and Err says so: a
+// conversation with a hole in it is not shorter but broken, so stopping
+// leaves a prefix that still restores.
 func (s *Session) RecordEvent(ctx context.Context, e agent.Event) {
+	var entry Entry
+	switch v := e.(type) {
+	case agent.MessageAdded:
+		entry = Entry{Type: EntryMessage, Messages: []ai.Message{v.Message}}
+	case agent.MessagesReplaced:
+		entry = Entry{Type: EntryConversationReplaced, Messages: v.Messages}
+	default:
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil || s.closed {
 		return
 	}
-
-	switch v := e.(type) {
-	case agent.MessageAdded:
-		msg := v.Message
-		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryMessage, Message: &msg})
-
-	case agent.MessagesReplaced:
-		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryConversationReplaced, Messages: v.Messages})
-
-	case agent.MessageEnd:
-		rec := Inference{Attempt: v.Attempt}
-		if v.Inference != nil {
-			if v.Inference.Client != nil {
-				rec.Model = v.Inference.Client.Model().ID
-			}
-			rec.System = v.Inference.System
-			for _, t := range v.Inference.Tools {
-				rec.Tools = append(rec.Tools, t.Schema.Name)
-			}
-		}
-		if v.Response != nil {
-			// The model is on the response, which pkg/ai stamps with the
-			// client that was called — so an inference a hook routed elsewhere
-			// is recorded where it went, and a session may name more than one.
-			rec.Model = v.Response.Model
-			rec.Usage = v.Response.Usage
-			rec.StopReason = v.Response.StopReason
-		}
-		if v.Err != nil {
-			rec.Error = v.Err.Error()
-		}
-		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryInference, Inference: &rec})
-
-	case agent.ToolEnd:
-		// The readable part of what the model was told, from the same pair of
-		// functions, so the record cannot come to disagree with the
-		// conversation about what a call said.
-		run := ToolRun{
-			ID: v.ID, Name: v.Name, Args: v.Args,
-			Content: agent.ResultText(v.Result, v.Err), IsError: v.Err != nil,
-		}
-		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryToolRun, ToolRun: &run})
-
-	case agent.TurnEnd:
-		rec := Outcome{StopReason: v.StopReason, Usage: v.Usage}
-		if v.Err != nil {
-			rec.Err = v.Err.Error()
-		}
-		_ = s.appendLocked(ctx, Entry{Turn: v.Turn, Type: EntryOutcome, Outcome: &rec})
+	resumed := s.resumed
+	s.resumed = nil
+	if entry.Type == EntryConversationReplaced && resumed != nil && reflect.DeepEqual(resumed, entry.Messages) {
+		return
 	}
+	entry.At = time.Now().UTC()
+	s.err = s.store.Append(ctx, s.id, entry)
 }
 
-// Append persists one typed entry. Turn is relative to the current agent run;
-// the session applies the restored exchange offset exactly once.
-func (s *Session) Append(ctx context.Context, entry Entry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.appendLocked(ctx, entry)
-}
-
-func (s *Session) appendLocked(ctx context.Context, entry Entry) error {
-	if s.closed {
-		return ErrClosed
-	}
-	if s.err != nil {
-		return s.err
-	}
-	if !entry.payload() {
-		return fmt.Errorf("session: %q entry has no payload", entry.Type)
-	}
-	if entry.Type == EntryCustom {
-		if entry.Custom.Kind == "" {
-			return fmt.Errorf("session: custom event kind is required")
-		}
-		if len(entry.Custom.Data) > 0 && !json.Valid(entry.Custom.Data) {
-			return fmt.Errorf("session: custom event data is not valid JSON")
-		}
-	}
-	if entry.Type == EntryConversationReplaced && s.resumeSnapshot != nil && reflect.DeepEqual(s.resumeSnapshot, entry.Messages) {
-		s.resumeSnapshot = nil
-		return nil
-	}
-	entry.Turn += s.turnOffset
-	if entry.At.IsZero() {
-		entry.At = time.Now().UTC()
-	}
-	if err := s.store.Append(ctx, s.id, entry); err != nil {
-		s.err = err
-		return err
-	}
-	if entry.Type == EntryMessage || entry.Type == EntryConversationReplaced {
-		s.resumeSnapshot = nil
-	}
-	return nil
-}
-
-var ErrClosed = errors.New("session: closed")
-
-// Close releases the opened session after any in-flight append.
+// Close gives up the claim.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,23 +117,17 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.closed = true
-	if s.release == nil {
-		return nil
-	}
 	return s.release()
 }
 
-// Err reports the persistence failure, or ErrClosed after resource retirement.
+// Err reports the write that stopped recording, or ErrClosed after Close.
 func (s *Session) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.err != nil {
-		return s.err
-	}
-	if s.closed {
+	if s.err == nil && s.closed {
 		return ErrClosed
 	}
-	return nil
+	return s.err
 }
 
 // ID reports which session this records into.

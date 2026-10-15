@@ -20,7 +20,7 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 	ctx := context.Background()
 
 	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"), aitest.Says("three"))
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -116,27 +116,26 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("go"))
 
-	var snapshot, after int
-	snapshot = -1
+	snapshot, after := false, 0
 	for e, err := range st.Entries(ctx, rec.ID()) {
 		if err != nil {
 			t.Fatalf("Entries: %v", err)
 		}
 		switch {
 		case e.Type == session.EntryConversationReplaced:
-			snapshot = int(e.Seq)
-		case e.Type == session.EntryMessage && snapshot >= 0:
+			snapshot = true
+		case e.Type == session.EntryMessage && snapshot:
 			after++
 		}
 	}
-	if snapshot < 0 {
+	if !snapshot {
 		t.Fatal("the compaction was never recorded")
 	}
 	if after == 0 {
@@ -170,7 +169,7 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 			st := impl.open(t)
 			ctx := context.Background()
 
-			rec, err := session.Create(ctx, st, session.Meta{})
+			rec, err := session.Create(ctx, st)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -225,7 +224,7 @@ func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 			ctx := context.Background()
 
 			a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
-			rec, err := session.Create(ctx, st, session.Meta{})
+			rec, err := session.Create(ctx, st)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}

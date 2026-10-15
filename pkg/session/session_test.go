@@ -2,7 +2,6 @@ package session_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -53,6 +52,15 @@ func store(t *testing.T) session.Store {
 	return &memStore{}
 }
 
+// stores are both implementations, for what must hold of either.
+var stores = []struct {
+	name string
+	open func(*testing.T) session.Store
+}{
+	{"memory", func(*testing.T) session.Store { return &memStore{} }},
+	{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
+}
+
 // jsonlStore is for the tests that are about the jsonl store itself.
 func jsonlStore(t *testing.T) *jsonl.Store {
 	t.Helper()
@@ -69,7 +77,7 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 	ctx := context.Background()
 
 	first := newAgent(t, nil, aitest.Says("the capital of France is Paris"))
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -113,83 +121,29 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 	}
 }
 
-// What is written is what a resume needs plus what an audit needs — and not
-// the fragments, which exist only to keep an interface current.
-func TestFragmentsAreNotPersistedButTheSpansThatCloseThemAre(t *testing.T) {
+// A session is the conversation and nothing else: what a turn cost and how it
+// ended are the application's to keep, and fragments only kept a screen current.
+func TestOnlyTheConversationIsRecorded(t *testing.T) {
 	st := store(t)
 	ctx := context.Background()
 
 	a := newAgent(t, nil, aitest.Says("hello"))
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hi"))
 
-	counts := map[session.EntryType]int{}
+	var types []session.EntryType
 	for e, err := range st.Entries(ctx, rec.ID()) {
 		if err != nil {
 			t.Fatalf("Entries: %v", err)
 		}
-		counts[e.Type]++
+		types = append(types, e.Type)
 	}
-
-	if counts[session.EntryMessage] != 2 {
-		t.Errorf("message entries = %d, want 2", counts[session.EntryMessage])
-	}
-	if counts[session.EntryInference] != 1 {
-		t.Errorf("inference entries = %d, want 1", counts[session.EntryInference])
-	}
-	if counts[session.EntryOutcome] != 1 {
-		t.Errorf("outcome entries = %d, want 1", counts[session.EntryOutcome])
-	}
-	if total := len(counts); total != 3 {
-		t.Errorf("entry types = %d, want 3 — a fragment was persisted", total)
-	}
-}
-
-func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
-	st := store(t)
-	ctx := context.Background()
-
-	a := newAgent(t, nil, aitest.Replies(ai.Response{
-		Content:    ai.TextContent("answer"),
-		Usage:      ai.Usage{Input: 120, Output: 8},
-		StopReason: ai.StopEndTurn,
-	}))
-	rec, err := session.Create(ctx, st, session.Meta{})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = rec.Close() })
-	converse(t, a, rec, ai.UserMessage("hi"))
-
-	var found *session.Inference
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		if e.Type == session.EntryInference {
-			found = e.Inference
-		}
-	}
-	if found == nil {
-		t.Fatal("no inference was recorded")
-	}
-	if found.Usage.Input != 120 || found.Usage.Output != 8 {
-		t.Errorf("usage = %+v, want the call's own", found.Usage)
-	}
-	if found.StopReason != ai.StopEndTurn {
-		t.Errorf("stop reason = %q", found.StopReason)
-	}
-	if found.Attempt != 1 {
-		t.Errorf("attempt = %d, want 1", found.Attempt)
-	}
-	// Per inference, not per session: an exchange routed to a second model
-	// records each call against the one that answered it.
-	if found.Model != "aitest" {
-		t.Errorf("model = %q, want the client that answered", found.Model)
+	if want := []session.EntryType{session.EntryMessage, session.EntryMessage}; !slices.Equal(types, want) {
+		t.Errorf("entries = %v, want %v", types, want)
 	}
 }
 
@@ -197,7 +151,7 @@ func TestTheInferenceEntryCarriesWhatTheCallCost(t *testing.T) {
 // the session handle instead.
 func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 	a := newAgent(t, nil, aitest.Says("still working"))
-	rec, err := session.Create(context.Background(), &flaky{Store: &memStore{}, failOn: 1}, session.Meta{})
+	rec, err := session.Create(context.Background(), &flaky{Store: &memStore{}, failOn: 1})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -216,7 +170,7 @@ func TestAFailingStoreDoesNotStopTheAgent(t *testing.T) {
 // The shape examples/agent-session teaches, and the one that matters: the
 // process ends. A second store opened on the same directory — a different
 // *jsonl.Store, holding none of the first one's state — restores what the
-// first recorded, and carries on numbering where it left off.
+// first recorded, and carries on after it.
 func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
@@ -226,7 +180,7 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	a := newAgent(t, nil, aitest.Says("morning"), aitest.Says("afternoon"))
-	rec, err := session.Create(ctx, first, session.Meta{})
+	rec, err := session.Create(ctx, first)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -239,8 +193,6 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() {
-	}()
 
 	// Finding it the way a program would, rather than by remembering the id.
 	sessions, err := second.List(ctx)
@@ -290,12 +242,12 @@ type flaky struct {
 	appends int
 }
 
-func (f *flaky) Append(ctx context.Context, id string, e ...session.Entry) error {
+func (f *flaky) Append(ctx context.Context, id string, e session.Entry) error {
 	f.appends++
 	if f.appends == f.failOn {
 		return errors.New("the disk, briefly")
 	}
-	return f.Store.Append(ctx, id, e...)
+	return f.Store.Append(ctx, id, e)
 }
 
 // A conversation is read back by folding it, so a hole in the middle is not a
@@ -305,12 +257,12 @@ func (f *flaky) Append(ctx context.Context, id string, e ...session.Entry) error
 // first failure: a prefix still folds.
 func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 	ctx := context.Background()
-	st := &flaky{Store: store(t), failOn: 3}
+	st := &flaky{Store: store(t), failOn: 2}
 
 	a := newAgent(t, nil,
 		aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"}),
 		aitest.Says("done"))
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,50 +283,8 @@ func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 			len(restored)-len(repaired), len(restored))
 	}
 	// And nothing was written after the failure.
-	if st.appends != 3 {
-		t.Errorf("the store saw %d appends, want 3 — recording carried on past the failure", st.appends)
-	}
-}
-
-// The agent numbers turns from one every run. A session that stored that
-// number as its own would hold two exchanges both called turn 1 after a
-// resume, and no consumer could group by it.
-func TestTurnsAreNumberedFromTheSessionsBeginning(t *testing.T) {
-	ctx := context.Background()
-	st := store(t)
-
-	a := newAgent(t, nil, aitest.Says("one"), aitest.Says("two"))
-	rec, err := session.Create(ctx, st, session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rec.Close() })
-	converse(t, a, rec, ai.UserMessage("first"), ai.UserMessage("second"))
-
-	// A second run, resuming: the agent starts counting at one again.
-	b := newAgent(t, nil, aitest.Says("three"))
-	if err := rec.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rec2, history, err := session.Open(ctx, st, rec.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rec2.Close() })
-	b.SetMessages(history)
-	converse(t, b, rec2, ai.UserMessage("third"))
-
-	var turns []int
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		if e.Type == session.EntryOutcome {
-			turns = append(turns, e.Turn)
-		}
-	}
-	if want := []int{1, 2, 3}; !slices.Equal(turns, want) {
-		t.Errorf("turn numbers = %v, want %v", turns, want)
+	if st.appends != 2 {
+		t.Errorf("the store saw %d appends, want 2 — recording carried on past the failure", st.appends)
 	}
 }
 
@@ -386,7 +296,7 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 	st := store(t)
 
 	a := newAgent(t, nil, aitest.Says("one"))
-	rec, err := session.Create(ctx, st, session.Meta{})
+	rec, err := session.Create(ctx, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,46 +334,6 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 	}
 }
 
-// Which turn an entry belongs to is a property of where it sits, like Seq and
-// At, so it is on the Entry rather than repeated inside three payloads. That
-// also gives it to the two that never had it: a message entry could not say
-// which exchange it came from, and now every entry can.
-func TestEveryEntryCarriesItsTurn(t *testing.T) {
-	ctx := context.Background()
-	st := store(t)
-
-	a := newAgent(t, nil,
-		aitest.Streams(ai.Delta{Block: ai.ToolCallBlock(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"})}, ai.Delta{StopReason: ai.StopToolUse}),
-		aitest.Says("first done"),
-		aitest.Says("second done"))
-	rec, err := session.Create(ctx, st, session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rec.Close() })
-	converse(t, a, rec, ai.UserMessage("one"), ai.UserMessage("two"))
-
-	seen := map[session.EntryType]bool{}
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		if e.Turn == 0 {
-			t.Errorf("entry %d (%s) belongs to no turn", e.Seq, e.Type)
-		}
-		seen[e.Type] = true
-	}
-	// Including the kinds that used to carry no turn at all.
-	for _, want := range []session.EntryType{
-		session.EntryMessage, session.EntryInference,
-		session.EntryToolRun, session.EntryOutcome,
-	} {
-		if !seen[want] {
-			t.Errorf("no %s entry was written; the test proves less than it claims", want)
-		}
-	}
-}
-
 // A name survives being stored and read back, which is the point of having one
 // at all: an application that records rows against these has to find the same
 // rows after a restart. Both entry kinds carry it — a message that was
@@ -479,7 +349,7 @@ func TestNamesSurviveTheRoundTrip(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	rec, err := session.Create(context.Background(), st, session.Meta{})
+	rec, err := session.Create(context.Background(), st)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -525,152 +395,6 @@ func counterIDs() func() string {
 	}
 }
 
-// An application's own events belong in the same log as the loop's, because
-// the order across both is the fact worth keeping: that the permission was
-// answered between the tool call and the next inference is not something two
-// separate logs can state.
-func TestAnApplicationsOwnEventsInterleaveWithTheLoops(t *testing.T) {
-	ctx := context.Background()
-	st := store(t)
-
-	a := newAgent(t, nil,
-		aitest.Asks(ai.ToolCall{ID: "c1", Name: "noop", Input: "{}"}),
-		aitest.Says("done"))
-	rec, err := session.Create(ctx, st, session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rec.Close() })
-
-	for e, err := range a.Run(ctx, ai.UserMessage("go")) {
-		if err != nil {
-			t.Fatalf("stream: %v", err)
-		}
-		if v, ok := e.(agent.ToolStart); ok {
-			data, err := json.Marshal(map[string]string{"tool": v.Name, "decision": "permit"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := rec.Append(ctx, session.Entry{Turn: v.Turn, Type: session.EntryCustom, Custom: &session.Custom{Kind: "permission.decided", Data: data}}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		rec.RecordEvent(ctx, e)
-	}
-	if err := rec.Err(); err != nil {
-		t.Fatalf("recording: %v", err)
-	}
-
-	var order []string
-	var decided *session.Custom
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		order = append(order, string(e.Type))
-		if e.Type == session.EntryCustom {
-			decided = e.Custom
-		}
-	}
-
-	if decided == nil {
-		t.Fatal("the application's record is not in the session")
-	}
-	if decided.Kind != "permission.decided" {
-		t.Errorf("kind = %q", decided.Kind)
-	}
-	if got := string(decided.Data); got != `{"decision":"permit","tool":"noop"}` {
-		t.Errorf("data = %s, want it handed back as it went in", got)
-	}
-
-	// The point: it sits where it happened, before the tool run it decided.
-	custom := slices.Index(order, "custom")
-	tool := slices.Index(order, "tool")
-	if custom == -1 || tool == -1 || custom > tool {
-		t.Errorf("entry order %v — the decision is not recorded before the run it permitted", order)
-	}
-}
-
-// The blocker this replaced: an entry type the fold did not know made the whole
-// session unreadable, so an application could not put anything of its own in
-// one. A record that is not the conversation is walked past, not refused.
-func TestAnApplicationsRecordIsNotTheConversation(t *testing.T) {
-	ctx := context.Background()
-	st := store(t)
-
-	a := newAgent(t, nil, aitest.Says("hello"))
-	rec, err := session.Create(ctx, st, session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rec.Close() })
-	converse(t, a, rec, ai.UserMessage("hi"))
-	if err := rec.Append(ctx, session.Entry{Turn: 1, Type: session.EntryCustom, Custom: &session.Custom{Kind: "skill.state.changed", Data: json.RawMessage(`{"skill":"review"}`)}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rec.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &session.Custom{Kind: "session.renamed"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rec.Err(); err != nil {
-		t.Fatalf("recording: %v", err)
-	}
-
-	msgs, err := messages(ctx, st, rec.ID())
-	if err != nil {
-		t.Fatalf("a session carrying application records would not fold: %v", err)
-	}
-	if len(msgs) != 2 {
-		t.Errorf("the conversation restored as %d messages, want the 2 that were said", len(msgs))
-	}
-
-	// And it does not count as an exchange, or resuming would number the next
-	// turn past the end.
-	b := newAgent(t, msgs, aitest.Says("still one exchange in"))
-	if err := rec.Close(); err != nil {
-		t.Fatal(err)
-	}
-	rec2, _, err := session.Open(ctx, st, rec.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rec2.Close() })
-	converse(t, b, rec2, ai.UserMessage("again"))
-
-	var turns []int
-	for e, err := range st.Entries(ctx, rec2.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		turns = append(turns, e.Turn)
-	}
-	if got := slices.Max(turns); got != 2 {
-		t.Errorf("the second exchange was numbered %d, want 2 — a record is not an exchange", got)
-	}
-}
-
-func TestAppendRejectsMalformedCustomEvents(t *testing.T) {
-	ctx := context.Background()
-	st := store(t)
-	opened, err := session.Create(ctx, st, session.Meta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = opened.Close() }()
-	for _, custom := range []session.Custom{{}, {Kind: "hook.fired", Data: []byte("invalid json")}} {
-		if err := opened.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &custom}); err == nil {
-			t.Fatal("invalid custom event accepted")
-		}
-	}
-	if err := opened.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &session.Custom{Kind: "hook.fired"}}); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := entryCount(ctx, st, opened.ID()); err != nil || n != 1 {
-		t.Fatalf("invalid events entered the log: %d entries, %v", n, err)
-	}
-}
-
-// messages reads a session's conversation back without claiming it, so a test
-// can look while the writer still holds the session.
 func messages(ctx context.Context, st session.Store, id string) ([]ai.Message, error) {
 	var out []ai.Message
 	for entry, err := range st.Entries(ctx, id) {
@@ -681,7 +405,7 @@ func messages(ctx context.Context, st session.Store, id string) ([]ai.Message, e
 		case session.EntryConversationReplaced:
 			out = slices.Clone(entry.Messages)
 		case session.EntryMessage:
-			out = append(out, *entry.Message)
+			out = append(out, entry.Messages...)
 		}
 	}
 	return out, nil
@@ -699,24 +423,15 @@ func entryCount(ctx context.Context, st session.Store, id string) (int, error) {
 }
 
 func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
-	for _, create := range []struct {
-		name  string
-		store func(*testing.T) session.Store
-	}{
-		{"memory", func(t *testing.T) session.Store { return &memStore{} }},
-		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
-	} {
-		t.Run(create.name, func(t *testing.T) {
+	for _, impl := range stores {
+		t.Run(impl.name, func(t *testing.T) {
 			ctx := context.Background()
-			st := create.store(t)
-			opened, err := session.Create(ctx, st, session.Meta{})
+			st := impl.open(t)
+			opened, err := session.Create(ctx, st)
 			if err != nil {
 				t.Fatal(err)
 			}
-			msg := ai.UserMessage("saved")
-			if err := opened.Append(ctx, session.Entry{Turn: 1, Type: session.EntryMessage, Message: &msg}); err != nil {
-				t.Fatal(err)
-			}
+			opened.RecordEvent(ctx, agent.MessageAdded{Message: ai.UserMessage("saved")})
 			if competing, _, err := session.Open(ctx, st, opened.ID()); err == nil {
 				_ = competing.Close()
 				t.Fatal("active session opened twice")
@@ -734,9 +449,6 @@ func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
 			defer func() { _ = reopened.Close() }()
 			if len(history) != 1 || history[0].Text() != "saved" {
 				t.Fatal(history)
-			}
-			if err := opened.Append(ctx, session.Entry{Type: session.EntryMessage, Message: &msg}); !errors.Is(err, session.ErrClosed) {
-				t.Fatalf("closed append: %v", err)
 			}
 			opened.RecordEvent(ctx, agent.MessageAdded{Message: ai.UserMessage("late")})
 			if err := opened.Close(); err != nil {
@@ -756,17 +468,17 @@ func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
 func TestOpenFailureReleasesItsClaim(t *testing.T) {
 	ctx := context.Background()
 	st := store(t)
-	meta, err := st.Create(ctx, session.Meta{})
+	id, err := st.Create(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(ctx, meta.ID, session.Entry{Type: session.EntryMessage}); err != nil {
+	if err := st.Append(ctx, id, session.Entry{Type: "unheard-of"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := session.Open(ctx, st, meta.ID); err == nil {
-		t.Fatal("malformed history opened")
+	if _, _, err := session.Open(ctx, st, id); err == nil {
+		t.Fatal("an entry of unknown type restored as if it meant nothing")
 	}
-	release, err := st.Claim(ctx, meta.ID)
+	release, err := st.Claim(ctx, id)
 	if err != nil {
 		t.Fatalf("failed Open leaked claim: %v", err)
 	}

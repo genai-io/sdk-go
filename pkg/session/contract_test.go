@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -11,49 +12,30 @@ import (
 
 // The Store contract, run against every implementation. An interface with one
 // implementation has never been asked whether it describes anything but that
-// implementation; this is where a third one finds out what it has to honour
-// before anything else in this package will work on it.
+// implementation; this is where a third one finds out what it has to honour.
 func TestStoreContract(t *testing.T) {
-	for _, impl := range []struct {
-		name string
-		open func(*testing.T) session.Store
-	}{
-		{"memory", func(*testing.T) session.Store { return &memStore{} }},
-		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
-	} {
+	for _, impl := range stores {
 		t.Run(impl.name, func(t *testing.T) {
-			t.Run("Create assigns an id when none is given", func(t *testing.T) {
-				meta, err := impl.open(t).Create(ctx(), session.Meta{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if meta.ID == "" {
-					t.Error("Create returned a session with no id")
-				}
-				if meta.CreatedAt.IsZero() || meta.UpdatedAt.IsZero() {
-					t.Error("Create left the timestamps unset")
-				}
-				if meta.Entries != 0 {
-					t.Errorf("a new session reports %d entries", meta.Entries)
-				}
-			})
-
-			t.Run("Create keeps an id it was given, and refuses it twice", func(t *testing.T) {
+			t.Run("Create assigns distinct ids", func(t *testing.T) {
 				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{ID: "chosen"})
+				a, err := st.Create(ctx())
 				if err != nil {
 					t.Fatal(err)
 				}
-				if meta.ID != "chosen" {
-					t.Errorf("Create = %+v, want the id and title it was given", meta)
+				b, err := st.Create(ctx())
+				if err != nil {
+					t.Fatal(err)
 				}
-				if _, err := st.Create(ctx(), session.Meta{ID: "chosen"}); err == nil {
-					t.Error("the same id was created twice")
+				if a == "" || a == b {
+					t.Errorf("Create gave %q then %q", a, b)
 				}
 			})
 
 			t.Run("an absent session is ErrNotFound", func(t *testing.T) {
 				st := impl.open(t)
+				if _, err := st.Claim(ctx(), "nope"); !errors.Is(err, session.ErrNotFound) {
+					t.Errorf("Claim = %v, want ErrNotFound", err)
+				}
 				if err := st.Append(ctx(), "nope", msg("x")); !errors.Is(err, session.ErrNotFound) {
 					t.Errorf("Append = %v, want ErrNotFound", err)
 				}
@@ -64,97 +46,94 @@ func TestStoreContract(t *testing.T) {
 				}
 			})
 
-			t.Run("Append numbers entries from one, in order", func(t *testing.T) {
+			t.Run("a claim excludes a second until released", func(t *testing.T) {
 				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{})
+				id, err := st.Create(ctx())
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := st.Append(ctx(), meta.ID, msg("one"), msg("two")); err != nil {
+				release, err := st.Claim(ctx(), id)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if err := st.Append(ctx(), meta.ID, msg("three")); err != nil {
+				if _, err := st.Claim(ctx(), id); err == nil {
+					t.Fatal("claimed twice")
+				}
+				if err := release(); err != nil {
 					t.Fatal(err)
 				}
+				again, err := st.Claim(ctx(), id)
+				if err != nil {
+					t.Fatalf("a released claim was not given back: %v", err)
+				}
+				_ = again()
+			})
 
-				var seqs []int64
+			t.Run("Entries reads back what was appended, in order", func(t *testing.T) {
+				st := impl.open(t)
+				id, err := st.Create(ctx())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, text := range []string{"one", "two", "three"} {
+					if err := st.Append(ctx(), id, msg(text)); err != nil {
+						t.Fatal(err)
+					}
+				}
 				var texts []string
-				for e, err := range st.Entries(ctx(), meta.ID) {
+				for e, err := range st.Entries(ctx(), id) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if e.At.IsZero() {
-						t.Errorf("entry %d was stored with no timestamp", e.Seq)
-					}
-					seqs = append(seqs, e.Seq)
-					texts = append(texts, e.Message.Text())
+					texts = append(texts, e.Messages[0].Text())
 				}
-				if want := []int64{1, 2, 3}; !equal(seqs, want) {
-					t.Errorf("Seq = %v, want %v", seqs, want)
-				}
-				if want := []string{"one", "two", "three"}; !equal(texts, want) {
+				if want := []string{"one", "two", "three"}; !slices.Equal(texts, want) {
 					t.Errorf("order = %v, want %v", texts, want)
-				}
-			})
-
-			t.Run("an empty Append is not an error", func(t *testing.T) {
-				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := st.Append(ctx(), meta.ID); err != nil {
-					t.Errorf("Append with no entries = %v, want nil", err)
 				}
 			})
 
 			t.Run("a cancelled read ends with the cancellation", func(t *testing.T) {
 				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{})
+				id, err := st.Create(ctx())
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := st.Append(ctx(), meta.ID, msg("one"), msg("two")); err != nil {
+				if err := st.Append(ctx(), id, msg("one")); err != nil {
 					t.Fatal(err)
 				}
-
 				stopped, cancel := context.WithCancel(context.Background())
 				cancel()
-
-				read, failure := 0, error(nil)
-				for _, err := range st.Entries(stopped, meta.ID) {
+				var failure error
+				for _, err := range st.Entries(stopped, id) {
 					if err != nil {
 						failure = err
 						break
 					}
-					read++
 				}
 				if !errors.Is(failure, context.Canceled) {
-					t.Errorf("Entries = %v after %d entries, want the cancellation — a read that "+
-						"stops quietly reads as a shorter session", failure, read)
+					t.Errorf("Entries = %v, want the cancellation — a read that stops "+
+						"quietly reads as a shorter session", failure)
 				}
 			})
 
 			t.Run("what was stored is not what the caller still holds", func(t *testing.T) {
 				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{})
+				id, err := st.Create(ctx())
 				if err != nil {
 					t.Fatal(err)
 				}
-				m := ai.UserMessage("as written")
-				e := session.Entry{Type: session.EntryMessage, Message: &m}
-				if err := st.Append(ctx(), meta.ID, e); err != nil {
+				e := msg("as written")
+				if err := st.Append(ctx(), id, e); err != nil {
 					t.Fatal(err)
 				}
-				m.Content = ai.TextContent("rewritten after the fact")
-
-				for got, err := range st.Entries(ctx(), meta.ID) {
+				e.Messages[0].Content = ai.TextContent("rewritten after the fact")
+				for got, err := range st.Entries(ctx(), id) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if got.Message.Text() != "as written" {
+					if got.Messages[0].Text() != "as written" {
 						t.Errorf("stored entry reads %q; the caller edited it after appending",
-							got.Message.Text())
+							got.Messages[0].Text())
 					}
 				}
 			})
@@ -162,21 +141,4 @@ func TestStoreContract(t *testing.T) {
 	}
 }
 
-func equal[T comparable](a, b []T) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func ctx() context.Context { return context.Background() }
-
-func msg(text string) session.Entry {
-	m := ai.UserMessage(text)
-	return session.Entry{Type: session.EntryMessage, Message: &m}
-}

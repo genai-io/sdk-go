@@ -70,7 +70,7 @@ func restore(ctx context.Context, store Store, id string) ([]ai.Message, error) 
 		case EntryMessage:
 			messages = append(messages, entry.Messages...)
 		case EntryConversationReplaced:
-			messages = slices.Clone(entry.Messages)
+			messages = entry.Messages
 		default:
 			return nil, fmt.Errorf("session: %s: unknown entry type %q", id, entry.Type)
 		}

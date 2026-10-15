@@ -130,12 +130,12 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 				yield(session.Entry{}, readErr)
 				return
 			}
-			if readErr == io.EOF && len(line) > 0 && !json.Valid(line) {
-				return // torn
-			}
 			if len(bytes.TrimSpace(line)) > 0 {
 				var e session.Entry
 				if err := json.Unmarshal(line, &e); err != nil {
+					if readErr == io.EOF {
+						return // torn
+					}
 					yield(session.Entry{}, fmt.Errorf("jsonl: %s: line %d does not parse: %w", id, n, err))
 					return
 				}

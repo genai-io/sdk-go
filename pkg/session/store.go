@@ -13,6 +13,7 @@ type Store interface {
 	Claim(ctx context.Context, id string) (release func() error, err error)
 	// Append adds one entry to the end of a claimed session.
 	Append(ctx context.Context, id string, entry Entry) error
-	// Entries reads from the beginning and stops at the first error.
+	// Entries reads from the beginning and stops at the first error. Each
+	// entry it yields is the caller's.
 	Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
 }

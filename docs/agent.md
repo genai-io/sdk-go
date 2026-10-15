@@ -590,16 +590,31 @@ compaction needs nothing of its own: `SetMessages(summary)`, and the next save
 is the summary. `Load` returns exactly what the last save wrote.
 
 When to save is yours. After each `Run` is the usual answer. A program that
-must not lose a long run of tools to a crash saves on every `MessageAdded`,
-at the cost of writing the conversation each time.
+must not lose a long run of tools to a crash saves on every `MessageAdded`;
+with `jsonl.Store` that costs one appended line per message.
 
-`jsonl.Store` keeps one file per session, `<id>.jsonl`, one message per line,
-and writes each save
-beside the old one before renaming it into place, so a crash leaves one or the
-other and never half of either. `List` returns the sessions newest first.
-Renaming, forking and deleting a session are file operations on that
-directory. Two processes saving one session do not corrupt it, but the later
-save wins; giving a session one writer at a time is the application's to do.
+`jsonl.Store` keeps a session as an append-only log. The store is a directory,
+the session is one file in it, and each line is one record:
+
+```
+sessions/                       jsonl.Open("sessions")
+  20261016-101500.jsonl         one session; the file name is its id
+    {"at":…,"type":"message","message":{…}}   ┐
+    {"at":…,"type":"message","message":{…}}   │ appended as the conversation grew
+    {"at":…,"type":"reset"}                   ← compaction: the conversation starts over
+    {"at":…,"type":"message","message":{…}}   ┘ the compacted conversation, then what followed
+```
+
+`Load` replays the lines: a message appends, a reset empties the
+conversation. So the file is everything that happened, and the conversation
+is what the replay ends with. `Save` appends only what the file does not hold
+yet — new messages if the conversation grew, a reset and the whole
+conversation if it changed. A crash mid-write leaves an unterminated last
+line, which `Load` ignores and the next `Save` cuts off.
+
+`List` returns the sessions newest first, by file time. Renaming, copying and
+deleting a session are file operations. Give a session one writer at a time:
+two writers appending to one file interleave their lines.
 
 What a turn cost and how it ended are on `MessageEnd` and `TurnEnd`. They are
 not the conversation, so a session does not keep them; an application that

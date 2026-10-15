@@ -5,9 +5,9 @@
 //	for e, err := range a.Run(ctx, msg) { … }
 //	err = store.Save(ctx, id, a.Messages())
 //
-// A save is the whole conversation, so compaction needs nothing of its own:
-// the next save is the compacted conversation. Save as often as losing work
-// would hurt — after each run, or on every agent.MessageAdded.
+// Save is handed the whole conversation, so compaction needs nothing of its
+// own: the next save is the compacted conversation. Save as often as losing
+// work would hurt — after each run, or on every agent.MessageAdded.
 package session
 
 import (

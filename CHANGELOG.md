@@ -23,9 +23,10 @@ Each such change is listed under **Changed** with what to write instead.
   ```
 
   Compaction needs nothing extra: the next save holds the compacted
-  conversation. `pkg/agent/session/jsonl` becomes `pkg/session/jsonl`, with
-  one `<id>.jsonl` per session, one message per line, written atomically.
-  `List` returns `jsonl.Session{ID, SavedAt}`. The application chooses the id.
+  conversation. `pkg/agent/session/jsonl` becomes `pkg/session/jsonl`: one
+  append-only `<id>.jsonl` per session. A save appends only what is new, and a
+  rewritten conversation is appended after a `reset` line. `List` returns
+  `jsonl.Session{ID, SavedAt}`. The application chooses the id.
 
 ### Removed
 

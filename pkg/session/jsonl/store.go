@@ -1,5 +1,19 @@
-// Package jsonl keeps sessions on the filesystem: one file per session, one
-// message per line.
+// Package jsonl keeps sessions on the filesystem as append-only logs.
+//
+// A store is a directory, and a session is one file in it, <id>.jsonl. Each
+// line is one record, and a file is only ever appended to:
+//
+//	{"at":"…","type":"message","message":{…}}   a message joined the conversation
+//	{"at":"…","type":"reset"}                   the conversation starts over here
+//
+// Load replays the lines in order: a message appends, a reset empties the
+// conversation. So the file is the session's whole history and the
+// conversation is what the replay ends with.
+//
+// Save appends only what the file does not hold yet. A conversation that grew
+// costs one line per new message; one that changed — compaction, an edit —
+// costs a reset and the new conversation. A process killed mid-write leaves an
+// unterminated last line, which Load ignores and the next Save cuts off.
 package jsonl
 
 import (
@@ -8,12 +22,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -23,7 +38,27 @@ import (
 const ext = ".jsonl"
 
 // Store keeps sessions in a directory.
-type Store struct{ root string }
+type Store struct {
+	root string
+
+	mu sync.Mutex
+	// written is what this store last left in each file it wrote, so a Save
+	// can tell what is new without reading the file back. A file whose size
+	// no longer matches was written by someone else, and is read again.
+	written map[string]written
+}
+
+type written struct {
+	size int64
+	msgs []ai.Message
+}
+
+// record is one line of a session file.
+type record struct {
+	At      time.Time   `json:"at"`
+	Type    string      `json:"type"` // "message" or "reset"
+	Message *ai.Message `json:"message,omitempty"`
+}
 
 var _ session.Store = (*Store)(nil)
 
@@ -32,11 +67,10 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("jsonl: creating %s: %w", dir, err)
 	}
-	return &Store{root: dir}, nil
+	return &Store{root: dir, written: map[string]written{}}, nil
 }
 
-// Save writes the conversation beside the old one and renames it into place,
-// so a crash leaves one or the other, never half of either.
+// Save appends to the session file whatever msgs adds to what it holds.
 func (s *Store) Save(ctx context.Context, id string, msgs []ai.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -45,29 +79,72 @@ func (s *Store) Save(ctx context.Context, id string, msgs []ai.Message) error {
 	if err != nil {
 		return err
 	}
-	var data bytes.Buffer
-	enc := json.NewEncoder(&data)
-	for _, m := range msgs {
-		if err := enc.Encode(m); err != nil {
-			return fmt.Errorf("jsonl: encoding %s: %w", id, err)
-		}
-	}
-	tmp, err := os.CreateTemp(s.root, ".save-*")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	prev, err := s.held(id, path)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }() // already renamed away on success
-	_, err = tmp.Write(data.Bytes())
-	if err == nil {
-		err = tmp.Sync()
+	now := time.Now().UTC()
+	var lines bytes.Buffer
+	enc := json.NewEncoder(&lines)
+	start := len(prev.msgs)
+	if len(msgs) < start || !slices.EqualFunc(prev.msgs, msgs[:start], func(a, b ai.Message) bool {
+		return reflect.DeepEqual(a, b)
+	}) {
+		_ = enc.Encode(record{At: now, Type: "reset"})
+		start = 0
 	}
-	if err = errors.Join(err, tmp.Close()); err != nil {
+	for _, m := range msgs[start:] {
+		if err := enc.Encode(record{At: now, Type: "message", Message: &m}); err != nil {
+			return fmt.Errorf("jsonl: encoding %s: %w", id, err)
+		}
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	_, err = f.Write(lines.Bytes())
+	if err == nil {
+		err = f.Sync()
+	}
+	if err = errors.Join(err, f.Close()); err != nil {
+		delete(s.written, id) // what reached the file is unknown; read it next time
+		return err
+	}
+	s.written[id] = written{size: prev.size + int64(lines.Len()), msgs: clone(msgs)}
+	return nil
 }
 
-// Load reads a session's conversation.
+// held is what the session file holds: remembered if this store wrote it last,
+// read back otherwise, with an unfinished last line cut off so the next line
+// starts on its own.
+func (s *Store) held(id, path string) (written, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return written{}, nil
+	}
+	if err != nil {
+		return written{}, err
+	}
+	if w, ok := s.written[id]; ok && w.size == info.Size() {
+		return w, nil
+	}
+	msgs, end, err := replay(path)
+	if err != nil {
+		return written{}, err
+	}
+	if end < info.Size() {
+		if err := os.Truncate(path, end); err != nil {
+			return written{}, err
+		}
+	}
+	return written{size: end, msgs: msgs}, nil
+}
+
+// Load replays the session file into its conversation.
 func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -76,33 +153,57 @@ func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
+	msgs, _, err := replay(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("jsonl: %s: %w", id, session.ErrNotFound)
 	}
+	return msgs, err
+}
+
+// replay folds a session file's lines into the conversation they end with,
+// and reports where the last complete line ends. An unterminated last line is
+// a write that did not finish, and is not part of the session. A bad line
+// anywhere else is an error: a conversation with a hole in it is not a
+// shorter one.
+func replay(path string) ([]ai.Message, int64, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	defer func() { _ = f.Close() }() // read-only
 	var msgs []ai.Message
-	for dec := json.NewDecoder(f); ; {
-		var m ai.Message
-		if err := dec.Decode(&m); err == io.EOF {
-			return msgs, nil
-		} else if err != nil {
-			return nil, fmt.Errorf("jsonl: reading %s: %w", id, err)
+	var end int64
+	for n := 1; ; n++ {
+		i := bytes.IndexByte(data[end:], '\n')
+		if i < 0 {
+			return msgs, end, nil
 		}
-		msgs = append(msgs, m)
+		line := data[end : end+int64(i)]
+		end += int64(i) + 1
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var r record
+		if err := json.Unmarshal(line, &r); err != nil {
+			return nil, 0, fmt.Errorf("jsonl: %s line %d: %w", filepath.Base(path), n, err)
+		}
+		switch {
+		case r.Type == "reset":
+			msgs = nil
+		case r.Type == "message" && r.Message != nil:
+			msgs = append(msgs, *r.Message)
+		default:
+			return nil, 0, fmt.Errorf("jsonl: %s line %d: not a message or a reset", filepath.Base(path), n)
+		}
 	}
 }
 
-// Session is a saved session as List reports it.
+// Session is a session file as List reports it.
 type Session struct {
 	ID      string
 	SavedAt time.Time
 }
 
-// List returns every saved session, most recently saved first.
+// List returns every session, most recently saved first.
 func (s *Store) List(ctx context.Context) ([]Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -134,4 +235,14 @@ func (s *Store) path(id string) (string, error) {
 		return "", fmt.Errorf("jsonl: %q is not a session id", id)
 	}
 	return filepath.Join(s.root, id+ext), nil
+}
+
+// clone copies what the caller still holds, so an edit after Save is a change
+// the next Save sees rather than one it already agrees with.
+func clone(msgs []ai.Message) []ai.Message {
+	out := slices.Clone(msgs)
+	for i := range out {
+		out[i].Content = out[i].Content.Clone()
+	}
+	return out
 }

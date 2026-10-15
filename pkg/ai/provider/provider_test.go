@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -280,5 +281,26 @@ func TestConfigForCarriesTheProviderSettings(t *testing.T) {
 	cfg.Headers["X-Acme"] = "tampered"
 	if again := p.ConfigFor(ai.Model{ID: "acme-pro"}); again.Headers["X-Acme"] != "1" {
 		t.Error("editing a built Config changed the provider's headers")
+	}
+}
+
+// An endpoint whose listing lives off the protocol's models call — the Codex
+// subscription's own catalog — supplies it through Fetch.
+func TestFetchReplacesTheProtocolListing(t *testing.T) {
+	p := New(Config{
+		ID:  "acme",
+		API: ai.APIOpenAIChat,
+		Fetch: func(_ context.Context, got *Provider) ([]ai.Model, error) {
+			if got.Name() == "" {
+				t.Error("Fetch was not handed its provider")
+			}
+			return []ai.Model{{ID: "listed-elsewhere"}}, nil
+		},
+	})
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, listed := p.Model("listed-elsewhere"); !listed {
+		t.Errorf("Models = %+v, want what Fetch returned", p.Models())
 	}
 }

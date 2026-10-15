@@ -103,7 +103,7 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 	if !found || cred.Access == "" {
 		return ai.Config{}, &NotSignedInError{Vendor: v.ID}
 	}
-	client, err := httpClient(v.ID, cred, s, nil)
+	client, err := HTTPClient(v.ID, cred, s, nil)
 	if err != nil {
 		return ai.Config{}, err
 	}

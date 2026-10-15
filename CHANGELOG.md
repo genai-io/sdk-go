@@ -37,19 +37,16 @@ Each such change is listed under **Changed** with what to write instead.
 - `ai.Available`; filter on `Model.Stage.Available()`.
 - `ai.AssistantMessage`; write `ai.Message{Role: ai.RoleAssistant, Content: ai.TextContent(text)}`.
 - `ai.NewClient`; call `ai.New`.
-- `ai.FindTool`, `ai.ExtractJSON`, `ai.Efforts`, `Client.Driver`,
-  `Content.ThinkingSignature`, `Error.Retryable` (use `ai.IsRetryable`) and
-  `Model.DefaultLevel`.
+- `ai.FindTool`, `ai.ExtractJSON`, `ai.Efforts`, `Client.Driver` (read
+  `Client.Model().API`), `Error.Retryable` (use `ai.IsRetryable`) and
+  `Model.DefaultLevel` (the rung in `Model.Reasoning` with `Default` set).
 - `anthropic.ClientOptions`, `NewSDKClient` and `NewWithClient`; call
   `anthropic.NewWithOptions(cfg, api, opts...)`.
 - `catalog.Vendor.Order` and `Vendor.Verified`; `catalog.All` returns vendors
   in display order.
-- `auth.RegisterFlow`, `auth.HTTPClient`, `auth.DefaultStorePath`, and `List`
-  from `auth.Store`.
+- `auth.RegisterFlow`, `auth.DefaultStorePath`, and `List` from `auth.Store`.
 - `oauth.InteractionFunc`; `oauth.Interaction` is now a func type.
-- `provider.Config.Fetch`.
-- `mcp.Client.Resources`, `Prompts` and `Alive`, the `Resource` and `Prompt`
-  types, `Server.SSE`, and `mcp.Option`; set `Server.OnToolsChanged`.
+- `mcp.Option` and `mcp.OnToolsChanged`; set `Server.OnToolsChanged`.
 - `agent.Agent.System`.
 - From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
   `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,

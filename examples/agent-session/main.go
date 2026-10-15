@@ -2,18 +2,16 @@
 // and the second run remembers the first.
 //
 // The agent knows nothing about storage, and the store knows nothing about
-// agents. What joins them is the event stream: a Session consumes the same
-// events you draw from, and session.Open folds what was recorded back into a
-// conversation to hand the agent. Three lines carry the whole thing —
+// agents. A conversation is a []ai.Message: load one, hand it to the agent,
+// and save what the agent holds afterwards —
 //
-//	rec, history, _ := session.Open(ctx, store, id)   // restore
-//	defer func() { _ = rec.Close() }()
-//	a.SetMessages(history)                            // seed
-//	rec.RecordEvent(ctx, e)                          // record, in your loop
+//	history, _ := store.Load(ctx, id)        // session.ErrNotFound if new
+//	a.SetMessages(history)
+//	for e, err := range a.Run(ctx, msg) { … }
+//	store.Save(ctx, id, a.Messages())
 //
-// — and nothing more, compaction included: replacing the conversation is an
-// event too, so a session that consumed the stream already knows. See compact
-// below.
+// — compaction included: the next save is the compacted conversation. See
+// compact below.
 //
 //	export ANTHROPIC_API_KEY=...
 //	go run ./examples/agent-session "what is a goroutine?"
@@ -24,6 +22,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -35,7 +34,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
 	"github.com/genai-io/sdk-go/pkg/session"
-	"github.com/genai-io/sdk-go/pkg/session/jsonl"
+	"github.com/genai-io/sdk-go/pkg/session/jsonfile"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -58,9 +57,8 @@ func main() {
 func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (err error) {
 	ctx := context.Background()
 
-	// A store is a directory. Nothing about it is agent-specific: it holds
-	// a log of each conversation, and listing reads recency from it.
-	store, err := jsonl.Open(dir)
+	// A store is a directory, one file per conversation.
+	store, err := jsonfile.Open(dir)
 	if err != nil {
 		return err
 	}
@@ -72,38 +70,30 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		return fmt.Errorf("usage: agent-session [flags] <prompt>")
 	}
 
-	// Which session to continue. An empty id selects session.Create.
-	if !fresh && resume == "" {
-		sessions, err := store.List(ctx) // most recently updated first
+	// Which session to continue: the one asked for, or the most recent, or
+	// a new one. An id is any name the store accepts.
+	id := resume
+	if !fresh && id == "" {
+		sessions, err := store.List(ctx) // most recently saved first
 		if err != nil {
 			return err
 		}
 		if len(sessions) > 0 {
-			resume = sessions[0].ID
+			id = sessions[0].ID
 		}
 	}
-	if fresh {
-		resume = ""
+	if fresh || id == "" {
+		id = time.Now().Format("20060102-150405")
 	}
 
-	// Restore. What comes back is the conversation, folded out of the log
-	// that were recorded — the agent is handed a plain []ai.Message and never
-	// learns where it came from.
-	var rec *session.Session
-	var history []ai.Message
-	if resume == "" {
-		rec, err = session.Create(ctx, store)
-	} else {
-		rec, history, err = session.Open(ctx, store, resume)
-	}
-	if err != nil {
+	history, err := store.Load(ctx, id)
+	if err != nil && !errors.Is(err, session.ErrNotFound) {
 		return err
 	}
-	defer func() { _ = rec.Close() }()
 	if len(history) > 0 {
-		fmt.Printf("\033[2mcontinuing %s · %d messages\033[0m\n", rec.ID(), len(history))
+		fmt.Printf("\033[2mcontinuing %s · %d messages\033[0m\n", id, len(history))
 	} else {
-		fmt.Printf("\033[2mnew session %s\033[0m\n", rec.ID())
+		fmt.Printf("\033[2mnew session %s\033[0m\n", id)
 	}
 
 	client, err := auth.Client(model)
@@ -123,9 +113,6 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		compact(a, keep)
 	}
 
-	// One loop, and it owns the order: record first, then draw. RecordEvent is
-	// synchronous and sits on this goroutine by design — a program that cannot
-	// afford that forwards to a buffer of its own.
 	var end agent.TurnEnd
 	for e, err := range a.Run(ctx, ai.UserMessage(prompt)) {
 		if err != nil {
@@ -133,28 +120,23 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 			// TurnEnd.
 			return err
 		}
-		rec.RecordEvent(ctx, e)
 		render(e)
 		if v, ok := e.(agent.TurnEnd); ok {
 			end = v
 		}
 	}
 
-	// Recording never fails a turn — a store that broke mid-conversation
-	// should not take the answer down with it — so ask afterwards.
-	if err := rec.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "\nthe session was not fully written: %v\n", err)
+	// Saved even when the turn failed: what it got through is still the
+	// conversation.
+	if err := store.Save(ctx, id, a.Messages()); err != nil {
+		return err
 	}
-	fmt.Printf("\n\n\033[2m— %s · %d tokens · %s\033[0m\n", end.StopReason, end.Usage.Total(), rec.ID())
+	fmt.Printf("\n\n\033[2m— %s · %d tokens · %s\033[0m\n", end.StopReason, end.Usage.Total(), id)
 	return end.Err
 }
 
-// compact throws most of the conversation away, and tells the session nothing
-// — there is nothing to tell it. Replacing a conversation is an event like any
-// other: the agent reports it as MessagesReplaced at the start of the next
-// exchange, and the writer stores it as the point a fold starts from. Get
-// this wrong and the next restore hands back everything you just discarded,
-// which is why it is not something a caller is asked to remember.
+// compact throws most of the conversation away. The store needs telling
+// nothing: the save after this run is the compacted conversation.
 func compact(a *agent.Agent, keep int) {
 	msgs := a.Messages()
 	if len(msgs) <= keep {
@@ -169,7 +151,7 @@ func compact(a *agent.Agent, keep int) {
 	fmt.Printf("\033[2mcompacted %d messages to %d\033[0m\n", len(msgs), len(kept))
 }
 
-func listSessions(ctx context.Context, store *jsonl.Store) error {
+func listSessions(ctx context.Context, store *jsonfile.Store) error {
 	sessions, err := store.List(ctx)
 	if err != nil {
 		return err
@@ -178,8 +160,8 @@ func listSessions(ctx context.Context, store *jsonl.Store) error {
 		fmt.Println("no sessions yet")
 		return nil
 	}
-	for _, m := range sessions {
-		fmt.Printf("%s  %s\n", m.ID, m.UpdatedAt.Local().Format(time.RFC822))
+	for _, s := range sessions {
+		fmt.Printf("%s  %s\n", s.ID, s.SavedAt.Local().Format(time.RFC822))
 	}
 	return nil
 }

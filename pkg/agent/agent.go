@@ -153,7 +153,7 @@ func orNever(d time.Duration) time.Duration {
 //	    "Carry on from exactly where you stopped, and do not repeat anything.")
 //
 // The prompt enters the conversation as an ordinary message and is reported as
-// MessageAdded, so a session records what was asked and a restore replays it.
+// MessageAdded, and stays in the conversation like any other.
 // Running out of attempts ends the exchange with StopMaxTokens, the same as
 // never asking: the answer is still cut off.
 func WithContinuation(attempts int, prompt string) Option {

@@ -11,19 +11,21 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
-- **Sessions persist the conversation and nothing else**, and move to
-  `pkg/session` and `pkg/session/jsonl`. Update imports.
-  - `session.Open(ctx, store, "")` is now `session.Create(ctx, store)`.
-    `session.Open` restores an existing session. Both return a `*Session` that
-    is the session's only writer until `Close`.
-  - `Recorder.Handle` is `Session.RecordEvent`. It writes `MessageAdded` and
-    `MessagesReplaced`, and ignores every other event.
-  - `Store` is `Create(ctx) (id, error)`, `Claim`, `Append(ctx, id, msg)`,
-    `Replace(ctx, id, msgs)` and `Load(ctx, id)`. There is no `Entry`: how the
-    conversation is kept is the store's business. Only the claim holder writes.
-  - `jsonl` keeps each session in `log.jsonl`.
-  - `jsonl.Store.List` returns `jsonl.Meta{ID, UpdatedAt}`, read from the log.
-    There is no `meta.json`, no `Close`, and no flush.
+- **A session is a saved conversation.** It moves to `pkg/session`, and
+  `session.Store` is `Save(ctx, id, msgs)` and `Load(ctx, id)`. Replace the
+  recorder with a load before the run and a save after it:
+
+  ```go
+  history, err := store.Load(ctx, id)   // session.ErrNotFound if new
+  a.SetMessages(history)
+  // run the agent
+  err = store.Save(ctx, id, a.Messages())
+  ```
+
+  Compaction needs nothing extra: the next save holds the compacted
+  conversation. `pkg/agent/session/jsonl` becomes `pkg/session/jsonfile`, with
+  one `<id>.json` per session, written atomically. `List` returns
+  `jsonfile.Session{ID, SavedAt}`. The application chooses the id.
 
 ### Removed
 
@@ -48,10 +50,11 @@ Each such change is listed under **Changed** with what to write instead.
 - `mcp.Client.Resources`, `Prompts` and `Alive`, the `Resource` and `Prompt`
   types, `Server.SSE`, and `mcp.Option`; set `Server.OnToolsChanged`.
 - `agent.Agent.System`.
-- From sessions: `Entry` with all its types (`Inference`, `ToolRun`,
-  `Outcome`, `Custom`), `Recorder.Record`, `Store.Entries`, `session.Meta`,
-  `Meta.Created`, `ByRecency`, `session.Read`, and `Store.Meta`. Read cost and outcome from `MessageEnd` and
-  `TurnEnd` in your event loop, and keep them with your own records.
+- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
+  `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,
+  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and
+  `jsonl.Store.Close`. Read cost and outcome from `MessageEnd` and `TurnEnd` in
+  your event loop, and keep them with your own records.
 - `ai.ProtocolOptions`, `ai.WithProtocolOptions`, `ai.ProtocolOptionsAs`,
   `ai.RejectProtocolOptions`, `Request.ProtocolOptions`, `anthropic.Options` and
   `responses.Options`. Send an `anthropic-beta` header through `Config.Headers`;
@@ -60,14 +63,6 @@ Each such change is listed under **Changed** with what to write instead.
   `OpenAIChatCompat.MaxTokensField`, `NoUsageInStream` and `NoFinishReason`.
 - `catalog.Vendor.SamplingParams`; set `Model.SamplingParams`.
 - `ai.ToolChoice.String`.
-
-### Fixed
-
-- Session recency comes from the time of the last logged change, so a coarse
-  filesystem mtime cannot put a recently active session behind a newer empty one.
-- Claiming a JSONL session repairs what a crash left at the end of its log:
-  a torn record is cut, and a complete one missing its newline keeps it. A
-  corrupt record anywhere else is reported instead of hidden.
 
 ## [0.8.0] - 2026-10-01
 

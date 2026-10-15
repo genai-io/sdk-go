@@ -23,7 +23,7 @@
 - **一切皆事件** —— 一段序列上 10 种类型，而对话就是其中两种的折叠。
 - **四种 hook** —— 拦下一次工具调用、改写发出去的东西、抹掉返回来的东西。
 - **并行工具** —— 一批默认并发，除非某个工具说它不能。
-- **会话** —— 从 agent 的事件流里持久化对话，并把它恢复回来。
+- **会话** —— 保存 agent 的对话，并把它加载回来。
 - **MCP** —— MCP 服务器的工具直接变成 agent 自己的工具，`WithTools` 直接收。
 
 [安装](#安装) · [English](README.md)
@@ -369,7 +369,7 @@ ToolStart     ToolUpdate     ToolEnd      一次工具调用，从提出到答�
 TurnStart                    TurnEnd      包住它们的那一轮
 ```
 
-**对话是第一行的折叠。** 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份；遇到 `MessagesReplaced` 就从头开始折，因为在它之前的都是 agent 已经扔掉的。会话要存的只有这些，恢复要读的也只有这些。
+**对话是第一行的折叠。** 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份；遇到 `MessagesReplaced` 就从头开始折，因为在它之前的都是 agent 已经扔掉的。
 
 **每个事件都带着自己属于哪一轮，每个收尾事件都带着开启它的东西**——所以读一个事件是"读"，不是"回忆"。
 
@@ -394,28 +394,18 @@ flowchart LR
 
 ### 会话
 
-会话是这条事件流的**消费者**，不住在 agent 内部。你的循环喂给它，而 agent 从头到尾不知道有存储这回事。
-
-```mermaid
-flowchart LR
-    agent(["agent"]) -->|"Event"| loop["你的循环"]
-    loop --> ui["你的界面"]
-    loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
-    rec -->|"Append / Replace"| store[("Store")]
-    store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
-    hist -.->|"SetMessages"| agent
-```
+agent 从头到尾不知道有存储这回事。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，用完把 agent 手里的那份存回去。
 
 ```go
-rec, history, _ := session.Open(ctx, store, id)   // 恢复
-a.SetMessages(history)                            // 喂给 agent
+history, _ := store.Load(ctx, id)        // 新会话返回 session.ErrNotFound
+a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
-    rec.Handle(ctx, e)                            // 记录，在你自己的循环里
     render(e)
 }
+store.Save(ctx, id, a.Messages())        // 整份对话
 ```
 
-压缩不需要第四行：**换掉对话本身也是一个事件**，消费了这条流的会话已经知道了。
+压缩不需要任何额外处理：下一次保存存的就是压缩后的对话。
 
 事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；
 能直接跑的程序见 [`examples/agent-chat`](examples/agent-chat)、[`examples/agent-progress`](examples/agent-progress)、

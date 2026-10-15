@@ -25,7 +25,7 @@ loop around it.
 - **Everything as events** — ten types on one sequence, and the conversation is the fold of two of them.
 - **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
-- **Sessions** — persist an agent's conversation from its event stream, and restore it.
+- **Sessions** — save an agent's conversation, and load it back.
 - **MCP** — an MCP server's tools arrive as the agent's own, ready for `WithTools`.
 
 [Installation](#installation) · [中文文档](README.zh-CN.md)
@@ -445,8 +445,7 @@ TurnStart                    TurnEnd      the turn around them
 
 **The conversation is the fold of the first row.** Replay `MessageAdded` in
 order and you have what the agent holds; a `MessagesReplaced` starts the fold
-over, because everything before one is what the agent threw away. That is all a
-session stores and all a restore reads.
+over, because everything before one is what the agent threw away.
 
 Every event carries the turn it belongs to, and every closing event carries
 what opened it — so reading one is reading, not remembering.
@@ -478,31 +477,19 @@ answers a failed call with a shorter conversation and another go at the step.
 
 ### Sessions
 
-A session is a **consumer of the event stream**, not something living inside the
-agent. Your loop feeds it; the agent never learns storage exists.
-
-```mermaid
-flowchart LR
-    agent(["agent"]) -->|"Event"| loop["your loop"]
-    loop --> ui["your interface"]
-    loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
-    rec -->|"Append / Replace"| store[("Store")]
-    store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
-    hist -.->|"SetMessages"| agent
-```
+The agent never learns storage exists. A conversation is a `[]ai.Message`:
+load it, hand it over, save what the agent holds afterwards.
 
 ```go
-rec, history, _ := session.Open(ctx, store, id)   // restore
-defer rec.Close()
-a.SetMessages(history)                            // seed
+history, _ := store.Load(ctx, id)        // session.ErrNotFound if new
+a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
-    rec.RecordEvent(ctx, e)                        // record, in your loop
     render(e)
 }
+store.Save(ctx, id, a.Messages())        // the whole conversation
 ```
 
-Compaction needs no fourth line: replacing the conversation is an event too, so
-a session that consumed the stream already knows.
+Compaction needs nothing more: the next save is the compacted conversation.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
 rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),

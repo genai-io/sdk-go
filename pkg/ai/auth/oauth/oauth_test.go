@@ -36,7 +36,7 @@ func TestDeviceShowsTheCodeAndWaitsForTheToken(t *testing.T) {
 	defer server.Close()
 
 	var shown Prompt
-	ui := InteractionFunc(func(ctx context.Context, p Prompt) error { shown = p; return nil })
+	ui := Interaction(func(ctx context.Context, p Prompt) error { shown = p; return nil })
 	token, err := Device(t.Context(), &oauth2.Config{ClientID: "client", Endpoint: oauth2.Endpoint{
 		DeviceAuthURL: server.URL + "/code", TokenURL: server.URL + "/token",
 	}}, ui)
@@ -87,7 +87,7 @@ func TestCodeExchangesTheCallbackWithItsVerifier(t *testing.T) {
 	defer provider.Close()
 
 	redirect := loopbackURL(t)
-	ui := InteractionFunc(func(ctx context.Context, p Prompt) error {
+	ui := Interaction(func(ctx context.Context, p Prompt) error {
 		u, err := url.Parse(p.URL)
 		if err != nil {
 			return err
@@ -109,7 +109,7 @@ func TestCodeExchangesTheCallbackWithItsVerifier(t *testing.T) {
 // from an attacker's — being taken for this one.
 func TestCodeRejectsAMismatchedState(t *testing.T) {
 	redirect := loopbackURL(t)
-	ui := InteractionFunc(func(ctx context.Context, p Prompt) error {
+	ui := Interaction(func(ctx context.Context, p Prompt) error {
 		u, err := url.Parse(p.URL)
 		if err != nil {
 			return err
@@ -125,7 +125,7 @@ func TestCodeRejectsAMismatchedState(t *testing.T) {
 
 func TestCodeReportsWhatTheProviderRefused(t *testing.T) {
 	redirect := loopbackURL(t)
-	ui := InteractionFunc(func(ctx context.Context, p Prompt) error {
+	ui := Interaction(func(ctx context.Context, p Prompt) error {
 		return visit(redirect + "?error=access_denied&error_description=nope")
 	})
 

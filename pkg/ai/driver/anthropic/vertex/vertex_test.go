@@ -59,10 +59,9 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	defer s.Close()
 
 	cfg := ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}}
-	d, err := anthropic.NewWithClient(
-		anthropic.NewSDKClient(anthropic.ClientOptions(cfg)...), cfg, ai.APIAnthropicVertex)
+	d, err := anthropic.NewWithOptions(cfg, ai.APIAnthropicVertex)
 	if err != nil {
-		t.Fatalf("NewWithClient: %v", err)
+		t.Fatalf("NewWithOptions: %v", err)
 	}
 	if d.Name() != Name {
 		t.Errorf("Name = %q, want %q", d.Name(), Name)
@@ -101,10 +100,9 @@ func TestTheCallersEndpointOutranksTheDeploymentsOwn(t *testing.T) {
 	deployment := option.WithBaseURL("https://global-aiplatform.googleapis.com/")
 
 	cfg := ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}}
-	opts := anthropic.ClientOptions(cfg, deployment)
-	d, err := anthropic.NewWithClient(anthropic.NewSDKClient(opts...), cfg, ai.APIAnthropicVertex)
+	d, err := anthropic.NewWithOptions(cfg, ai.APIAnthropicVertex, deployment)
 	if err != nil {
-		t.Fatalf("NewWithClient: %v", err)
+		t.Fatalf("NewWithOptions: %v", err)
 	}
 	for range d.Stream(context.Background(), &ai.Request{Messages: []ai.Message{ai.UserMessage("hi")}}) {
 	}

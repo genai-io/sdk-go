@@ -271,7 +271,11 @@ func TestAvailableReportsWhatCanActuallyBeReached(t *testing.T) {
 		}
 	}
 	// In display order, so a picker renders the same list every time.
-	if !slices.IsSortedFunc(Available(), func(a, b catalog.Vendor) int { return a.Order - b.Order }) {
+	all := catalog.All()
+	pos := func(v catalog.Vendor) int {
+		return slices.IndexFunc(all, func(c catalog.Vendor) bool { return c.ID == v.ID })
+	}
+	if !slices.IsSortedFunc(Available(), func(a, b catalog.Vendor) int { return pos(a) - pos(b) }) {
 		t.Error("Available is not in display order")
 	}
 }
@@ -329,21 +333,22 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 	}))
 	defer server.Close()
 
-	RegisterFlow(copilotStub, newCopilotFlow(copilotEndpoints{
+	flows[copilotStub] = newCopilotFlow(copilotEndpoints{
 		device:   server.URL + "/device",
 		token:    server.URL + "/token",
 		exchange: server.URL + "/exchange",
 		api:      "https://api.individual.githubcopilot.test",
-	}))
+	})
+	t.Cleanup(func() { delete(flows, copilotStub) })
 
 	store := &memStore{}
 	var shown oauth.Prompt
 	got, err := Login(t.Context(), copilotStub, LoginOptions{
 		Store: store,
-		Interaction: oauth.InteractionFunc(func(ctx context.Context, p oauth.Prompt) error {
+		Interaction: func(ctx context.Context, p oauth.Prompt) error {
 			shown = p
 			return nil
-		}),
+		},
 	})
 	if err != nil {
 		t.Fatalf("Login: %v", err)

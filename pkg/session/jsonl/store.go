@@ -44,7 +44,12 @@ func (s *Store) Create(ctx context.Context, meta session.Meta) (session.Meta, er
 	if meta.ID == "" {
 		meta.ID = newID()
 	}
-	meta = meta.Created(time.Now().UTC())
+	now := time.Now().UTC()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+	meta.Entries = 0
 
 	dir, err := s.dir(meta.ID)
 	if err != nil {
@@ -170,7 +175,7 @@ func (s *Store) List(ctx context.Context) ([]session.Meta, error) {
 		}
 		out = append(out, meta)
 	}
-	slices.SortFunc(out, session.ByRecency)
+	slices.SortFunc(out, func(a, b session.Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 	return out, nil
 }
 
@@ -247,7 +252,5 @@ func (s *Store) Claim(ctx context.Context, id string) (func() error, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jsonl: claim session %s: %w", id, err)
 	}
-	var once sync.Once
-	var closeErr error
-	return func() error { once.Do(func() { closeErr = lock.Close() }); return closeErr }, nil
+	return sync.OnceValue(lock.Close), nil
 }

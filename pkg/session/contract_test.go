@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/session"
@@ -55,9 +54,6 @@ func TestStoreContract(t *testing.T) {
 
 			t.Run("an absent session is ErrNotFound", func(t *testing.T) {
 				st := impl.open(t)
-				if _, err := st.Meta(ctx(), "nope"); !errors.Is(err, session.ErrNotFound) {
-					t.Errorf("Meta = %v, want ErrNotFound", err)
-				}
 				if err := st.Append(ctx(), "nope", msg("x")); !errors.Is(err, session.ErrNotFound) {
 					t.Errorf("Append = %v, want ErrNotFound", err)
 				}
@@ -98,28 +94,6 @@ func TestStoreContract(t *testing.T) {
 				}
 				if want := []string{"one", "two", "three"}; !equal(texts, want) {
 					t.Errorf("order = %v, want %v", texts, want)
-				}
-			})
-
-			t.Run("Meta counts what was appended", func(t *testing.T) {
-				st := impl.open(t)
-				meta, err := st.Create(ctx(), session.Meta{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				before := time.Now().Add(-time.Second)
-				if err := st.Append(ctx(), meta.ID, msg("one"), msg("two")); err != nil {
-					t.Fatal(err)
-				}
-				got, err := st.Meta(ctx(), meta.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got.Entries != 2 {
-					t.Errorf("Entries = %d, want 2", got.Entries)
-				}
-				if !got.UpdatedAt.After(before) {
-					t.Errorf("UpdatedAt = %v, want a time after the append", got.UpdatedAt)
 				}
 			})
 

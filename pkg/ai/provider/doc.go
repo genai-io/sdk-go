@@ -27,5 +27,4 @@
 // # Where things live
 //
 //	provider.go  one host: its models, its config, and merging a live listing over them
-//	set.go       several of them, and the fan-out refresh across them
 package provider

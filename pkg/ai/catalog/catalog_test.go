@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/provider"
@@ -45,27 +44,22 @@ func compatName(c any) string {
 }
 
 // TestCatalogInvariants checks the properties the hand-written table is written
-// on and nothing enforces: a duplicated Order shuffles a picker, and a mistyped
-// Compat is read as the zero value and ignored.
+// on and nothing enforces: a mistyped Compat is read as the zero value and
+// ignored.
 func TestCatalogInvariants(t *testing.T) {
 	seenID := map[string]string{}
-	seenOrder := map[int]string{}
 
 	for _, v := range vendors {
 		t.Run(v.ID, func(t *testing.T) {
-			checkVendorIdentity(t, v, seenID, seenOrder)
+			checkVendorIdentity(t, v, seenID)
 			checkVendorProtocol(t, v)
 			checkVendorCredential(t, v)
 			checkVendorEndpoint(t, v)
-
-			if _, err := time.Parse("2006-01-02", v.Verified); err != nil {
-				t.Errorf("Verified = %q, want a YYYY-MM-DD date: %v", v.Verified, err)
-			}
 		})
 	}
 }
 
-func checkVendorIdentity(t *testing.T, v Vendor, seenID map[string]string, seenOrder map[int]string) {
+func checkVendorIdentity(t *testing.T, v Vendor, seenID map[string]string) {
 	t.Helper()
 	if v.ID == "" {
 		t.Error("ID is empty")
@@ -85,10 +79,6 @@ func checkVendorIdentity(t *testing.T, v Vendor, seenID map[string]string, seenO
 	if v.DisplayName == "" {
 		t.Error("DisplayName is empty")
 	}
-	if first, dup := seenOrder[v.Order]; dup {
-		t.Errorf("Order %d is already used by %s; two vendors at one position sort arbitrarily", v.Order, first)
-	}
-	seenOrder[v.Order] = v.ID
 }
 
 func checkVendorProtocol(t *testing.T, v Vendor) {

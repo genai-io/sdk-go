@@ -26,16 +26,6 @@ type Tool struct {
 	Run func(ctx context.Context, arguments string) (string, error) `json:"-"`
 }
 
-// FindTool returns the tool with the given name.
-func FindTool(tools []Tool, name string) (Tool, bool) {
-	for _, t := range tools {
-		if t.Schema.Name == name {
-			return t, true
-		}
-	}
-	return Tool{}, false
-}
-
 // ─── Running the tools a model asked for ───
 
 // ToolFunc builds a tool from a name, a description and one function.
@@ -99,12 +89,13 @@ func runOne(ctx context.Context, tools []Tool, call ToolCall) ToolResult {
 		return result
 	}
 
-	tool, found := FindTool(tools, call.Name)
-	if !found {
+	i := slices.IndexFunc(tools, func(t Tool) bool { return t.Schema.Name == call.Name })
+	if i < 0 {
 		// Naming what does exist matters: a model that invented a tool can
 		// pick a real one, where "unknown tool" leaves it guessing again.
 		return failed("no tool named %q; the tools available are %s", call.Name, toolNames(tools))
 	}
+	tool := tools[i]
 	if tool.Run == nil {
 		return failed("tool %q was offered without anything to run it", call.Name)
 	}

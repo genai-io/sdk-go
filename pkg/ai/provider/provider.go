@@ -51,15 +51,6 @@ type Config struct {
 	// taken from the baseline.
 	API ai.API
 
-	// Fetch retrieves the live model list. Nil means the default: open a
-	// driver for this provider's protocol and call its Models. Set it for an
-	// endpoint whose listing lives somewhere other than the protocol's own
-	// models call.
-	//
-	// It is handed the *Provider it belongs to, so it can read the credential
-	// and endpoint already configured here.
-	Fetch func(ctx context.Context, p *Provider) ([]ai.Model, error)
-
 	// Resolve fills in what is known about a model from its ID alone — the
 	// family's reasoning ladder, its protocol dialect — which a host's
 	// listing rarely carries; catalog installs one here. It must fill rather than
@@ -136,18 +127,22 @@ func (p *Provider) Model(id string) (ai.Model, bool) {
 	return p.decorate(ai.Model{ID: id}), false
 }
 
-// Refresh fetches the live model list and merges it in. A failure leaves the
-// previous list untouched, so an endpoint that went down keeps serving what it
-// last knew.
+// Refresh asks the protocol's driver for the live model list and merges it
+// in. A failure leaves the previous list untouched, so an endpoint that went
+// down keeps serving what it last knew.
 func (p *Provider) Refresh(ctx context.Context) error {
-	fetch := p.cfg.Fetch
-	if fetch == nil {
-		if p.cfg.API == "" {
-			return nil
-		}
-		fetch = defaultFetch
+	if p.cfg.API == "" {
+		return nil
 	}
-	models, err := fetch(ctx, p)
+	probe := ai.Model{ID: "-", API: p.cfg.API}
+	if len(p.cfg.Models) > 0 {
+		probe = p.cfg.Models[0]
+	}
+	client, err := ai.New(p.ConfigFor(probe))
+	if err != nil {
+		return err
+	}
+	models, err := client.Models(ctx)
 	if err != nil {
 		return err
 	}
@@ -155,19 +150,6 @@ func (p *Provider) Refresh(ctx context.Context) error {
 	p.listing = ai.CloneModels(models)
 	p.mu.Unlock()
 	return nil
-}
-
-// defaultFetch opens a client for the provider's protocol and asks it.
-func defaultFetch(ctx context.Context, p *Provider) ([]ai.Model, error) {
-	probe := ai.Model{ID: "-", API: p.cfg.API}
-	if len(p.cfg.Models) > 0 {
-		probe = p.cfg.Models[0]
-	}
-	client, err := ai.New(p.ConfigFor(probe))
-	if err != nil {
-		return nil, err
-	}
-	return client.Models(ctx)
 }
 
 // ConfigFor builds the ai.Config for opening one of this provider's models.

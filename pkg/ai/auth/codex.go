@@ -24,8 +24,6 @@ var codexDefaults = oauth2.Config{
 	},
 }
 
-func init() { RegisterFlow("openai-codex", newCodexFlow(codexDefaults)) }
-
 func newCodexFlow(cfg oauth2.Config) Flow {
 	return Flow{
 		Method: "browser (PKCE)",

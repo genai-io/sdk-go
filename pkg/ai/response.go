@@ -149,7 +149,7 @@ func (r *Response) Unmarshal(v any) error {
 		return fmt.Errorf("ai: no response to decode")
 	}
 	text := r.Text()
-	raw, ok := ExtractJSON(text)
+	raw, ok := extractJSON(text)
 	if !ok {
 		return fmt.Errorf("ai: response contains no JSON value: %s", truncate(text, 200))
 	}
@@ -159,8 +159,8 @@ func (r *Response) Unmarshal(v any) error {
 	return nil
 }
 
-// ExtractJSON finds the JSON value in a model's answer.
-func ExtractJSON(s string) (string, bool) {
+// extractJSON finds the JSON value in a model's answer.
+func extractJSON(s string) (string, bool) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
 		return "", false
@@ -171,8 +171,12 @@ func ExtractJSON(s string) (string, bool) {
 	if fenced, ok := stripFence(trimmed); ok && json.Valid([]byte(fenced)) {
 		return fenced, true
 	}
-	if scanned, ok := scanBalanced(trimmed); ok {
-		return scanned, true
+	// The first object or array in the prose, if it decodes.
+	if start := strings.IndexAny(trimmed, "{["); start >= 0 {
+		var raw json.RawMessage
+		if json.NewDecoder(strings.NewReader(trimmed[start:])).Decode(&raw) == nil {
+			return string(raw), true
+		}
 	}
 	return "", false
 }
@@ -191,43 +195,6 @@ func stripFence(s string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(rest[:end]), true
-}
-
-// scanBalanced returns the first balanced object or array, ignoring braces
-// that sit inside string literals.
-func scanBalanced(s string) (string, bool) {
-	start := strings.IndexAny(s, "{[")
-	if start < 0 {
-		return "", false
-	}
-	open := s[start]
-	close := byte('}')
-	if open == '[' {
-		close = ']'
-	}
-
-	depth, inString, escaped := 0, false, false
-	for i := start; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case escaped:
-			escaped = false
-		case c == '\\' && inString:
-			escaped = true
-		case c == '"':
-			inString = !inString
-		case inString:
-		case c == open:
-			depth++
-		case c == close:
-			depth--
-			if depth == 0 {
-				candidate := s[start : i+1]
-				return candidate, json.Valid([]byte(candidate))
-			}
-		}
-	}
-	return "", false
 }
 
 func truncate(s string, n int) string {

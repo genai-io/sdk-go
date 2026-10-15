@@ -3,7 +3,6 @@ package auth
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 )
@@ -24,9 +23,6 @@ func TestStoresBehaveAlike(t *testing.T) {
 			// Nobody has signed in yet is the normal state, not an error.
 			if _, found, err := s.Load("copilot"); err != nil || found {
 				t.Errorf("Load on an empty store = %v, %v, want not-found and no error", found, err)
-			}
-			if names, err := s.List(); err != nil || len(names) != 0 {
-				t.Errorf("List on an empty store = %v, %v", names, err)
 			}
 			// Deleting one that is not there succeeds.
 			if err := s.Delete("copilot"); err != nil {
@@ -69,14 +65,6 @@ func TestStoresBehaveAlike(t *testing.T) {
 
 			if err := s.Save(Credential{Vendor: "openai-codex", Access: "sk"}); err != nil {
 				t.Fatal(err)
-			}
-			names, err := s.List()
-			if err != nil {
-				t.Fatal(err)
-			}
-			slices.Sort(names)
-			if len(names) != 2 || names[0] != "copilot" || names[1] != "openai-codex" {
-				t.Errorf("List = %v, want both vendors", names)
 			}
 
 			if err := s.Delete("copilot"); err != nil {
@@ -174,16 +162,16 @@ func TestFileStoreReportsAFileItCannotRead(t *testing.T) {
 
 func TestDefaultStorePathFollowsXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/somewhere/config")
-	got, err := DefaultStorePath()
+	got, err := defaultStorePath()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := filepath.Join("/somewhere/config", "genai-io", "credentials.json"); got != want {
-		t.Errorf("DefaultStorePath = %q, want %q", got, want)
+		t.Errorf("defaultStorePath = %q, want %q", got, want)
 	}
 
 	t.Setenv("XDG_CONFIG_HOME", "")
-	got, err = DefaultStorePath()
+	got, err = defaultStorePath()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +180,7 @@ func TestDefaultStorePathFollowsXDG(t *testing.T) {
 		t.Skip("no home directory to check the fallback against")
 	}
 	if want := filepath.Join(home, ".config", "genai-io", "credentials.json"); got != want {
-		t.Errorf("DefaultStorePath = %q, want %q", got, want)
+		t.Errorf("defaultStorePath = %q, want %q", got, want)
 	}
 }
 
@@ -231,7 +219,7 @@ func TestFileStoresForOnePathShareRefreshAndWriteLocks(t *testing.T) {
 	if first != second {
 		t.Fatal("default clients got independent stores for the same credentials file")
 	}
-	path, err := DefaultStorePath()
+	path, err := defaultStorePath()
 	if err != nil {
 		t.Fatal(err)
 	}

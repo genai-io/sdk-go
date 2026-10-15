@@ -237,7 +237,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	}
 
 	var sent *agent.Inference
-	client := ai.NewClientWithDriver(aitest.New(aitest.Says("fine")), ai.Model{ID: "stub", API: "stub"})
+	client := ai.NewClientWithDriver(aitest.New(aitest.Says("fine"), aitest.Says("fine")), ai.Model{ID: "stub", API: "stub"})
 	a, err := agent.New(client,
 		agent.WithSystem("the agent's own prompt"),
 		agent.WithTools(tools...),
@@ -277,14 +277,24 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	}
 
 	// None of it stuck to the agent.
-	if a.System() != "the agent's own prompt" {
-		t.Errorf("the agent's prompt changed: %q", a.System())
-	}
 	if len(a.Tools()) != 2 {
 		t.Errorf("the agent holds %d tools, want both", len(a.Tools()))
 	}
 	if len(a.Messages()) != 2 {
 		t.Errorf("the injected message stuck to the conversation: %d messages", len(a.Messages()))
+	}
+	// The next call starts from the agent's own prompt, so the edit goes out once.
+	events, err = collect(t, a, ai.UserMessage("again"))
+	if err != nil {
+		t.Fatalf("second turn failed: %v", err)
+	}
+	for _, e := range events {
+		if v, ok := e.(agent.MessageStart); ok {
+			sent = v.Inference
+		}
+	}
+	if n := strings.Count(sent.System, "only right now"); n != 1 {
+		t.Errorf("the system edit went out %d times on the next call, want once: %q", n, sent.System)
 	}
 }
 
@@ -944,7 +954,7 @@ func TestPreStepIsPricedAgainstTheConversationItHasNow(t *testing.T) {
 		}))
 	a.SetMessages([]ai.Message{
 		ai.UserMessage(strings.Repeat("a long history. ", 200)),
-		ai.AssistantMessage(strings.Repeat("and a long answer. ", 200)),
+		{Role: ai.RoleAssistant, Content: ai.TextContent(strings.Repeat("and a long answer. ", 200))},
 	})
 
 	if _, err := collect(t, a, ai.UserMessage("go")); err != nil {

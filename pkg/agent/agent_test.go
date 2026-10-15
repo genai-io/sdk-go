@@ -364,7 +364,6 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 		func() { a.AddMessages(ai.UserMessage("from outside")) },
 		func() { _ = a.Messages() },
 		func() { _ = a.Tools() },
-		func() { _ = a.System() },
 	} {
 		wg.Add(1)
 		go func(f func()) {

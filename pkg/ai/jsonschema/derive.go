@@ -12,14 +12,6 @@ import (
 	"time"
 )
 
-// The tag key is the JSON Schema keyword it sets.
-//
-//	type Order struct {
-//		Item     string `json:"item" description:"what to order, one line"`
-//		Priority string `json:"priority" enum:"low|medium|high"`
-//		Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
-//	}
-
 // keywords maps a tag key to how its value is written on the wire.
 var keywords = map[string]struct{ numeric bool }{
 	"description": {},

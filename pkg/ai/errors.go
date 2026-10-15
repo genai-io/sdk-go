@@ -107,20 +107,6 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// Retryable reports whether trying the same request again could succeed.
-func (e *Error) Retryable() bool { return e.Kind.retryable() }
-
-// retryable is the rule itself, so a kind arrived at without an Error around
-// it answers the same question the same way.
-func (k ErrorKind) retryable() bool {
-	switch k {
-	case KindRateLimit, KindOverloaded, KindNetwork:
-		return true
-	default:
-		return false
-	}
-}
-
 // IsRetryable reports whether err is a transient failure worth retrying.
 //
 // A classified error answers from its kind. Anything else is put to the same
@@ -129,11 +115,13 @@ func (k ErrorKind) retryable() bool {
 // and an application should not have to reconstruct an *Error to be told so.
 func IsRetryable(err error) bool {
 	var e *Error
+	kind, ok := ErrorKind(""), true
 	if errors.As(err, &e) {
-		return e.Retryable()
+		kind = e.Kind
+	} else {
+		kind, ok = classifyTransport(err)
 	}
-	kind, ok := classifyTransport(err)
-	return ok && kind.retryable()
+	return ok && (kind == KindRateLimit || kind == KindOverloaded || kind == KindNetwork)
 }
 
 // IsKind reports whether err is a provider error of the given kind.

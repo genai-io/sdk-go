@@ -21,23 +21,18 @@ func readAPIError(res *http.Response) error {
 	if message == "" {
 		message = strings.TrimSpace(string(raw))
 	}
-	return &statusError{status: res.StatusCode, code: envelope.Error.Status, message: message, response: res}
+	return &statusError{errs.Details{Status: res.StatusCode, Code: envelope.Error.Status, Message: message, Response: res}}
 }
 
 // statusError carries what the driver knows about a failed response through to
 // classification.
-type statusError struct {
-	status   int
-	code     string
-	message  string
-	response *http.Response
-}
+type statusError struct{ errs.Details }
 
 func (e *statusError) Error() string {
-	if e.code != "" {
-		return fmt.Sprintf("%s: %s", e.code, e.message)
+	if e.Code != "" {
+		return fmt.Sprintf("%s: %s", e.Code, e.Message)
 	}
-	return e.message
+	return e.Message
 }
 
 // details reads what the endpoint reported. There is no vendor SDK here, so
@@ -46,7 +41,7 @@ func (e *statusError) Error() string {
 func details(err error) errs.Details {
 	var se *statusError
 	if errors.As(err, &se) {
-		return errs.Details{Status: se.status, Code: se.code, Message: se.message, Response: se.response}
+		return se.Details
 	}
 	return errs.Details{}
 }

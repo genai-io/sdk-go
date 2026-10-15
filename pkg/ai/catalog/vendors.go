@@ -10,30 +10,14 @@ import (
 // credential variables, the protocol and its quirks. Which models a vendor
 // serves, and everything about them, is the application's to set on ai.Model.
 
-// verified is the date this file's figures were last checked against the
-// vendors' own documentation. Every entry carries its own Verified field so
-// they can drift apart; this is the date of the sweep that set them.
-const verified = "2026-08-20"
+// The rows were last checked against each vendor's own documentation between
+// 2026-08-20 and 2026-09-17.
 
-// verifiedGateways is the sweep that added the OpenAI-compatible gateways and
-// single-vendor endpoints below.
-const verifiedGateways = "2026-08-21"
-
-// verifiedGoogleVertex is the sweep that added Gemini through Vertex AI.
-const verifiedGoogleVertex = "2026-09-17"
-
-// verifiedHyperscalers is the sweep that added the two hyperscaler-hosted
-// OpenAI endpoints below.
-const verifiedHyperscalers = "2026-08-21"
-
-// vendors is the directory. Order is the display order; the numbering leaves
-// gaps so a vendor can be slotted in without renumbering the rest.
+// vendors is the directory, in display order.
 var vendors = []Vendor{
 	{
 		ID:          "anthropic",
 		DisplayName: "Anthropic",
-		Order:       10,
-		Verified:    verified,
 		API:         ai.APIAnthropicMessages,
 		BaseURLEnv:  "ANTHROPIC_BASE_URL",
 		KeyEnv:      []string{"ANTHROPIC_API_KEY"},
@@ -44,13 +28,10 @@ var vendors = []Vendor{
 	{
 		ID:          "anthropic-vertex",
 		DisplayName: "Anthropic (Vertex AI)",
-		Order:       15,
-		Verified:    verifiedGateways,
 		API:         ai.APIAnthropicVertex,
 		// Vertex resolves its own endpoint from the deployment region, and
 		// authenticates with Google credentials rather than a key. The two
 		// variables below name the deployment, not a credential.
-		KeyEnv: nil,
 		DeploymentEnv: map[string]string{
 			"project": "ANTHROPIC_VERTEX_PROJECT_ID",
 			"region":  "CLOUD_ML_REGION",
@@ -62,8 +43,6 @@ var vendors = []Vendor{
 	{
 		ID:          "openai",
 		DisplayName: "OpenAI",
-		Order:       20,
-		Verified:    verified,
 		API:         ai.APIOpenAIResponses,
 		BaseURLEnv:  "OPENAI_BASE_URL",
 		KeyEnv:      []string{"OPENAI_API_KEY"},
@@ -72,8 +51,6 @@ var vendors = []Vendor{
 	{
 		ID:          "azure-openai",
 		DisplayName: "OpenAI (Azure)",
-		Order:       22,
-		Verified:    verifiedHyperscalers,
 		// Azure serves the Responses protocol itself under its v1 surface, so
 		// this is the same driver as first-party OpenAI pointed somewhere
 		// else — the endpoint and the credential header are what differ.
@@ -98,8 +75,6 @@ var vendors = []Vendor{
 	{
 		ID:          "bedrock-openai",
 		DisplayName: "OpenAI (Amazon Bedrock)",
-		Order:       25,
-		Verified:    verifiedHyperscalers,
 		// Chat Completions, not Responses: Bedrock fronts the open-weight
 		// OpenAI models with an OpenAI-compatible endpoint that offers
 		// /chat/completions only. There is no /responses to point at, so the
@@ -124,8 +99,6 @@ var vendors = []Vendor{
 	{
 		ID:          "google",
 		DisplayName: "Google Gemini",
-		Order:       30,
-		Verified:    verified,
 		API:         ai.APIGoogleGenAI,
 		// Google's own SDKs take a base URL in code, not from the environment, so
 		// there is no name of theirs to follow; this is the Gemini CLI's.
@@ -138,14 +111,11 @@ var vendors = []Vendor{
 	{
 		ID:          "google-vertex",
 		DisplayName: "Google Gemini (Vertex AI)",
-		Order:       35,
-		Verified:    verifiedGoogleVertex,
 		API:         ai.APIGoogleVertex,
 		// Vertex resolves its own endpoint from the deployment region, and
 		// authenticates with Google credentials rather than a key. The two
 		// variables below name the deployment, not a credential; they are the
 		// ones Google's own Gen AI SDK reads.
-		KeyEnv: nil,
 		DeploymentEnv: map[string]string{
 			"project": "GOOGLE_CLOUD_PROJECT",
 			"region":  "GOOGLE_CLOUD_LOCATION",
@@ -157,8 +127,6 @@ var vendors = []Vendor{
 	{
 		ID:          "deepseek",
 		DisplayName: "DeepSeek",
-		Order:       40,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "https://api.deepseek.com",
 		BaseURLEnv:  "DEEPSEEK_BASE_URL",
@@ -176,8 +144,6 @@ var vendors = []Vendor{
 	{
 		ID:          "sensenova",
 		DisplayName: "SenseNova",
-		Order:       50,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "https://token.sensenova.cn/v1",
 		BaseURLEnv:  "SENSENOVA_BASE_URL",
@@ -191,8 +157,6 @@ var vendors = []Vendor{
 	{
 		ID:          "minimax",
 		DisplayName: "MiniMax",
-		Order:       60,
-		Verified:    verified,
 		API:         ai.APIAnthropicMessages,
 		BaseURL:     "https://api.minimaxi.com/anthropic",
 		BaseURLEnv:  "MINIMAX_BASE_URL",
@@ -201,8 +165,6 @@ var vendors = []Vendor{
 	{
 		ID:          "moonshot",
 		DisplayName: "Moonshot (Kimi)",
-		Order:       70,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "https://api.moonshot.cn/v1",
 		BaseURLEnv:  "MOONSHOT_BASE_URL",
@@ -218,8 +180,6 @@ var vendors = []Vendor{
 	{
 		ID:          "alibaba",
 		DisplayName: "Alibaba (Qwen)",
-		Order:       80,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		BaseURLEnv:  "DASHSCOPE_BASE_URL",
@@ -234,8 +194,6 @@ var vendors = []Vendor{
 	{
 		ID:          "bigmodel",
 		DisplayName: "Z.ai (GLM)",
-		Order:       90,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "https://open.bigmodel.cn/api/paas/v4",
 		BaseURLEnv:  "BIGMODEL_BASE_URL",
@@ -245,8 +203,6 @@ var vendors = []Vendor{
 	{
 		ID:          "ollama",
 		DisplayName: "Ollama (local)",
-		Order:       100,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "http://localhost:11434/v1",
 		BaseURLEnv:  "OLLAMA_BASE_URL",
@@ -259,8 +215,6 @@ var vendors = []Vendor{
 	{
 		ID:          "mimo",
 		DisplayName: "Xiaomi MiMo",
-		Order:       110,
-		Verified:    verified,
 		API:         ai.APIAnthropicMessages,
 		BaseURL:     "https://api.xiaomimimo.com/anthropic",
 		BaseURLEnv:  "MIMO_BASE_URL",
@@ -269,8 +223,6 @@ var vendors = []Vendor{
 	{
 		ID:          "volcengine",
 		DisplayName: "Volcengine Ark",
-		Order:       120,
-		Verified:    verified,
 		API:         ai.APIAnthropicMessages,
 		BaseURL:     "https://ark.cn-beijing.volces.com/api/coding",
 		BaseURLEnv:  "VOLCENGINE_BASE_URL",
@@ -281,123 +233,15 @@ var vendors = []Vendor{
 	{
 		ID:          "agnesai",
 		DisplayName: "Agnes-AI",
-		Order:       130,
-		Verified:    verified,
 		API:         ai.APIOpenAIChat,
 		BaseURL:     "https://apihub.agnes-ai.com/v1",
 		BaseURLEnv:  "AGNESAI_BASE_URL",
 		KeyEnv:      []string{"AGNESAI_API_KEY"},
 		Compat:      ai.OpenAIChatCompat{},
 	},
-	// ── OpenAI-compatible gateways and single-vendor endpoints ──
-	{
-		ID:          "openrouter",
-		DisplayName: "OpenRouter",
-		Order:       150,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://openrouter.ai/api/v1",
-		BaseURLEnv:  "OPENROUTER_BASE_URL",
-		KeyEnv:      []string{"OPENROUTER_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingReasoningObject},
-		Note:        "A gateway over many upstreams; it normalizes reasoning onto reasoning:{effort}.",
-	},
-	{
-		ID:          "xai",
-		DisplayName: "xAI (Grok)",
-		Order:       160,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://api.x.ai/v1",
-		BaseURLEnv:  "XAI_BASE_URL",
-		KeyEnv:      []string{"XAI_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingEffort},
-	},
-	{
-		ID:          "zai",
-		DisplayName: "Z.ai (international)",
-		Order:       170,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://api.z.ai/api/paas/v4",
-		BaseURLEnv:  "ZAI_BASE_URL",
-		KeyEnv:      []string{"ZAI_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingType, ReasoningContent: true},
-		Note:        "Z.ai's international endpoint. A Coding Plan subscription uses a different path — set ZAI_BASE_URL to https://api.z.ai/api/coding/paas/v4.",
-	},
-	{
-		ID:          "groq",
-		DisplayName: "Groq",
-		Order:       180,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://api.groq.com/openai/v1",
-		BaseURLEnv:  "GROQ_BASE_URL",
-		KeyEnv:      []string{"GROQ_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{},
-		Note:        "No reasoning switch is stated; set Compat on a model you know reasons.",
-	},
-	{
-		ID:          "cerebras",
-		DisplayName: "Cerebras",
-		Order:       190,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://api.cerebras.ai/v1",
-		BaseURLEnv:  "CEREBRAS_BASE_URL",
-		KeyEnv:      []string{"CEREBRAS_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{},
-		Note:        "No reasoning switch is stated; set Compat on a model you know reasons.",
-	},
-	{
-		ID:          "together",
-		DisplayName: "Together AI",
-		Order:       200,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://api.together.ai/v1",
-		BaseURLEnv:  "TOGETHER_BASE_URL",
-		KeyEnv:      []string{"TOGETHER_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{},
-	},
-	{
-		ID:          "fireworks",
-		DisplayName: "Fireworks AI",
-		Order:       210,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://api.fireworks.ai/inference/v1",
-		BaseURLEnv:  "FIREWORKS_BASE_URL",
-		KeyEnv:      []string{"FIREWORKS_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{},
-	},
-	{
-		ID:          "nvidia",
-		DisplayName: "NVIDIA NIM",
-		Order:       220,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://integrate.api.nvidia.com/v1",
-		BaseURLEnv:  "NVIDIA_BASE_URL",
-		KeyEnv:      []string{"NVIDIA_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{},
-	},
-	{
-		ID:          "huggingface",
-		DisplayName: "Hugging Face",
-		Order:       230,
-		Verified:    verifiedGateways,
-		API:         ai.APIOpenAIChat,
-		BaseURL:     "https://router.huggingface.co/v1",
-		BaseURLEnv:  "HF_BASE_URL",
-		KeyEnv:      []string{"HF_TOKEN", "HUGGINGFACE_API_KEY"},
-		Compat:      ai.OpenAIChatCompat{},
-	},
 	{
 		ID:          "copilot",
 		DisplayName: "GitHub Copilot",
-		Order:       140,
-		Verified:    verifiedGateways,
 		API:         ai.APIOpenAIChat,
 		// A fallback only: Copilot reveals the endpoint the account actually
 		// talks to during sign-in, and an enterprise account's is not this
@@ -413,8 +257,6 @@ var vendors = []Vendor{
 	{
 		ID:          "openai-codex",
 		DisplayName: "ChatGPT (Codex)",
-		Order:       145,
-		Verified:    verifiedGateways,
 		API:         ai.APIOpenAIResponses,
 		BaseURL:     "https://chatgpt.com/backend-api/codex",
 		Compat:      ai.OpenAIResponsesCompat{NoMaxOutputTokens: true},
@@ -423,6 +265,92 @@ var vendors = []Vendor{
 			"The endpoint and client identifier come from OpenAI's Codex CLI, not from " +
 			"published API documentation, and are not covered by the API's compatibility " +
 			"promises.",
+	},
+	// ── OpenAI-compatible gateways and single-vendor endpoints ──
+	{
+		ID:          "openrouter",
+		DisplayName: "OpenRouter",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://openrouter.ai/api/v1",
+		BaseURLEnv:  "OPENROUTER_BASE_URL",
+		KeyEnv:      []string{"OPENROUTER_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingReasoningObject},
+		Note:        "A gateway over many upstreams; it normalizes reasoning onto reasoning:{effort}.",
+	},
+	{
+		ID:          "xai",
+		DisplayName: "xAI (Grok)",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://api.x.ai/v1",
+		BaseURLEnv:  "XAI_BASE_URL",
+		KeyEnv:      []string{"XAI_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingEffort},
+	},
+	{
+		ID:          "zai",
+		DisplayName: "Z.ai (international)",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://api.z.ai/api/paas/v4",
+		BaseURLEnv:  "ZAI_BASE_URL",
+		KeyEnv:      []string{"ZAI_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{Thinking: ai.ThinkingType, ReasoningContent: true},
+		Note:        "Z.ai's international endpoint. A Coding Plan subscription uses a different path — set ZAI_BASE_URL to https://api.z.ai/api/coding/paas/v4.",
+	},
+	{
+		ID:          "groq",
+		DisplayName: "Groq",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://api.groq.com/openai/v1",
+		BaseURLEnv:  "GROQ_BASE_URL",
+		KeyEnv:      []string{"GROQ_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{},
+		Note:        "No reasoning switch is stated; set Compat on a model you know reasons.",
+	},
+	{
+		ID:          "cerebras",
+		DisplayName: "Cerebras",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://api.cerebras.ai/v1",
+		BaseURLEnv:  "CEREBRAS_BASE_URL",
+		KeyEnv:      []string{"CEREBRAS_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{},
+		Note:        "No reasoning switch is stated; set Compat on a model you know reasons.",
+	},
+	{
+		ID:          "together",
+		DisplayName: "Together AI",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://api.together.ai/v1",
+		BaseURLEnv:  "TOGETHER_BASE_URL",
+		KeyEnv:      []string{"TOGETHER_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{},
+	},
+	{
+		ID:          "fireworks",
+		DisplayName: "Fireworks AI",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://api.fireworks.ai/inference/v1",
+		BaseURLEnv:  "FIREWORKS_BASE_URL",
+		KeyEnv:      []string{"FIREWORKS_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{},
+	},
+	{
+		ID:          "nvidia",
+		DisplayName: "NVIDIA NIM",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://integrate.api.nvidia.com/v1",
+		BaseURLEnv:  "NVIDIA_BASE_URL",
+		KeyEnv:      []string{"NVIDIA_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{},
+	},
+	{
+		ID:          "huggingface",
+		DisplayName: "Hugging Face",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     "https://router.huggingface.co/v1",
+		BaseURLEnv:  "HF_BASE_URL",
+		KeyEnv:      []string{"HF_TOKEN", "HUGGINGFACE_API_KEY"},
+		Compat:      ai.OpenAIChatCompat{},
 	},
 }
 

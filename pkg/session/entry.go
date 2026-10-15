@@ -135,8 +135,8 @@ type Outcome struct {
 // Stamped is the entry as a store writes it: numbered, and timestamped if
 // whoever handed it over did not do so already.
 //
-// This and the two below are the store contract's own arithmetic, kept here so
-// a third implementation cannot get it subtly different.
+// This is the store contract's own arithmetic, kept here so a third
+// implementation cannot get it subtly different.
 func (e Entry) Stamped(seq int64, at time.Time) Entry {
 	if e.Seq == 0 {
 		e.Seq = seq
@@ -146,18 +146,3 @@ func (e Entry) Stamped(seq int64, at time.Time) Entry {
 	}
 	return e
 }
-
-// Created is the metadata a store starts a session with: what it was asked
-// for, with the fields the store owns set.
-func (m Meta) Created(at time.Time) Meta {
-	if m.CreatedAt.IsZero() {
-		m.CreatedAt = at
-	}
-	m.UpdatedAt = at
-	m.Entries = 0
-	return m
-}
-
-// ByRecency orders sessions the way a list of them is read: most recently
-// updated first.
-func ByRecency(a, b Meta) int { return b.UpdatedAt.Compare(a.UpdatedAt) }

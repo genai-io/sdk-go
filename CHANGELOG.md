@@ -18,6 +18,31 @@ Each such change is listed under **Changed** with what to write instead.
   numbers and listing counts come from the log, with no shutdown flush or
   `Store.Close` required.
 
+### Removed
+
+- `ai.Wrap`, `ai.Middleware`, `ai.Handler` and `ai.Retry`. Decorate a driver
+  with your own `Driver`; retry with `agent.WithRetry` or a loop on
+  `ai.IsRetryable`.
+- `ai.RegisterCompat`; compat types are fixed per built-in protocol.
+- `ai.Available`; filter on `Model.Stage.Available()`.
+- `ai.AssistantMessage`; write `ai.Message{Role: ai.RoleAssistant, Content: ai.TextContent(text)}`.
+- `ai.NewClient`; call `ai.New`.
+- `ai.FindTool`, `ai.ExtractJSON`, `ai.Efforts`, `Client.Driver`,
+  `Content.ThinkingSignature`, `Error.Retryable` (use `ai.IsRetryable`) and
+  `Model.DefaultLevel`.
+- `anthropic.ClientOptions`, `NewSDKClient` and `NewWithClient`; call
+  `anthropic.NewWithOptions(cfg, api, opts...)`.
+- `catalog.Vendor.Order` and `Vendor.Verified`; `catalog.All` returns vendors
+  in display order.
+- `auth.RegisterFlow`, `auth.HTTPClient`, `auth.DefaultStorePath`, and `List`
+  from `auth.Store`.
+- `oauth.InteractionFunc`; `oauth.Interaction` is now a func type.
+- `provider.Config.Fetch`.
+- `mcp.Client.Resources`, `Prompts` and `Alive`, the `Resource` and `Prompt`
+  types, `Server.SSE`, and `mcp.Option`; set `Server.OnToolsChanged`.
+- `agent.Agent.System`.
+- `session.Read`, `Meta.Created`, `ByRecency`, and `Meta` from `session.Store`.
+
 ### Fixed
 
 - Session recency comes from the last logged event timestamp, so coarse

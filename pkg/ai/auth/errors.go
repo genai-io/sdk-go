@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -54,6 +55,4 @@ func (e *UnknownVendorError) Error() string {
 // errNoVendor reports a credential that names no vendor. Every Store rejects
 // one: it is keyed by vendor, so a credential without one could never be
 // loaded back, and accepting it would silently lose a sign-in.
-func errNoVendor() error {
-	return fmt.Errorf("auth: credential has no vendor")
-}
+var errNoVendor = errors.New("auth: credential has no vendor")

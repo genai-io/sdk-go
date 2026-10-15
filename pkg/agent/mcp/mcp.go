@@ -51,43 +51,31 @@ type Server struct {
 	// full-screen program — it paints over the interface.
 	Stderr io.Writer
 
-	// URL is reached over HTTP with Headers on every request. SSE selects the
-	// older 2024-11-05 transport; the default is streamable HTTP.
+	// URL is reached over streamable HTTP with Headers on every request.
 	URL     string
 	Headers map[string]string
-	SSE     bool
 
 	// HTTPClient is used for every request when set.
 	HTTPClient *http.Client
+
+	// OnToolsChanged is called when the server says its tool list has changed —
+	// which servers that load tools lazily, or gate them behind a login, do while
+	// connected. Read [Client.Tools] again and hand the result to
+	// agent.Agent.SetTools; the next step uses it.
+	//
+	// The client is an argument because the handler is installed before Connect
+	// returns, and a closure over that variable would race. Asking it for the
+	// tools is safe. It runs on the notification's goroutine; write `go` yourself
+	// if you want otherwise.
+	OnToolsChanged func(*Client)
 }
 
 type Client struct {
 	server  Server
 	session *mcpsdk.ClientSession
-	done    chan struct{}
 	// ready gates the change handler until session is set: it is installed
 	// before Connect, which is when the session it would ask does not exist.
 	ready atomic.Bool
-}
-
-// Option is set when a session is opened.
-type Option func(*options)
-
-type options struct {
-	toolsChanged func(*Client)
-}
-
-// OnToolsChanged is called when the server says its tool list has changed —
-// which servers that load tools lazily, or gate them behind a login, do while
-// connected. Read [Client.Tools] again and hand the result to
-// agent.Agent.SetTools; the next step uses it.
-//
-// The client is an argument because the handler is installed before Connect
-// returns, and a closure over that variable would race. Asking it for the
-// tools is safe. It runs on the notification's goroutine; write `go` yourself
-// if you want otherwise.
-func OnToolsChanged(fn func(*Client)) Option {
-	return func(o *options) { o.toolsChanged = fn }
 }
 
 // implementation is how this SDK introduces itself to a server.
@@ -95,28 +83,21 @@ var implementation = &mcpsdk.Implementation{Name: "genai-io/sdk-go", Version: "v
 
 // Connect opens a session. The client must be closed; for a command server,
 // that is what stops the child process.
-func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
+func Connect(ctx context.Context, s Server) (*Client, error) {
 	transport, err := s.transport()
 	if err != nil {
 		return nil, err
 	}
 
-	var cfg options
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
-	c := &Client{server: s, done: make(chan struct{})}
-
+	c := &Client{server: s}
 	clientOpts := &mcpsdk.ClientOptions{}
-	if cfg.toolsChanged != nil {
+	if s.OnToolsChanged != nil {
 		clientOpts.ToolListChangedHandler = func(context.Context, *mcpsdk.ToolListChangedRequest) {
 			// A server may announce a change while the handshake is still in
 			// flight. There is nothing to ask yet, and whoever just connected
 			// is about to read the tools anyway.
 			if c.ready.Load() {
-				cfg.toolsChanged(c)
+				s.OnToolsChanged(c)
 			}
 		}
 	}
@@ -127,21 +108,7 @@ func Connect(ctx context.Context, s Server, opts ...Option) (*Client, error) {
 	}
 	c.session = session
 	c.ready.Store(true)
-	go func() {
-		defer close(c.done)
-		_ = session.Wait()
-	}()
 	return c, nil
-}
-
-// Alive reports whether the session is still up.
-func (c *Client) Alive() bool {
-	select {
-	case <-c.done:
-		return false
-	default:
-		return true
-	}
 }
 
 func (s Server) transport() (mcpsdk.Transport, error) {
@@ -163,9 +130,6 @@ func (s Server) transport() (mcpsdk.Transport, error) {
 		httpClient := s.HTTPClient
 		if len(s.Headers) > 0 {
 			httpClient = withHeaders(httpClient, s.Headers)
-		}
-		if s.SSE {
-			return &mcpsdk.SSEClientTransport{Endpoint: s.URL, HTTPClient: httpClient}, nil
 		}
 		return &mcpsdk.StreamableClientTransport{Endpoint: s.URL, HTTPClient: httpClient}, nil
 	}
@@ -291,45 +255,4 @@ func decodeArgs(input string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	return args, nil
-}
-
-// Resource is something a server offers to read. Not a tool: the model cannot
-// call it, and what to do with one is the application's.
-type Resource struct {
-	URI         string
-	Name        string
-	Description string
-	// MediaType is the IANA type, named as ai.Image names it.
-	MediaType string
-}
-
-// Prompt is a prompt template a server offers, for a person to pick.
-type Prompt struct {
-	Name        string
-	Description string
-}
-
-// Resources is what this server offers to read. Reading one is not here:
-// turning a resource into ai.Message has decisions no caller has asked for yet.
-func (c *Client) Resources(ctx context.Context) ([]Resource, error) {
-	var out []Resource
-	for r, err := range c.session.Resources(ctx, nil) {
-		if err != nil {
-			return nil, fmt.Errorf("mcp: listing resources on %s: %w", c.server.describe(), err)
-		}
-		out = append(out, Resource{URI: r.URI, Name: r.Name, Description: r.Description, MediaType: r.MIMEType})
-	}
-	return out, nil
-}
-
-// Prompts is what this server offers as templates.
-func (c *Client) Prompts(ctx context.Context) ([]Prompt, error) {
-	var out []Prompt
-	for p, err := range c.session.Prompts(ctx, nil) {
-		if err != nil {
-			return nil, fmt.Errorf("mcp: listing prompts on %s: %w", c.server.describe(), err)
-		}
-		out = append(out, Prompt{Name: p.Name, Description: p.Description})
-	}
-	return out, nil
 }

@@ -72,7 +72,7 @@ func TestResumeSnapshotDoesNotAliasReturnedMessages(t *testing.T) {
 			if err := opened.Err(); err != nil {
 				t.Fatal(err)
 			}
-			got, err := session.Read(ctx, st, s.ID())
+			got, err := messages(ctx, st, s.ID())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestResumeDeduplicationEndsAfterAppendingMessage(t *testing.T) {
 	if err := opened.Append(ctx, session.Entry{Type: session.EntryConversationReplaced, Messages: history}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := session.Read(ctx, st, s.ID())
+	got, err := messages(ctx, st, s.ID())
 	if err != nil {
 		t.Fatal(err)
 	}

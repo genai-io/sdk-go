@@ -73,17 +73,3 @@ func TestAnUnregisteredProtocolSaysWhatToImport(t *testing.T) {
 		t.Error("a model with no API resolved to a driver")
 	}
 }
-
-// Wrap has to keep the optional capabilities as well as Stream, or attaching
-// middleware would quietly change what a client can do.
-func TestWrapKeepsTheOptionalCapabilities(t *testing.T) {
-	plain := Wrap(&scripted{scripts: []script{{}}})
-	c := NewClientWithDriver(plain, stubModel())
-
-	if _, err := c.Models(t.Context()); !IsUnsupported(err) {
-		t.Errorf("Models = %v, want it reported as unsupported", err)
-	}
-	if _, err := c.CountTokens(t.Context(), []Message{UserMessage("hi")}); err != nil {
-		t.Errorf("CountTokens: %v, want it to fall back to an estimate", err)
-	}
-}

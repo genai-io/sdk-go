@@ -88,11 +88,9 @@ agent.WithContinuation(2, "你的回答被输出上限截断了。从你停下�
 
 循环知道这件事**什么时候**发生;要不要为更多 token 付费、以及说什么,是你的 —— 所以它**默认关**。这句 prompt 作为普通消息进入对话,并作为 `MessageAdded` 播报,所以会话会记下问了什么。次数用完仍然以 `max_tokens` 收尾:答案本来就是断的。
 
-### 重试归 client
+### 重试
 
-`ai.Retry(attempts, backoff)` 包在 driver 外面,那才是重试该待的地方。**agent 默认不重试**,因为两份预算是相乘不是相加:client 已经 `ai.Retry(3, …)` 了,agent 这边再来三次,一个 step 就是九次模型调用,而且两个循环互相看不见对方的计数。
-
-`WithRetry(attempts, backoff)` 是**显式**再开一份预算,给的是 client replay 不了的两种失败:**已经吐过内容的流**——`ai.Retry` 在这里会放弃,因为它的调用方已经看见了,而这个循环会丢弃这次尝试、另开一条消息——以及**卡住的流**,因为结束一次卡住就会取消掉 `ai.Retry` 要等的那个 context。两种情况下,等待都先看端点给的 `Retry-After`,再退到自己的退避。
+driver 自己不重试,**agent 默认也不重试**。`WithRetry(attempts, backoff)` 打开它,**已经吐过内容的流**也重放——循环丢弃这次尝试、另开一条消息——**卡住的流**也一样。等待先看端点给的 `Retry-After`,再退到自己的退避。
 
 `Interrupt()` 结束正在进行的交换,**但 agent 还活着**:这个 turn 以 `StopCanceled` 收尾,`Run` 返回,下一轮干净地开始。这就是用户按 ESC 想要的效果。
 
@@ -373,7 +371,7 @@ a, err := agent.New(client, agent.WithTools(tools...))
 
 **失败的工具会同时交回内容和错误。** 循环把内容告诉模型——服务器把原因写在那里,模型据此自我纠正——同时把这次调用记为失败。MCP 规范自己也是这么说的:工具自身的失败属于 content 加 `isError`,而不是协议级错误,「否则 LLM 就看不到出过错,也就无法自我纠正」。
 
-**服务器在连接期间可能改变它提供的工具**——懒加载的、或者登录后才放出来的。`mcp.OnToolsChanged` 会告诉你;重新读一次 `Client.Tools`,把结果交给 `SetTools`,下一个 step 就会用上。`Client` 还答 `Resources` 和 `Prompts`,给要展示服务器还带了什么的界面用;以及 `Alive`,给需要察觉服务器死掉的那一方。
+**服务器在连接期间可能改变它提供的工具**——懒加载的、或者登录后才放出来的。`Server.OnToolsChanged` 会告诉你;重新读一次 `Client.Tools`,把结果交给 `SetTools`,下一个 step 就会用上。
 
 ### 从工具里结束一个 turn
 
@@ -416,7 +414,7 @@ flowchart LR
 Agent 自己管理运行和实时原生消息。恢复返回的 `[]ai.Message` 是数据，没有独立生命周期。
 
 `session.Create` 创建新会话；`session.Open` 恢复已有会话；
-`session.Read` 是普通读取；`session.Open` 返回需要关闭的会话。恢复同一 ID 前先关闭
+`session.Open` 返回需要关闭的会话。恢复同一 ID 前先关闭
 旧句柄。自定义 Store 必须实现 `Claim`，释放函数必须幂等。底层存储操作属于实现约定，
 写入时必须遵守会话所有权。`Writer`、`Handle`、`Record` 和回调工厂均无兼容别名。
 对话替换明确命名为 `EntryConversationReplaced`，载荷保留原生 `Messages`。
@@ -499,7 +497,6 @@ type Store interface {
     Create(ctx context.Context, meta Meta) (Meta, error)
     Append(ctx context.Context, id string, entries ...Entry) error
     Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
-    Meta(ctx context.Context, id string) (Meta, error)
 }
 ```
 

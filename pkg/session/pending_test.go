@@ -34,7 +34,7 @@ func TestPendingInputSurvivesFailedSessionResume(t *testing.T) {
 	if err := rec.Close(); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := session.Read(ctx, st, rec.ID())
+	messages, err := messages(ctx, st, rec.ID())
 	if err != nil {
 		t.Fatal(err)
 	}

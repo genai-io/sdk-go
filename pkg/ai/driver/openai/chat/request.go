@@ -62,11 +62,6 @@ func (d *Driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatC
 	return params
 }
 
-// thinkingOn reports whether a rung asks for any reasoning at all.
-func thinkingOn(level ai.ReasoningLevel) bool {
-	return level.Value != "" || level.Budget > 0
-}
-
 // toolChoice maps the neutral constraint onto Chat Completions. A nil result
 // leaves the field off, which is the API's own default.
 func toolChoice(req *ai.Request) *sdk.ChatCompletionToolChoiceOptionUnionParam {
@@ -90,7 +85,8 @@ func (d *Driver) applyReasoning(params *sdk.ChatCompletionNewParams, level ai.Re
 	if d.compat.Thinking == ai.ThinkingNone || level.Effort == ai.EffortDefault {
 		return
 	}
-	on := thinkingOn(level)
+	// on is whether the rung asks for any reasoning at all.
+	on := level.Value != "" || level.Budget > 0
 
 	switch d.compat.Thinking {
 	case ai.ThinkingEffort:

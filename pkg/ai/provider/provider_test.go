@@ -1,13 +1,31 @@
 package provider
 
 import (
-	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	_ "github.com/genai-io/sdk-go/pkg/ai/driver/openai/chat"
 )
+
+// listing serves an OpenAI-style model listing, which is what Refresh asks a
+// Chat provider for, and returns its base URL.
+func listing(t *testing.T, serve http.HandlerFunc) string {
+	t.Helper()
+	srv := httptest.NewServer(serve)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func models(body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":` + body + `}`))
+	}
+}
 
 // TestMergeListing pins the rule the whole package exists for: the host is
 // authoritative about what exists and about any figure it reported, and the
@@ -136,10 +154,9 @@ func TestAListedFigureBeatsTheResolver(t *testing.T) {
 	p := New(Config{
 		ID:      "acme",
 		API:     ai.APIOpenAIChat,
+		APIKey:  "k",
+		BaseURL: listing(t, models(`[{"id":"acme-pro","context_length":900}]`)),
 		Resolve: fill,
-		Fetch: func(context.Context, *Provider) ([]ai.Model, error) {
-			return []ai.Model{{ID: "acme-pro", ContextWindow: 900}}, nil
-		},
 	})
 	if err := p.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
@@ -157,24 +174,26 @@ func TestAListedFigureBeatsTheResolver(t *testing.T) {
 // picker has to keep rendering when the endpoint goes down.
 func TestRefreshFailureLeavesThePreviousListing(t *testing.T) {
 	fail := false
-	boom := errors.New("endpoint is down")
+	ok := models(`[{"id":"acme-pro","context_length":900}]`)
 	p := New(Config{
-		ID:  "acme",
-		API: ai.APIOpenAIChat,
-		Fetch: func(context.Context, *Provider) ([]ai.Model, error) {
+		ID:     "acme",
+		API:    ai.APIOpenAIChat,
+		APIKey: "k",
+		BaseURL: listing(t, func(w http.ResponseWriter, r *http.Request) {
 			if fail {
-				return nil, boom
+				http.Error(w, "endpoint is down", http.StatusServiceUnavailable)
+				return
 			}
-			return []ai.Model{{ID: "acme-pro", ContextWindow: 900}}, nil
-		},
+			ok(w, r)
+		}),
 	})
 
 	if err := p.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	fail = true
-	if err := p.Refresh(t.Context()); !errors.Is(err, boom) {
-		t.Fatalf("Refresh err = %v, want the fetch failure", err)
+	if err := p.Refresh(t.Context()); err == nil {
+		t.Fatal("Refresh = nil, want the listing failure")
 	}
 
 	models := p.Models()
@@ -183,8 +202,7 @@ func TestRefreshFailureLeavesThePreviousListing(t *testing.T) {
 	}
 }
 
-// TestRefreshWithNothingToAsk covers the provider that has neither a fetcher
-// nor a protocol: there is nothing to ask, which is not a failure.
+// TestRefreshWithNothingToAsk covers the provider that has no protocol: there is nothing to ask, which is not a failure.
 func TestRefreshWithNothingToAsk(t *testing.T) {
 	if err := New(Config{ID: "acme"}).Refresh(t.Context()); err != nil {
 		t.Errorf("Refresh = %v, want nil for a provider with no protocol to ask", err)
@@ -197,12 +215,8 @@ func TestModelsMergesTheListingOverTheBaseline(t *testing.T) {
 		Models: []ai.Model{
 			{ID: "acme-pro", Name: "Acme Pro", API: ai.APIOpenAIChat, ContextWindow: 100, MaxOutput: 10},
 		},
-		Fetch: func(context.Context, *Provider) ([]ai.Model, error) {
-			return []ai.Model{
-				{ID: "ACME-PRO", ContextWindow: 900},
-				{ID: "acme-new"},
-			}, nil
-		},
+		APIKey:  "k",
+		BaseURL: listing(t, models(`[{"id":"ACME-PRO","context_length":900},{"id":"acme-new"}]`)),
 	})
 	if err := p.Refresh(t.Context()); err != nil {
 		t.Fatal(err)

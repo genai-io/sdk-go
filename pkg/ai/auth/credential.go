@@ -51,9 +51,6 @@ type Store interface {
 	// Delete forgets a vendor's credential. Deleting one that is not there
 	// succeeds.
 	Delete(vendor string) error
-
-	// List names the vendors with a stored credential, in no particular order.
-	List() ([]string, error)
 }
 
 // DefaultStore is where Login, Config, and Endpoint keep credentials when

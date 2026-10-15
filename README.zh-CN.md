@@ -259,7 +259,7 @@ response, err := client.Complete(ctx, messages,
 ```go
 messages := []ai.Message{
 	ai.UserMessage("What is in this image?", image),
-	ai.AssistantMessage("A gopher."),
+	{Role: ai.RoleAssistant, Content: ai.TextContent("A gopher.")},
 	ai.ToolResultsMessage(result),
 }
 
@@ -269,7 +269,7 @@ history = append(history, response.Message()) // 保留每一个块，保序
 
 **工具结果也是内容**：文本，以及协议能带的图片——一张截图、一张渲染出来的图。`Model.Validate` 会在那两个带不了的协议上**拒绝请求**，而不是把图悄悄丢掉、让模型去回答一张它从没看见过的图。
 
-**用 `response.Message()`，不要用 `ai.AssistantMessage(response.Text())`** —— 前者把 thinking 和 reasoning 状态带到下一轮，那正是让推理模型能接着想、而不是每轮从头想的东西。
+**用 `response.Message()`，不要拿 `response.Text()` 重新拼一条消息** —— 前者把 thinking 和 reasoning 状态带到下一轮，那正是让推理模型能接着想、而不是每轮从头想的东西。
 
 ### 错误与执行策略
 
@@ -286,13 +286,7 @@ case ai.IsUnsupported(err):     // 这个模型做不了要求它做的事
 
 失败的一轮会**同时**返回非 nil 的 error 和非 nil 的 `*Response`，装着先到的那部分——**部分答案和它的花费不会跟着错误一起丢掉**。请求发出前就会校验，而且**绝不会被改写成"能跑"**：模型没有 system 角色就报错并指名道姓，因为把那些指令挪进 user 轮是**关于你产品的决定**。
 
-执行策略是装饰 driver 的 `Middleware`：
-
-```go
-client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
-```
-
-`Retry` 是唯一自带的策略，而且**每个 driver 都关掉了厂商 SDK 自己的重试**——不加它就一次重试都没有。缓存、日志、成本统计都归你。
+**每个 driver 都关掉了厂商 SDK 自己的重试**，所以一次调用只试一次。重试用 agent 的 `WithRetry`，或者自己围着 `IsRetryable` 写个循环；缓存、日志、成本统计都归你。
 
 ### 凭证
 
@@ -396,7 +390,7 @@ flowchart LR
 
 压缩是一个 `PreStep`：循环把对话和"发出去要花多少"交给你，而更短的那份该说什么，是你的事。
 
-重试归 client：`ai.Retry` 包在 driver 外面，所以 agent 默认一次都不重试——两份预算是相乘不是相加。重放救不回来的那些——prompt 超过窗口、密钥配额用完——是 `OnInferError`：它用一份更短的对话回答一次失败的调用，并要求这一步再来一次。
+重试默认关闭，`WithRetry` 打开它。重放救不回来的那些——prompt 超过窗口、密钥配额用完——是 `OnInferError`：它用一份更短的对话回答一次失败的调用，并要求这一步再来一次。
 
 ### 会话
 

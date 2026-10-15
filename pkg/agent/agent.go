@@ -165,17 +165,9 @@ func WithContinuation(attempts int, prompt string) Option {
 }
 
 // WithRetry replays a failed model call, at most attempts times, waiting
-// backoff before the second and doubling after each further failure — the same
-// rule and arguments as ai.Retry.
-//
-// Off by default, and that is the point: retry belongs on the client, and two
-// budgets multiply rather than add. Three attempts here on a client wrapped in
-// ai.Retry(3, …) is nine model calls for one step, with neither loop able to
-// see the other's count.
-//
-// Turn it on for what the client cannot replay: a stream that already yielded
-// output, which ai.Retry gives up on because its caller has seen it, and a
-// stalled one, since ending a stall cancels the context ai.Retry would wait on.
+// backoff before the second and doubling after each further failure. A stream
+// that already yielded output is replayed as a new message, and a stalled one
+// is ended and replayed. Off by default; no driver retries on its own.
 func WithRetry(attempts int, backoff time.Duration) Option {
 	return func(a *Agent) {
 		if attempts > 0 {
@@ -333,13 +325,6 @@ func (a *Agent) Client() *ai.Client {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.client
-}
-
-// System returns the system prompt as it stands.
-func (a *Agent) System() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.system
 }
 
 // SetSystem replaces the system prompt. It takes effect on the next inference,

@@ -1,10 +1,6 @@
 package auth
 
-import (
-	"maps"
-	"slices"
-	"sync"
-)
+import "sync"
 
 // memStore keeps credentials in memory: the second Store, which these tests
 // swap in for the file one. The zero value is ready to use.
@@ -22,7 +18,7 @@ func (s *memStore) Load(vendor string) (Credential, bool, error) {
 
 func (s *memStore) Save(c Credential) error {
 	if c.Vendor == "" {
-		return errNoVendor()
+		return errNoVendor
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -38,10 +34,4 @@ func (s *memStore) Delete(vendor string) error {
 	defer s.mu.Unlock()
 	delete(s.m, vendor)
 	return nil
-}
-
-func (s *memStore) List() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Collect(maps.Keys(s.m)), nil
 }

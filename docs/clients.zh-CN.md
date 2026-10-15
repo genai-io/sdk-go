@@ -124,14 +124,14 @@ client, err := ai.New(ai.Config{
 
 ## 停在 `ai.NewDriver`
 
-执行策略——重试、成本统计、缓存、日志——是**装饰 driver 的 `Middleware`**，所以它需要拿到 driver 这个值：
+执行策略——成本统计、缓存、日志——是**装饰 driver**，所以它需要拿到 driver 这个值：
 
 ```go
 driver, err := ai.NewDriver(cfg)
-client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), cfg.Model)
+client := ai.NewClientWithDriver(metered{driver}, cfg.Model)
 ```
 
-`Retry` 是这里唯一自带的策略，而且**每个 driver 都关掉了它厂商 SDK 自己的重试**，所以不加它就一次重试都没有。顺序是**最外层在前**：第一个 middleware 最先看到请求、最后看到响应。一个 `Middleware` 是"包着 `Handler` 的 `Handler`"，和 `Driver.Stream` 同一个形状，所以你写的任何东西都能和自带的组合起来。
+装饰器嵌入 `Driver`、覆盖 `Stream`；`Models` 和 `CountTokens` 也要转发，否则 client 就不再提供它们。**每个 driver 都关掉了厂商 SDK 自己的重试**，所以一次调用只试一次。
 
 ## 停在 `ai.NewClientWithDriver`
 

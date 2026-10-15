@@ -198,8 +198,8 @@ const (
 	EffortMax   Effort = "max"
 )
 
-// Efforts is the canonical ordering, least to most, excluding EffortDefault.
-var Efforts = []Effort{
+// efforts is the canonical ordering, least to most, excluding EffortDefault.
+var efforts = []Effort{
 	EffortOff, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax,
 }
 
@@ -214,7 +214,7 @@ func (e Effort) Valid() bool {
 }
 
 func effortRank(e Effort) (int, bool) {
-	i := slices.Index(Efforts, e)
+	i := slices.Index(efforts, e)
 	return i, i >= 0
 }
 

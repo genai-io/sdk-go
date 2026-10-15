@@ -664,15 +664,38 @@ func TestAppendRejectsMalformedCustomEvents(t *testing.T) {
 	if err := opened.Append(ctx, session.Entry{Type: session.EntryCustom, Custom: &session.Custom{Kind: "hook.fired"}}); err != nil {
 		t.Fatal(err)
 	}
-	meta, err := st.Meta(ctx, opened.ID())
-	if err != nil || meta.Entries != 1 {
-		t.Fatalf("invalid events entered the log: %+v, %v", meta, err)
+	if n, err := entryCount(ctx, st, opened.ID()); err != nil || n != 1 {
+		t.Fatalf("invalid events entered the log: %d entries, %v", n, err)
 	}
 }
 
-// messages reads a session's conversation back without recording into it.
+// messages reads a session's conversation back without claiming it, so a test
+// can look while the writer still holds the session.
 func messages(ctx context.Context, st session.Store, id string) ([]ai.Message, error) {
-	return session.Read(ctx, st, id)
+	var out []ai.Message
+	for entry, err := range st.Entries(ctx, id) {
+		if err != nil {
+			return nil, err
+		}
+		switch entry.Type {
+		case session.EntryConversationReplaced:
+			out = slices.Clone(entry.Messages)
+		case session.EntryMessage:
+			out = append(out, *entry.Message)
+		}
+	}
+	return out, nil
+}
+
+func entryCount(ctx context.Context, st session.Store, id string) (int, error) {
+	n := 0
+	for _, err := range st.Entries(ctx, id) {
+		if err != nil {
+			return 0, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
@@ -723,9 +746,8 @@ func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
 				_ = competing.Close()
 				t.Fatal("old Close released the newer claim")
 			}
-			meta, err := st.Meta(ctx, reopened.ID())
-			if err != nil || meta.Entries != 1 {
-				t.Fatalf("late event wrote an entry: %+v, %v", meta, err)
+			if n, err := entryCount(ctx, st, reopened.ID()); err != nil || n != 1 {
+				t.Fatalf("late event wrote an entry: %d entries, %v", n, err)
 			}
 		})
 	}

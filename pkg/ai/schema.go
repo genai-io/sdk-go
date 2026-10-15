@@ -66,14 +66,31 @@ func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts 
 // DefinitionMap returns an independent JSON-object representation of the
 // schema, or nil when Definition cannot be represented as a JSON object.
 func (s Schema) DefinitionMap() map[string]any {
-	return jsonSchemaObject(s.Definition)
+	switch def := s.Definition.(type) {
+	case map[string]any:
+		return maps.Clone(def)
+	case nil:
+		return nil
+	default:
+		// A caller who built the schema from a struct or a typed value gets it
+		// re-encoded rather than dropped.
+		raw, err := json.Marshal(def)
+		if err != nil {
+			return nil
+		}
+		var out map[string]any
+		if json.Unmarshal(raw, &out) != nil {
+			return nil
+		}
+		return out
+	}
 }
 
 // Validate checks a JSON document against the schema. An empty document is
 // read as an empty object, which is what every protocol sends for a call that
 // takes no arguments. A schema with no definition accepts anything.
 func (s Schema) Validate(input string) error {
-	definition := jsonSchemaObject(s.Definition)
+	definition := s.DefinitionMap()
 	if len(definition) == 0 {
 		return nil
 	}
@@ -101,28 +118,6 @@ func (s Schema) WireName() string {
 		return "response"
 	}
 	return s.Name
-}
-
-// jsonSchemaObject renders a schema definition as an independent JSON object.
-func jsonSchemaObject(value any) map[string]any {
-	switch def := value.(type) {
-	case map[string]any:
-		return maps.Clone(def)
-	case nil:
-		return nil
-	default:
-		// A caller who built the schema from a struct or a typed value gets it
-		// re-encoded rather than dropped.
-		raw, err := json.Marshal(def)
-		if err != nil {
-			return nil
-		}
-		var out map[string]any
-		if json.Unmarshal(raw, &out) != nil {
-			return nil
-		}
-		return out
-	}
 }
 
 func cloneSchema(schema *Schema) *Schema {

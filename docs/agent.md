@@ -121,19 +121,13 @@ message and is reported as `MessageAdded`, so a session records what was asked.
 Running out of attempts still ends with `max_tokens`: the answer is still cut
 off.
 
-### Retry belongs to the client
+### Retry
 
-`ai.Retry(attempts, backoff)` wraps the driver and is where retry goes. The
-agent does not retry by default, because two budgets multiply rather than add:
-three attempts here on a client already wrapped in `ai.Retry(3, …)` is nine
-model calls for one step, and neither loop can see the other's count.
-
-`WithRetry(attempts, backoff)` turns on a second budget deliberately, for the
-two failures the client cannot replay: a stream that already yielded output —
-`ai.Retry` gives up there, because its caller has seen it, where this loop
-discards the attempt and opens a new message — and a stalled stream, since
-ending one cancels the context `ai.Retry` would wait on. Either way the wait
-honours the endpoint's `Retry-After` before its own backoff.
+No driver retries on its own, and the agent does not retry by default.
+`WithRetry(attempts, backoff)` turns it on, including for a stream that already
+yielded output — the loop discards the attempt and opens a new message — and
+for a stalled stream. The wait honours the endpoint's `Retry-After` before its
+own backoff.
 
 `Interrupt()` ends the exchange in flight and leaves the agent alive: the turn
 stops with `StopCanceled`, `Run` returns, and the next one starts clean. That
@@ -558,11 +552,9 @@ protocol error, "otherwise the LLM would not be able to see that an error
 occurred and self-correct."
 
 **A server may change what it offers while connected** — one that loads tools
-lazily, or gates them behind a login. `mcp.OnToolsChanged` says so; read
+lazily, or gates them behind a login. `Server.OnToolsChanged` says so; read
 `Client.Tools` again and hand the result to `Agent.SetTools`,
-which the next step picks up. `Client` also answers `Resources` and `Prompts`
-for an interface that shows what else a server brought, and `Alive` for one
-that has to notice a server dying.
+which the next step picks up.
 
 ### Ending a turn from a tool
 
@@ -615,7 +607,7 @@ entries; `RecordEvent` adapts the native stream to the same implementation.
 The agent owns its live native messages and execution. The restored `[]ai.Message`
 is data handed to the agent, with no independent save method or lifecycle.
 `session.Create` opens a new identity; `session.Open` restores an existing one.
-`session.Read` reads without opening a writer. `session.Open` returns an owned
+`session.Open` returns an owned
 Session, so close it before reopening the same identity. Custom stores implement
 `Claim`; the returned release must be idempotent. Raw storage operations are the
 implementation contract and callers must respect session ownership when writing.
@@ -733,7 +725,6 @@ type Store interface {
     Create(ctx context.Context, meta Meta) (Meta, error)
     Append(ctx context.Context, id string, entries ...Entry) error
     Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
-    Meta(ctx context.Context, id string) (Meta, error)
 }
 ```
 

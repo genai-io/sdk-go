@@ -3,10 +3,8 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 )
 
@@ -22,12 +20,12 @@ type FileStore struct {
 
 var fileStores sync.Map // absolute path -> *FileStore; shares writes and refreshes
 
-// NewFileStore returns a store backed by path. An empty path uses
-// DefaultStorePath.
+// NewFileStore returns a store backed by path. An empty path means
+// genai-io/credentials.json under XDG_CONFIG_HOME, or ~/.config.
 func NewFileStore(path string) (*FileStore, error) {
 	if path == "" {
 		var err error
-		if path, err = DefaultStorePath(); err != nil {
+		if path, err = defaultStorePath(); err != nil {
 			return nil, err
 		}
 	}
@@ -39,9 +37,9 @@ func NewFileStore(path string) (*FileStore, error) {
 	return store.(*FileStore), nil
 }
 
-// DefaultStorePath is where FileStore writes when given no path: under
+// defaultStorePath is where FileStore writes when given no path: under
 // XDG_CONFIG_HOME if it is set, otherwise ~/.config.
-func DefaultStorePath() (string, error) {
+func defaultStorePath() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -68,7 +66,7 @@ func (s *FileStore) Load(vendor string) (Credential, bool, error) {
 // Save keeps a credential, replacing any held for the same vendor.
 func (s *FileStore) Save(c Credential) error {
 	if c.Vendor == "" {
-		return errNoVendor()
+		return errNoVendor
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -93,17 +91,6 @@ func (s *FileStore) Delete(vendor string) error {
 	}
 	delete(all, vendor)
 	return s.write(all)
-}
-
-// List names the vendors this store holds a credential for.
-func (s *FileStore) List() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	all, err := s.read()
-	if err != nil {
-		return nil, err
-	}
-	return slices.Collect(maps.Keys(all)), nil
 }
 
 func (s *FileStore) read() (map[string]Credential, error) {

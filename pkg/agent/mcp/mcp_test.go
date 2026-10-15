@@ -62,15 +62,6 @@ func serve() {
 			}, nil, nil
 		})
 
-	s.AddResource(&mcpsdk.Resource{URI: "file:///tmp/notes.md", Name: "notes", MIMEType: "text/markdown"},
-		func(context.Context, *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
-			return &mcpsdk.ReadResourceResult{}, nil
-		})
-	s.AddPrompt(&mcpsdk.Prompt{Name: "review", Description: "Review a diff."},
-		func(context.Context, *mcpsdk.GetPromptRequest) (*mcpsdk.GetPromptResult, error) {
-			return &mcpsdk.GetPromptResult{}, nil
-		})
-
 	if os.Getenv(notifyEnv) == "1" {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -269,24 +260,6 @@ func schemaJSON(t *testing.T, s ai.Schema) string {
 	return string(b)
 }
 
-// A session that ended has to say so. A child process that died is otherwise
-// indistinguishable from an idle one until the next call hangs.
-func TestASessionSaysWhenItIsOver(t *testing.T) {
-	c := connect(t, "")
-	if !c.Alive() {
-		t.Fatal("a session reported itself dead as soon as it connected")
-	}
-	if err := c.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	for deadline := time.Now().Add(5 * time.Second); c.Alive(); {
-		if time.Now().After(deadline) {
-			t.Fatal("a closed session still reports itself alive")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // A tool the loop is given must survive the client that produced it being
 // asked for its tools again — the application re-reads them on every change.
 func TestToolsAreReadFreshRatherThanCached(t *testing.T) {
@@ -307,31 +280,6 @@ func TestToolsAreReadFreshRatherThanCached(t *testing.T) {
 	}
 }
 
-// An application shows what a server brought, which is more than its tools: the
-// /mcp listing in San counts resources and prompts beside them.
-func TestAServerAlsoSaysWhatElseItOffers(t *testing.T) {
-	c := connect(t, "")
-
-	resources, err := c.Resources(t.Context())
-	if err != nil {
-		t.Fatalf("Resources: %v", err)
-	}
-	if len(resources) != 1 || resources[0].URI != "file:///tmp/notes.md" {
-		t.Fatalf("resources = %+v, want the one the server offers", resources)
-	}
-	if resources[0].MediaType != "text/markdown" {
-		t.Errorf("media type = %q", resources[0].MediaType)
-	}
-
-	prompts, err := c.Prompts(t.Context())
-	if err != nil {
-		t.Fatalf("Prompts: %v", err)
-	}
-	if len(prompts) != 1 || prompts[0].Name != "review" {
-		t.Fatalf("prompts = %+v, want the one the server offers", prompts)
-	}
-}
-
 // A server that adds a tool while connected says so, and the handler has to be
 // able to ask what the tools now are — that is the only useful thing to do in
 // one. It works because the protocol layer dispatches the notification off the
@@ -343,14 +291,15 @@ func TestAToolsChangedHandlerCanAskWhatChanged(t *testing.T) {
 	c, err := mcp.Connect(t.Context(), mcp.Server{
 		Command: os.Args[0],
 		Env:     map[string]string{serverEnv: "1", notifyEnv: "1"},
-	}, mcp.OnToolsChanged(func(c *mcp.Client) {
-		tools, err := c.Tools(context.Background())
-		if err != nil {
-			saw <- -1
-			return
-		}
-		saw <- len(tools)
-	}))
+		OnToolsChanged: func(c *mcp.Client) {
+			tools, err := c.Tools(context.Background())
+			if err != nil {
+				saw <- -1
+				return
+			}
+			saw <- len(tools)
+		},
+	})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

@@ -109,25 +109,6 @@
 //		}
 //	}
 //
-// # Middleware
-//
-// Middleware wraps execution policy — retry, logging, caching, metering. It
-// decorates the driver rather than the client, because Handler and
-// Driver.Stream are the same shape, so a wrapped driver is still a Driver —
-// the shape net/http uses for the same job:
-//
-//	client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
-//
-// Retry is the one policy shipped here, because every driver disables its
-// vendor SDK's own and the rule for writing one is easy to get wrong. The rest
-// stays the caller's.
-//
-// The policy itself belongs to the caller, who alone knows the budget for a
-// turn and what must not be logged. One rule is not theirs to discover: a
-// retry may only replay a call that failed before any content reached the
-// caller — a delta of usage or a model ID is not content, and a stream that
-// opens with one and then fails is still replayable.
-//
 // # Where things live
 //
 // A file is named for the subject it owns, and owns all of it. If two files
@@ -147,7 +128,7 @@
 //	compat.go      where one endpoint differs from its protocol's owner
 //	pricing.go     a rate card, and the money one call cost
 //
-//	client.go      one call: prepared, wrapped, run, and streamed back
+//	client.go      one call: prepared, run, and streamed back
 //	retry.go       the one execution policy this package ships, and why
 //	history.go     the repairs every protocol needs
 //	validate.go    everything caught before the network

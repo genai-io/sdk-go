@@ -207,10 +207,10 @@ func (m Model) Offers(e Effort) bool {
 	return slices.ContainsFunc(m.Reasoning, func(l ReasoningLevel) bool { return l.Effort == e })
 }
 
-// DefaultLevel returns the rung used when a request leaves Effort unset, and
+// defaultLevel returns the rung used when a request leaves Effort unset, and
 // whether the model states one. A model with a ladder but no default sends
 // nothing, leaving the provider's own default in place.
-func (m Model) DefaultLevel() (ReasoningLevel, bool) {
+func (m Model) defaultLevel() (ReasoningLevel, bool) {
 	for _, level := range m.Reasoning {
 		if level.Default {
 			return level, true
@@ -236,7 +236,7 @@ func (m Model) pickLevel(want Effort) (ReasoningLevel, bool) {
 		return ReasoningLevel{}, false
 	}
 	if want == EffortDefault {
-		return m.DefaultLevel()
+		return m.defaultLevel()
 	}
 	for _, level := range m.Reasoning {
 		if level.Effort == want {
@@ -246,7 +246,7 @@ func (m Model) pickLevel(want Effort) (ReasoningLevel, bool) {
 
 	rank, ok := effortRank(want)
 	if !ok {
-		return m.DefaultLevel()
+		return m.defaultLevel()
 	}
 	// Upward first.
 	for _, level := range m.Reasoning {
@@ -260,7 +260,7 @@ func (m Model) pickLevel(want Effort) (ReasoningLevel, bool) {
 			return m.Reasoning[i], true
 		}
 	}
-	return m.DefaultLevel()
+	return m.defaultLevel()
 }
 
 // String returns "vendor/id", or just the ID for a model with no vendor.
@@ -313,10 +313,9 @@ func (m *Model) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	t, ok := compatType(in.API)
+	t, ok := compatTypes[in.API]
 	if !ok {
-		return fmt.Errorf("ai: model %s carries compat for unregistered protocol %q; "+
-			"call RegisterCompat for it, or the model would load with its quirks silently dropped", m, in.API)
+		return fmt.Errorf("ai: model %s carries compat for unknown protocol %q", m, in.API)
 	}
 	compat := reflect.New(t)
 	if err := json.Unmarshal(in.Compat, compat.Interface()); err != nil {
@@ -366,19 +365,6 @@ const (
 
 // Available reports whether the model still serves requests.
 func (s Stage) Available() bool { return s != StageRetired }
-
-// Available returns the models that still serve requests, dropping retired
-// ones. A model picker wants this; a lookup by ID does not, because answering
-// "that one was retired, use this instead" needs the entry to still be there.
-func Available(models []Model) []Model {
-	out := make([]Model, 0, len(models))
-	for _, m := range models {
-		if m.Stage.Available() {
-			out = append(out, m)
-		}
-	}
-	return out
-}
 
 // Clone returns a model snapshot whose mutable fields do not alias m.
 // A Model handed to a caller is always one of these: the catalog's rows are a

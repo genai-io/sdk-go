@@ -16,6 +16,4 @@ type Store interface {
 	Append(ctx context.Context, id string, entries ...Entry) error
 	// Entries reads from the beginning and stops at the first error.
 	Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
-	// Meta reads one session's metadata, or ErrNotFound.
-	Meta(ctx context.Context, id string) (Meta, error)
 }

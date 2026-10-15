@@ -30,11 +30,6 @@ func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
 //	other := ai.NewClientWithDriver(driver, tweaked)                         // talk to a different model
 func (c *Client) Model() Model { return c.model.Clone() }
 
-// Driver returns the driver this client calls through, so a caller who built
-// the client from a Config can still reach the protocol seam — to wrap it in
-// Middleware, or to ask it for an optional capability.
-func (c *Client) Driver() Driver { return c.driver }
-
 // unsupportedBy reports that a driver does not implement an optional
 // capability, naming both so the message says what to do about it.
 func unsupportedBy(d Driver, capability string) error {
@@ -185,7 +180,7 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 	// The system prompt travels outside Messages, so Repair never sees it.
 	req.System = sanitizeText(req.System)
 	// History repair is semantic preparation, not wire translation. Doing it
-	// once here makes exact counting, estimated counting, middleware and
+	// once here makes exact counting, estimated counting and
 	// generation observe the same conversation.
 	req.Messages = Repair(req.Messages)
 	// And then the reasoning state this model cannot replay, which is what
@@ -196,51 +191,6 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 		return nil, err
 	}
 	return req, nil
-}
-
-// Handler runs one model call: the seam every middleware wraps.
-type Handler func(ctx context.Context, req *Request) iter.Seq2[Delta, error]
-
-// Middleware wraps a Handler.
-type Middleware func(Handler) Handler
-
-// Wrap returns a Driver that runs mw around d, outermost first.
-//
-//	client := ai.NewClientWithDriver(ai.Wrap(driver, retry, costMeter), model)
-func Wrap(d Driver, mw ...Middleware) Driver {
-	h := Handler(d.Stream)
-	for i := len(mw) - 1; i >= 0; i-- {
-		h = mw[i](h)
-	}
-	return wrapped{Driver: d, handler: h}
-}
-
-// wrapped forwards the optional driver capabilities as well as Stream: a
-// decorated driver that silently stopped being a ModelLister would change what
-// the client can do depending on whether middleware happened to be attached.
-type wrapped struct {
-	Driver
-	handler Handler
-}
-
-func (w wrapped) Stream(ctx context.Context, req *Request) iter.Seq2[Delta, error] {
-	return w.handler(ctx, req)
-}
-
-func (w wrapped) Models(ctx context.Context) ([]Model, error) {
-	lister, ok := w.Driver.(ModelLister)
-	if !ok {
-		return nil, unsupportedBy(w.Driver, "model listing")
-	}
-	return lister.Models(ctx)
-}
-
-func (w wrapped) CountTokens(ctx context.Context, req *Request) (int, error) {
-	counter, ok := w.Driver.(TokenCounter)
-	if !ok {
-		return 0, unsupportedBy(w.Driver, "token counting")
-	}
-	return counter.CountTokens(ctx, req)
 }
 
 // EventType identifies one stage in a streamed block's lifecycle.

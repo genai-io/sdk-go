@@ -77,8 +77,8 @@ func TestClassifyReadsEachSignalWhereItBelongs(t *testing.T) {
 			if got.Kind != tc.want {
 				t.Errorf("kind = %q, want %q", got.Kind, tc.want)
 			}
-			if got.Retryable() != tc.retryable {
-				t.Errorf("retryable = %v, want %v", got.Retryable(), tc.retryable)
+			if IsRetryable(got) != tc.retryable {
+				t.Errorf("retryable = %v, want %v", IsRetryable(got), tc.retryable)
 			}
 			if got.RetryAfter != tc.after {
 				t.Errorf("retry-after = %v, want %v", got.RetryAfter, tc.after)

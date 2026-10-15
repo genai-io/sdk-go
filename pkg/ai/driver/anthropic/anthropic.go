@@ -54,23 +54,34 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
 		return nil, err
 	}
-	return NewWithClient(NewSDKClient(ClientOptions(cfg)...), cfg, ai.APIAnthropicMessages)
+	return NewWithOptions(cfg, ai.APIAnthropicMessages)
 }
 
-// ClientOptions builds the SDK options a Config asks for: endpoint,
-// credential, transport and headers. Anything in deployment — the Vertex auth
-// option is the only one — is applied ahead of them, so a Config's own endpoint
-// still wins over the host such an option carries with it.
-func ClientOptions(cfg ai.Config, deployment ...option.RequestOption) []option.RequestOption {
-	opts := []option.RequestOption{
-		// The SDK's own host. NewSDKClient skips the constructor that would
-		// otherwise supply it, along with the environment it reads.
+// NewWithOptions builds a driver for a deployment that reaches this protocol
+// some other way. api is the protocol as the caller reaches it: Vertex speaks
+// this wire format from a different host under different credentials, and an
+// error or a model listing labelled with the direct API would send a caller to
+// the wrong console. opts — the Vertex auth option is the only one — are
+// applied ahead of the Config's own, so a Config's endpoint still wins over
+// the host such an option carries with it.
+//
+// The SDK client is assembled here rather than by sdk.NewClient, which
+// prepends DefaultClientOptions — and that reads ANTHROPIC_API_KEY,
+// ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL out of the process environment.
+// A Config is meant to be the whole truth about where a request goes and what
+// it presents, so none of them is ever read.
+func NewWithOptions(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.Driver, error) {
+	if cfg.Model.ID == "" {
+		return nil, fmt.Errorf("%s: model ID is required", api)
+	}
+
+	opts = append([]option.RequestOption{
+		// The SDK's own host, which sdk.NewClient would otherwise supply.
 		option.WithEnvironmentProduction(),
 		// Retries belong to the caller, which alone knows the budget for the
 		// whole turn. An SDK retrying underneath would multiply it silently.
 		option.WithMaxRetries(0),
-	}
-	opts = append(opts, deployment...)
+	}, opts...)
 	if url := cfg.URL(); url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
@@ -89,34 +100,11 @@ func ClientOptions(cfg ai.Config, deployment ...option.RequestOption) []option.R
 	for k, v := range cfg.MergedHeaders() {
 		opts = append(opts, option.WithHeader(k, v))
 	}
-	return opts
-}
 
-// NewSDKClient assembles the SDK client for a set of options.
-//
-// It does not call sdk.NewClient, which prepends DefaultClientOptions — and
-// that reads ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL out
-// of the process environment. A Config is meant to be the whole truth about
-// where a request goes and what it presents, so none of them is ever read.
-//
-// Only the two services the driver uses are wired; reaching through this client
-// for a third finds one carrying no options and fails on its first call.
-func NewSDKClient(opts ...option.RequestOption) sdk.Client {
+	// Only the two services the driver uses are wired.
 	client := sdk.Client{Options: opts}
 	client.Messages = sdk.NewMessageService(opts...)
 	client.Models = sdk.NewModelService(opts...)
-	return client
-}
-
-// NewWithClient builds a driver over an already-constructed SDK client. api is
-// the protocol the client actually reaches: the Vertex deployment speaks this
-// wire format from a different host under different credentials, and an error
-// or a model listing labelled with the direct API would send a caller to the
-// wrong console.
-func NewWithClient(client sdk.Client, cfg ai.Config, api ai.API) (ai.Driver, error) {
-	if cfg.Model.ID == "" {
-		return nil, fmt.Errorf("%s: model ID is required", api)
-	}
 
 	return &Driver{
 		client: client,

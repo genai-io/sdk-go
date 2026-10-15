@@ -15,8 +15,6 @@ type Vendor struct {
 	ID string
 	// DisplayName is the vendor's name as it should be shown.
 	DisplayName string
-	// Order sorts vendors for display; lower comes first.
-	Order int
 
 	// API is the wire protocol this vendor's endpoint speaks — the field that
 	// decides which driver handles its models.
@@ -63,10 +61,6 @@ type Vendor struct {
 
 	// Headers are sent with every request to this vendor.
 	Headers map[string]string
-
-	// Verified is when this entry was last checked against the vendor's own
-	// published documentation, as YYYY-MM-DD.
-	Verified string
 
 	// Note records anything a caller has to know before choosing this vendor,
 	// such as a credential that only an interactive login can produce, or a

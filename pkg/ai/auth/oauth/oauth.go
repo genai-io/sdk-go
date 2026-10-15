@@ -29,14 +29,7 @@ type Prompt struct {
 }
 
 // Interaction shows a Prompt to whoever is signing in.
-type Interaction interface {
-	Prompt(ctx context.Context, p Prompt) error
-}
-
-// InteractionFunc adapts a function to Interaction.
-type InteractionFunc func(ctx context.Context, p Prompt) error
-
-func (f InteractionFunc) Prompt(ctx context.Context, p Prompt) error { return f(ctx, p) }
+type Interaction func(ctx context.Context, p Prompt) error
 
 // Device runs the device authorization grant: ask for a code, show it to the
 // person, then poll until they have finished in a browser. cfg.Endpoint needs
@@ -54,7 +47,7 @@ func Device(ctx context.Context, cfg *oauth2.Config, ui Interaction) (*oauth2.To
 	if ui != nil {
 		// The complete form embeds the code, so a person who can open it does
 		// not have to type anything.
-		err := ui.Prompt(ctx, Prompt{
+		err := ui(ctx, Prompt{
 			URL:       cmp.Or(code.VerificationURIComplete, code.VerificationURI),
 			UserCode:  code.UserCode,
 			ExpiresAt: code.Expiry,

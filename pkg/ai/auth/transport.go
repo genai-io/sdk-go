@@ -39,10 +39,10 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(clone)
 }
 
-// HTTPClient returns a client that presents a vendor's stored credential,
+// httpClient returns a client that presents a vendor's stored credential,
 // renewing it as it expires.
-func HTTPClient(vendorID string, c Credential, store Store, base *http.Client) (*http.Client, error) {
-	f, ok := flowFor(vendorID)
+func httpClient(vendorID string, c Credential, store Store, base *http.Client) (*http.Client, error) {
+	f, ok := flows[vendorID]
 	if !ok {
 		return nil, fmt.Errorf("auth: %s does not sign in interactively", vendorID)
 	}

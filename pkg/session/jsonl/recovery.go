@@ -34,23 +34,17 @@ func trimTornTail(path string) (err error) {
 	if last[0] == '\n' {
 		return nil
 	}
-	for window := int64(8 * 1024); ; window *= 4 {
-		if window > size {
-			window = size
-		}
-		buf := make([]byte, window)
-		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
-			return err
-		}
+	return readTail(f, size, func(buf []byte) (bool, error) {
 		i := bytes.LastIndexByte(buf, '\n')
-		if i >= 0 || window == size {
-			if json.Valid(buf[i+1:]) {
-				_, err := f.WriteAt([]byte{'\n'}, size)
-				return err
-			}
-			return f.Truncate(size - window + int64(i) + 1)
+		if i < 0 && int64(len(buf)) < size {
+			return false, nil
 		}
-	}
+		if json.Valid(buf[i+1:]) {
+			_, err := f.WriteAt([]byte{'\n'}, size)
+			return true, err
+		}
+		return true, f.Truncate(size - int64(len(buf)) + int64(i) + 1)
+	})
 }
 
 // lastPosition reads the committed sequence and event time from the log tail.
@@ -69,14 +63,8 @@ func lastPosition(path string) (logPosition, error) {
 	if err != nil || size == 0 {
 		return logPosition{}, err
 	}
-	for window := int64(8 * 1024); ; window *= 4 {
-		if window > size {
-			window = size
-		}
-		buf := make([]byte, window)
-		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
-			return logPosition{}, err
-		}
+	var position logPosition
+	err = readTail(f, size, func(buf []byte) (bool, error) {
 		// Back over whole lines until one parses: the count carries on from
 		// where the readable part ended.
 		trimmed := bytes.TrimRight(buf, "\n")
@@ -86,21 +74,41 @@ func lastPosition(path string) (logPosition, error) {
 			if i < 0 {
 				break
 			}
-			if position, ok := positionOf(trimmed[i+1:]); ok {
-				return position, nil
+			if p, ok := positionOf(trimmed[i+1:]); ok {
+				position = p
+				return true, nil
 			}
 			if complete {
-				return logPosition{}, fmt.Errorf("jsonl: corrupt final record")
+				return true, fmt.Errorf("jsonl: corrupt final record")
 			}
 			trimmed = trimmed[:i]
 			complete = true
 		}
-		if window == size { // the whole file is one line, or none
-			position, ok := positionOf(trimmed)
-			if !ok && complete {
-				return logPosition{}, fmt.Errorf("jsonl: corrupt final record")
-			}
-			return position, nil
+		if int64(len(buf)) < size {
+			return false, nil
+		}
+		// The whole file is one line, or none.
+		p, ok := positionOf(trimmed)
+		if !ok && complete {
+			return true, fmt.Errorf("jsonl: corrupt final record")
+		}
+		position = p
+		return true, nil
+	})
+	return position, err
+}
+
+// readTail hands fn the last bytes of a file of the given size, growing the
+// window until fn is done or the window is the whole file.
+func readTail(f *os.File, size int64, fn func(buf []byte) (done bool, err error)) error {
+	for window := int64(8 * 1024); ; window *= 4 {
+		window = min(window, size)
+		buf := make([]byte, window)
+		if _, err := f.ReadAt(buf, size-window); err != nil && err != io.EOF {
+			return err
+		}
+		if done, err := fn(buf); done || err != nil || window == size {
+			return err
 		}
 	}
 }

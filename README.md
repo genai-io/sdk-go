@@ -305,7 +305,7 @@ fields, because that order is what the next request has to replay.
 ```go
 messages := []ai.Message{
 	ai.UserMessage("What is in this image?", image),
-	ai.AssistantMessage("A gopher."),
+	{Role: ai.RoleAssistant, Content: ai.TextContent("A gopher.")},
 	ai.ToolResultsMessage(result),
 }
 
@@ -318,8 +318,8 @@ A tool result is content too: text, and images where the protocol carries them
 protocol that would drop it rather than letting the model answer about a
 picture it was never shown.
 
-Append `response.Message()`, not `ai.AssistantMessage(response.Text())` — the
-first carries thinking and reasoning state forward, which is what lets a
+Append `response.Message()`, not a message rebuilt from `response.Text()` —
+the first carries thinking and reasoning state forward, which is what lets a
 reasoning model resume instead of starting over.
 
 ### Errors and execution policy
@@ -342,14 +342,9 @@ before they leave, and never rewritten to make them work: a model with no
 system role is an error naming the model, because moving those instructions
 into a user turn is a decision about your product.
 
-Execution policy is `Middleware` decorating a driver:
-
-```go
-client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), model)
-```
-
-`Retry` is the only policy shipped, and every driver disables its vendor SDK's
-own — so without it you get none. Caching, logging and metering stay yours.
+Every driver disables its vendor SDK's own retries, so a call is tried once.
+Retry is the agent's `WithRetry`, or your own loop on `IsRetryable`; caching,
+logging and metering stay yours.
 
 ### Credentials
 
@@ -477,8 +472,7 @@ panics fails the way any tool fails — the model is told and the turn carries o
 Compaction is a `PreStep`: the loop hands over the conversation and what sending
 it would cost, and what a shorter one should say is yours.
 
-Retry belongs to the client: `ai.Retry` wraps the driver, so the agent adds none
-by default, because two budgets multiply rather than add. What a replay cannot
+Retry is off by default; `WithRetry` turns it on. What a replay cannot
 fix — a prompt over the window, a key out of quota — is `OnInferError`, which
 answers a failed call with a shorter conversation and another go at the step.
 

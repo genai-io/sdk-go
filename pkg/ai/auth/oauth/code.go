@@ -46,7 +46,7 @@ func Code(ctx context.Context, cfg *oauth2.Config, ui Interaction) (*oauth2.Toke
 	}()
 
 	if ui != nil {
-		if err := ui.Prompt(ctx, Prompt{URL: cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))}); err != nil {
+		if err := ui(ctx, Prompt{URL: cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))}); err != nil {
 			return nil, err
 		}
 	}

@@ -37,8 +37,6 @@ var copilotDefaults = copilotEndpoints{
 	api:      "https://api.individual.githubcopilot.com",
 }
 
-func init() { RegisterFlow(copilotVendor, newCopilotFlow(copilotDefaults)) }
-
 func newCopilotFlow(e copilotEndpoints) Flow {
 	return Flow{
 		Method: "device code",

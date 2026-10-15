@@ -17,7 +17,6 @@ package catalog
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -29,7 +28,6 @@ func All() []Vendor {
 	for i, vendor := range vendors {
 		out[i] = vendor.clone()
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Order < out[j].Order })
 	return out
 }
 

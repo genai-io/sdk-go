@@ -24,17 +24,13 @@ func Provider(vendorID string) (*provider.Provider, error) {
 		}), nil
 	}
 
-	key, _ := Key(v)
-	if key == "" && len(v.KeyEnv) > 0 {
-		return nil, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
-	}
-	deployment, err := Deployment(v)
+	cfg, err := keyConfig(v)
 	if err != nil {
 		return nil, err
 	}
 	return v.Provider(provider.Config{
-		APIKey:         key,
-		BaseURL:        BaseURL(v),
-		ProtocolConfig: deployment,
+		APIKey:         cfg.APIKey,
+		BaseURL:        cfg.BaseURL,
+		ProtocolConfig: cfg.ProtocolConfig,
 	}), nil
 }

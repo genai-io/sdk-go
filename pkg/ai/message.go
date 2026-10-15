@@ -117,20 +117,6 @@ func (c Content) Text() string { return c.textOf(BlockText) }
 // Thinking concatenates human-readable thinking blocks.
 func (c Content) Thinking() string { return c.textOf(BlockThinking) }
 
-// ThinkingSignature is the provider token that proves this turn's thinking, or
-// empty. It rides with a thinking block rather than being its text, which is
-// why Thinking cannot return it: an application replaying a turn has to send
-// it back attached to the block it belongs to, or the provider rejects the
-// whole turn.
-func (c Content) ThinkingSignature() string {
-	for _, block := range c {
-		if block.Type == BlockThinking && block.Signature != "" {
-			return block.Signature
-		}
-	}
-	return ""
-}
-
 func (c Content) textOf(kind BlockType) string {
 	var out strings.Builder
 	for _, block := range c {
@@ -143,34 +129,29 @@ func (c Content) textOf(kind BlockType) string {
 
 // ToolCalls returns tool-call blocks in order.
 func (c Content) ToolCalls() []ToolCall {
-	var out []ToolCall
-	for _, block := range c {
-		if block.Type == BlockToolCall && block.ToolCall != nil {
-			call := *block.ToolCall
-			call.Signature = slices.Clone(call.Signature)
-			out = append(out, call)
-		}
+	calls := blocksOf(c, BlockToolCall, func(b Block) *ToolCall { return b.ToolCall })
+	for i := range calls {
+		calls[i].Signature = slices.Clone(calls[i].Signature)
 	}
-	return out
+	return calls
 }
 
 // ToolResults returns tool-result blocks in order.
 func (c Content) ToolResults() []ToolResult {
-	var out []ToolResult
-	for _, block := range c {
-		if block.Type == BlockToolResult && block.ToolResult != nil {
-			out = append(out, *block.ToolResult)
-		}
-	}
-	return out
+	return blocksOf(c, BlockToolResult, func(b Block) *ToolResult { return b.ToolResult })
 }
 
 // ReasoningItems returns opaque reasoning blocks in order.
 func (c Content) ReasoningItems() []ReasoningItem {
-	var out []ReasoningItem
+	return blocksOf(c, BlockReasoning, func(b Block) *ReasoningItem { return b.Reasoning })
+}
+
+// blocksOf copies the populated payload of every block of kind, in order.
+func blocksOf[T any](c Content, kind BlockType, payload func(Block) *T) []T {
+	var out []T
 	for _, block := range c {
-		if block.Type == BlockReasoning && block.Reasoning != nil {
-			out = append(out, *block.Reasoning)
+		if p := payload(block); block.Type == kind && p != nil {
+			out = append(out, *p)
 		}
 	}
 	return out
@@ -340,11 +321,6 @@ func UserMessage(text string, images ...Image) Message {
 		content = append(content, ImageBlock(image))
 	}
 	return Message{Role: RoleUser, Content: content}
-}
-
-// AssistantMessage returns an assistant turn carrying text.
-func AssistantMessage(text string) Message {
-	return Message{Role: RoleAssistant, Content: TextContent(text)}
 }
 
 // ToolResultsMessage returns the user turn that answers a set of tool calls.

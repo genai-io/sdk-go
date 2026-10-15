@@ -96,10 +96,10 @@ package tests for the parts no other protocol exercises.
 
 A new vendor needs no code, and `pkg/ai/catalog` will tell you if the row is
 wrong: `TestCatalogInvariants` pins that a ladder on an OpenAI-Chat endpoint
-states a `Thinking` dialect, that IDs and display order are unique, that
-`Verified` parses, and that a `Compat` value matches its `API`. `golden_test.go`
-holds the whole resolved table, so a row that changes another row's meaning
-shows up as a diff rather than as a surprise months later.
+states a `Thinking` dialect, that IDs are unique, and that a `Compat` value
+matches its `API`. `golden_test.go` holds the whole resolved table, so a row
+that changes another row's meaning shows up as a diff rather than as a surprise
+months later.
 
 ## Testing your own code
 

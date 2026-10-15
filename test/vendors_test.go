@@ -448,7 +448,7 @@ func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
 // silently falling back to the default is how a request quietly stops meaning
 // what it said.
 func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
-	const ultra ai.Effort = "ultra" // not one of ai.Efforts
+	const ultra ai.Effort = "ultra" // not a known effort
 
 	model := ai.Model{
 		ID: "custom", API: ai.APIOpenAIChat,

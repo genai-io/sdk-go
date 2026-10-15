@@ -182,8 +182,7 @@ func NewDriver(cfg Config) (Driver, error) {
 // New builds the driver for cfg.Model's protocol and wraps it in a Client. It
 // is NewDriver plus NewClientWithDriver, and it is the constructor most callers
 // want: reach for NewDriver and NewClientWithDriver only when the driver has to pass
-// through your hands on the way, which is what wrapping it in Middleware
-// needs.
+// through your hands on the way.
 func New(cfg Config, opts ...Option) (*Client, error) {
 	d, err := NewDriver(cfg)
 	if err != nil {
@@ -191,12 +190,6 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	}
 	return NewClientWithDriver(d, cfg.Model, opts...), nil
 }
-
-// NewClient is the former name of New, kept for one release so the rename is
-// not a compile error in every caller at once.
-//
-// Deprecated: call New.
-func NewClient(cfg Config, opts ...Option) (*Client, error) { return New(cfg, opts...) }
 
 // unregistered reports a model whose protocol has no driver linked into the
 // binary — nearly always a missing blank import.

@@ -44,7 +44,12 @@ func (s *memStore) Create(_ context.Context, meta session.Meta) (session.Meta, e
 		return session.Meta{}, fmt.Errorf("memory: session %s already exists", meta.ID)
 	}
 
-	meta = meta.Created(time.Now().UTC())
+	now := time.Now().UTC()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+	meta.Entries = 0
 	s.sessions[meta.ID] = &held{meta: meta}
 	return meta, nil
 }
@@ -100,18 +105,6 @@ func (s *memStore) Entries(ctx context.Context, id string) iter.Seq2[session.Ent
 			}
 		}
 	}
-}
-
-// Meta reads one session's metadata.
-func (s *memStore) Meta(_ context.Context, id string) (session.Meta, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	h, ok := s.sessions[id]
-	if !ok {
-		return session.Meta{}, fmt.Errorf("memory: %s: %w", id, session.ErrNotFound)
-	}
-	return h.meta, nil
 }
 
 // cloneEntry copies the parts of an entry a caller could still be holding.

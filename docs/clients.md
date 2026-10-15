@@ -146,19 +146,17 @@ protocol, and `Model.WireEfforts` says which efforts it can tell apart.
 
 ## Stopping at `ai.NewDriver`
 
-Execution policy — retries, cost metering, caching, logging — is `Middleware`
-decorating a driver, so it needs the driver as a value:
+Execution policy — cost metering, caching, logging — decorates a driver, so it
+needs the driver as a value:
 
 ```go
 driver, err := ai.NewDriver(cfg)
-client := ai.NewClientWithDriver(ai.Wrap(driver, ai.Retry(3, time.Second), costMeter), cfg.Model)
+client := ai.NewClientWithDriver(metered{driver}, cfg.Model)
 ```
 
-`Retry` is the one policy shipped here, and every driver disables its vendor
-SDK's own, so without it you get none. Order is outermost first: the first
-middleware sees the request first and the response last. A `Middleware` is a
-`Handler` wrapping a `Handler`, the same shape as `Driver.Stream`, so anything
-you write composes with anything shipped here.
+A decorator embeds the `Driver` and overrides `Stream`; forward `Models` and
+`CountTokens` too, or the client stops offering them. Every driver disables its
+vendor SDK's own retries, so a call is tried once.
 
 ## Stopping at `ai.NewClientWithDriver`
 

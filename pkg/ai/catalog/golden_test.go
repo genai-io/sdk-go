@@ -98,7 +98,6 @@ func itoa(n int) string {
 type goldenRow struct {
 	ID              string            `json:"id"`
 	DisplayName     string            `json:"display_name"`
-	Order           int               `json:"order"`
 	API             string            `json:"api"`
 	BaseURL         string            `json:"base_url,omitempty"`
 	BaseURLEnv      string            `json:"base_url_env,omitempty"`
@@ -109,7 +108,6 @@ type goldenRow struct {
 	Compat          any               `json:"compat,omitempty"`
 	SamplingParams  map[string]any    `json:"sampling_params,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
-	Verified        string            `json:"verified"`
 	Note            string            `json:"note,omitempty"`
 }
 
@@ -117,11 +115,11 @@ func goldenRows() []goldenRow {
 	var out []goldenRow
 	for _, v := range All() {
 		out = append(out, goldenRow{
-			ID: v.ID, DisplayName: v.DisplayName, Order: v.Order, API: string(v.API),
+			ID: v.ID, DisplayName: v.DisplayName, API: string(v.API),
 			BaseURL: v.BaseURL, BaseURLEnv: v.BaseURLEnv, BaseURLSuffix: v.BaseURLSuffix,
 			RequiresBaseURL: v.RequiresBaseURL, KeyEnv: v.KeyEnv, DeploymentEnv: v.DeploymentEnv,
 			Compat: v.Compat, SamplingParams: v.SamplingParams, Headers: v.Headers,
-			Verified: v.Verified, Note: v.Note,
+			Note: v.Note,
 		})
 	}
 	return out

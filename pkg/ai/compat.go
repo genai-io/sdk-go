@@ -3,7 +3,6 @@ package ai
 import (
 	"fmt"
 	"reflect"
-	"sync"
 )
 
 // CompatOf returns a model's protocol compatibility flags, or the zero value
@@ -110,36 +109,14 @@ type GoogleCompat struct {
 	ThinkingLevel bool `json:"thinking_level,omitempty"`
 }
 
-// compatRegistry maps a protocol to the compat type it expects.
-var compatRegistry = struct {
-	mu sync.RWMutex
-	m  map[API]reflect.Type
-}{m: map[API]reflect.Type{
+// compatTypes maps a protocol to the compat type it expects.
+var compatTypes = map[API]reflect.Type{
 	APIAnthropicMessages: reflect.TypeFor[AnthropicCompat](),
 	APIAnthropicVertex:   reflect.TypeFor[AnthropicCompat](),
 	APIOpenAIChat:        reflect.TypeFor[OpenAIChatCompat](),
 	APIOpenAIResponses:   reflect.TypeFor[OpenAIResponsesCompat](),
 	APIGoogleGenAI:       reflect.TypeFor[GoogleCompat](),
 	APIGoogleVertex:      reflect.TypeFor[GoogleCompat](),
-}}
-
-// RegisterCompat declares the compat type a protocol this package does not
-// define uses. A driver package for a custom protocol calls it from init,
-// alongside RegisterAPI.
-//
-//	ai.RegisterCompat[MyCompat](myAPI)
-func RegisterCompat[T any](api API) {
-	compatRegistry.mu.Lock()
-	defer compatRegistry.mu.Unlock()
-	compatRegistry.m[api] = reflect.TypeFor[T]()
-}
-
-// compatType reports the compat type registered for a protocol.
-func compatType(api API) (reflect.Type, bool) {
-	compatRegistry.mu.RLock()
-	defer compatRegistry.mu.RUnlock()
-	t, ok := compatRegistry.m[api]
-	return t, ok
 }
 
 // checkCompat reports a compat value that does not belong to the model's
@@ -148,7 +125,7 @@ func (m Model) checkCompat() error {
 	if m.Compat == nil {
 		return nil
 	}
-	want, ok := compatType(m.API)
+	want, ok := compatTypes[m.API]
 	if !ok {
 		return nil
 	}

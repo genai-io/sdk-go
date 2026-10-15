@@ -63,6 +63,20 @@ func Config(ref string) (ai.Config, error) {
 		return interactiveConfig(v, model, nil)
 	}
 
+	cfg, err := keyConfig(v)
+	if err != nil {
+		return ai.Config{}, err
+	}
+	cfg.Model = model
+	if err := checkBaseURL(v, cfg); err != nil {
+		return ai.Config{}, err
+	}
+	return cfg, nil
+}
+
+// keyConfig resolves a key-based vendor's credential, endpoint and deployment
+// from the environment.
+func keyConfig(v catalog.Vendor) (ai.Config, error) {
 	key, _ := Key(v)
 	if key == "" && len(v.KeyEnv) > 0 {
 		return ai.Config{}, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
@@ -71,11 +85,7 @@ func Config(ref string) (ai.Config, error) {
 	if err != nil {
 		return ai.Config{}, err
 	}
-	cfg := ai.Config{Model: model, APIKey: key, BaseURL: BaseURL(v), ProtocolConfig: deployment}
-	if err := checkBaseURL(v, cfg); err != nil {
-		return ai.Config{}, err
-	}
-	return cfg, nil
+	return ai.Config{APIKey: key, BaseURL: BaseURL(v), ProtocolConfig: deployment}, nil
 }
 
 // interactiveConfig builds a Config for a vendor that signs in through a
@@ -93,7 +103,7 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 	if !found || cred.Access == "" {
 		return ai.Config{}, &NotSignedInError{Vendor: v.ID}
 	}
-	client, err := HTTPClient(v.ID, cred, s, nil)
+	client, err := httpClient(v.ID, cred, s, nil)
 	if err != nil {
 		return ai.Config{}, err
 	}

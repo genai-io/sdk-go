@@ -12,7 +12,9 @@ import (
 func Repair(msgs []Message) []Message {
 	out := repairToolPairing(msgs)
 	for i := range out {
-		out[i] = repairEncoding(out[i])
+		if content, changed := sanitizeContent(out[i].Content); changed {
+			out[i].Content = content
+		}
 	}
 	return out
 }
@@ -121,15 +123,6 @@ func filterBlocks(content Content, keep func(Block) bool) Content {
 		return out
 	}
 	return content
-}
-
-// repairEncoding cleans every text-bearing field of one message, copying only
-// when something actually changes.
-func repairEncoding(m Message) Message {
-	if content, changed := sanitizeContent(m.Content); changed {
-		m.Content = content
-	}
-	return m
 }
 
 func sanitizeContent(c Content) (Content, bool) {

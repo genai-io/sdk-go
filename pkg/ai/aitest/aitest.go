@@ -116,9 +116,8 @@ type Driver struct {
 	turns  []Turn
 	always Turn
 
-	mu    sync.Mutex
-	calls int
-	sent  []*ai.Request
+	mu   sync.Mutex
+	sent []*ai.Request
 }
 
 // New answers with these turns, in order.
@@ -132,8 +131,7 @@ func (d *Driver) Name() string { return "aitest" }
 
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	d.mu.Lock()
-	n := d.calls
-	d.calls++
+	n := len(d.sent)
 	d.sent = append(d.sent, req)
 	d.mu.Unlock()
 
@@ -156,7 +154,7 @@ func (d *Driver) Client() *ai.Client {
 func (d *Driver) Calls() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.calls
+	return len(d.sent)
 }
 
 // Sent is what reached the driver: the request the provider would have seen,

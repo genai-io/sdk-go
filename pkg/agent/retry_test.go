@@ -95,9 +95,8 @@ func TestAFailedCallStillReportsItsCost(t *testing.T) {
 	}
 }
 
-// A stream that goes quiet is a transient failure, and the one the client
-// structurally cannot retry — ending the stall cancels the context ai.Retry
-// would wait on — so it is what the agent's own budget is for.
+// A stream that goes quiet is a transient failure: the agent ends the stall
+// and replays the call.
 func TestAStalledStreamIsRetried(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Hangs(), aitest.Says("answered at last")),
 		agent.WithStreamTimeout(20*time.Millisecond, 20*time.Millisecond),
@@ -159,9 +158,7 @@ func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
 	}
 }
 
-// Retry is off unless asked for, because the client already has ai.Retry and
-// two budgets multiply: three attempts here on a client wrapping ai.Retry(3)
-// is nine model calls for one step.
+// Retry is off unless asked for.
 func TestAnAgentDoesNotRetryUnlessAsked(t *testing.T) {
 	d := aitest.New(
 		aitest.Fails(&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}),

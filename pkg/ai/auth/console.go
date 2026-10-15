@@ -14,7 +14,7 @@ import (
 // ConsoleInteraction prints the instruction to stderr and tries to open a
 // browser.
 func ConsoleInteraction() oauth.Interaction {
-	return oauth.InteractionFunc(func(ctx context.Context, p oauth.Prompt) error {
+	return func(ctx context.Context, p oauth.Prompt) error {
 		if p.UserCode != "" {
 			fmt.Fprintf(os.Stderr, "\nOpen %s and enter the code:  %s\n", p.URL, p.UserCode)
 		} else {
@@ -25,7 +25,7 @@ func ConsoleInteraction() oauth.Interaction {
 		}
 		openBrowser(p.URL)
 		return nil
-	})
+	}
 }
 
 // openBrowser is best-effort and deliberately ignores its outcome: there is

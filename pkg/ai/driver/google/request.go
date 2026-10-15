@@ -35,8 +35,7 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 		cfg.MaxOutputTokens = int32(req.MaxTokens)
 	}
 	if req.Temperature != nil {
-		t := float32(*req.Temperature)
-		cfg.Temperature = &t
+		cfg.Temperature = new(float32(*req.Temperature))
 	}
 	if len(req.StopSequences) > 0 {
 		cfg.StopSequences = req.StopSequences
@@ -50,11 +49,12 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 				cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingLevel: level.Value}
 			}
 		case level.Budget > 0:
-			cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingBudget: budgetOf(level.Budget)}
+			cfg.ThinkingConfig = &thinkingConfig{IncludeThoughts: true, ThinkingBudget: new(int32(level.Budget))}
 		case level.Effort == ai.EffortOff:
 			// A budget model reasons unless a zero budget says not to, so the
-			// off rung has to be said out loud rather than left out.
-			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: budgetOf(0)}
+			// off rung has to be said out loud rather than left out — a pointer
+			// to zero, which is sent rather than omitted.
+			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: new(int32(0))}
 		}
 	}
 	// Gemini takes the schema as raw JSON Schema alongside a JSON mime type;
@@ -66,13 +66,6 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 		}
 	}
 	return cfg
-}
-
-// budgetOf is the pointer thinkingConfig wants, so that a budget of zero — off
-// — is sent rather than omitted.
-func budgetOf(tokens int) *int32 {
-	budget := int32(tokens)
-	return &budget
 }
 
 func declarations(tools []ai.Tool) []*tool {

@@ -170,7 +170,7 @@ carry them back the same way. Parallel fields lose it, and no protocol accepts
 a conversation whose order was reconstructed by guesswork.
 
 This is also why `Response.Message()` exists and why appending
-`ai.AssistantMessage(resp.Text())` instead is a bug: the former carries the
+a message built from `resp.Text()` instead is a bug: the former carries the
 thinking and the opaque reasoning state forward, and dropping those makes a
 reasoning model start over every turn.
 
@@ -268,16 +268,12 @@ vendor SDK — destroying the blank-import selectivity the registry exists for.
 
 ## What the SDK will not do
 
-It ships one execution policy and no more. `Retry` is here because every
-driver disables its vendor SDK's own, so without it a caller gets none, and
-because the rule for writing one is easy to get wrong in a way that surfaces as
-duplicated or vanished output rather than as an error: a retry may only replay
-a call that failed *before producing any delta*. Knowing a rule that dangerous
-and shipping only the warning would be the worse of the two.
-
-Caching, logging and cost metering stay the caller's, as `Middleware`
-decorating a driver — only the application knows the budget for a turn, what
-may be cached and what must not be logged.
+It ships no execution policy. Every driver disables its vendor SDK's retry, so
+a call is tried once; `agent.WithRetry` is the retry, because only the agent
+can replay a call safely — one that has already produced a delta must not be
+replayed under the caller who saw it. Caching, logging and cost metering stay
+the caller's, as a `Driver` that wraps another — only the application knows the
+budget for a turn, what may be cached and what must not be logged.
 
 It does no compaction. Deciding a conversation is too long, summarizing it or
 dropping the oldest turns are the application's calls, with knowledge this
@@ -396,7 +392,7 @@ And some are only documented, which means only review catches them:
 
 - Drivers must not mutate or retain the `*Request` they are given. The `Client`
   reads it again afterwards.
-- Middleware must not replay a call that has already produced a delta.
+- A wrapping driver must not replay a call that has already produced a delta.
 
 ## Known warts
 

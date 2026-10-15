@@ -31,18 +31,15 @@ type Details struct {
 	Response *http.Response
 }
 
-// Reader pulls Details out of one protocol's error type.
-type Reader func(error) Details
-
 // Classifier is one driver's pair of error constructors, bound to the name
 // that will appear as ai.Error.Driver.
 type Classifier struct {
 	driver string
-	read   Reader
+	read   func(error) Details
 }
 
 // For binds a driver name to the reader for its protocol's error type.
-func For(driver string, read Reader) Classifier {
+func For(driver string, read func(error) Details) Classifier {
 	return Classifier{driver: driver, read: read}
 }
 

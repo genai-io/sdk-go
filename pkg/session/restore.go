@@ -31,10 +31,9 @@ func fold(ctx context.Context, store Store, id string) ([]ai.Message, int, error
 			messages = slices.Clone(entry.Messages)
 		case EntryMessage:
 			messages = append(messages, *entry.Message)
-		case EntryOutcome:
 		}
-		// EntryCustom and EntryInference and EntryToolRun are not the
-		// conversation: they explain it. A fold walks past them.
+		// EntryCustom, EntryInference, EntryToolRun and EntryOutcome are not
+		// the conversation: they explain it. A fold walks past them.
 	}
 	return messages, lastTurn, nil
 }
@@ -78,10 +77,4 @@ func Open(ctx context.Context, store Store, id string) (*Session, []ai.Message, 
 		s.resumeSnapshot[i].Content = messages[i].Content.Clone()
 	}
 	return s, messages, nil
-}
-
-// Read restores the native conversation without opening a writer lease.
-func Read(ctx context.Context, store Store, id string) ([]ai.Message, error) {
-	messages, _, err := fold(ctx, store, id)
-	return messages, err
 }

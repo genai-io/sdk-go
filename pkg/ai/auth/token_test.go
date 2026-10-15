@@ -16,9 +16,8 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
 
-// The test vendors. Registering a flow is permanent for the life of the process
-// — a second registration for one vendor panics — so these are registered once
-// and their behavior varied through the hooks below.
+// The test vendors. The stub flows are added once and their behavior varied
+// through the hooks below.
 const (
 	stubVendor   = "test-stub"
 	rotateVendor = "test-rotating"
@@ -43,8 +42,8 @@ func init() {
 	signIn := func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
 		return Credential{Access: "signed-in"}, nil
 	}
-	RegisterFlow(stubVendor, Flow{Method: "stub", Login: signIn, Token: answer})
-	RegisterFlow(rotateVendor, Flow{Method: "stub", Login: signIn, Token: answer})
+	flows[stubVendor] = Flow{Method: "stub", Login: signIn, Token: answer}
+	flows[rotateVendor] = Flow{Method: "stub", Login: signIn, Token: answer}
 }
 
 // withTokenHook installs the stub's renewal for one test.
@@ -64,34 +63,8 @@ func withTokenHook(t *testing.T, fn func(c Credential) (string, time.Time, Crede
 	forgetSources(rotateVendor)
 }
 
-func TestRegisterFlowRefusesWhatCannotWork(t *testing.T) {
-	tests := map[string]struct {
-		vendor string
-		flow   Flow
-	}{
-		"no vendor": {"", Flow{Login: func(context.Context, *http.Client, oauth.Interaction) (Credential, error) {
-			return Credential{}, nil
-		}, Token: func(context.Context, *http.Client, Credential) (string, time.Time, Credential, error) {
-			return "", time.Time{}, Credential{}, nil
-		}}},
-		"no way to sign in":  {"test-half-a", Flow{Method: "x"}},
-		"already registered": {stubVendor, Flow{Method: "x", Login: nil, Token: nil}},
-	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			defer func() {
-				if recover() == nil {
-					t.Error("RegisterFlow accepted a registration that cannot work")
-				}
-			}()
-			RegisterFlow(tc.vendor, tc.flow)
-		})
-	}
-}
-
-// TestInteractiveKnowsTheRegisteredVendors covers the open set: the two grants
-// this package ships register themselves, and one a consumer added is just as
-// visible.
+// TestInteractiveKnowsTheRegisteredVendors covers the two grants this package
+// ships and a stub added by the tests.
 func TestInteractiveKnowsTheRegisteredVendors(t *testing.T) {
 	for _, id := range []string{"copilot", "openai-codex", stubVendor} {
 		method, ok := Interactive(id)
@@ -152,7 +125,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 	if err := store.Save(Credential{Vendor: stubVendor, Access: "stored"}); err != nil {
 		t.Fatal(err)
 	}
-	client, err := HTTPClient(stubVendor, Credential{Access: "stored"}, store, nil)
+	client, err := httpClient(stubVendor, Credential{Access: "stored"}, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +170,7 @@ func TestATokenWithNoStatedLifetimeIsMintedOnce(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := HTTPClient(stubVendor, Credential{Access: "stored"}, nil, nil)
+	client, err := httpClient(stubVendor, Credential{Access: "stored"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +195,7 @@ func TestClientsWithoutAStoreKeepTheirOwnCredentials(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, token := range []string{"account-a", "account-b"} {
-		client, err := HTTPClient(stubVendor, Credential{Access: token}, nil, nil)
+		client, err := httpClient(stubVendor, Credential{Access: token}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -266,7 +239,7 @@ func TestAuthenticatedRedirectsStayOnTheOriginalOrigin(t *testing.T) {
 		checks++
 		return nil
 	}
-	client, err := HTTPClient(stubVendor, Credential{Access: "secret"}, nil, base)
+	client, err := httpClient(stubVendor, Credential{Access: "secret"}, nil, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +270,7 @@ func TestAuthenticatedRedirectsWithoutOriginAreRejected(t *testing.T) {
 			visited = true
 			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
 		})}
-		client, err := HTTPClient(stubVendor, Credential{Access: "secret"}, nil, base)
+		client, err := httpClient(stubVendor, Credential{Access: "secret"}, nil, base)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -349,11 +322,11 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := HTTPClient(rotateVendor, start, store, nil)
+	first, err := httpClient(rotateVendor, start, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := HTTPClient(rotateVendor, start, otherHandle, nil)
+	second, err := httpClient(rotateVendor, start, otherHandle, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +373,7 @@ func TestARotatedTokenThatCannotBeStoredFailsLoudly(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := HTTPClient(rotateVendor, Credential{Access: "a", Refresh: "r1"}, readOnlyStore{}, nil)
+	client, err := httpClient(rotateVendor, Credential{Access: "a", Refresh: "r1"}, readOnlyStore{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +400,7 @@ func TestASaveFailureThatLosesNothingDoesNotFailTheTurn(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := HTTPClient(stubVendor, Credential{Access: "a"}, readOnlyStore{}, nil)
+	client, err := httpClient(stubVendor, Credential{Access: "a"}, readOnlyStore{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +421,7 @@ func TestARenewalFailureIsReportedToTheCaller(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := HTTPClient(stubVendor, Credential{Access: "a"}, nil, nil)
+	client, err := httpClient(stubVendor, Credential{Access: "a"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +432,7 @@ func TestARenewalFailureIsReportedToTheCaller(t *testing.T) {
 }
 
 func TestHTTPClientNeedsARegisteredFlow(t *testing.T) {
-	if _, err := HTTPClient("deepseek", Credential{}, nil, nil); err == nil {
+	if _, err := httpClient("deepseek", Credential{}, nil, nil); err == nil {
 		t.Error("built a token-renewing client for a vendor that takes an API key")
 	}
 }

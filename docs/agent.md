@@ -599,10 +599,10 @@ the session is one file in it, and each line is one record:
 ```
 sessions/                       jsonl.Open("sessions")
   20261016-101500.jsonl         one session; the file name is its id
-    {"at":…,"type":"message","message":{…}}   ┐
-    {"at":…,"type":"message","message":{…}}   │ appended as the conversation grew
-    {"at":…,"type":"reset"}                   ← compaction: the conversation starts over
-    {"at":…,"type":"message","message":{…}}   ┘ the compacted conversation, then what followed
+    {"type":"message","message":{…}}   ┐
+    {"type":"message","message":{…}}   │ appended as the conversation grew
+    {"type":"reset"}                   ← compaction: the conversation starts over
+    {"type":"message","message":{…}}   ┘ the compacted conversation, then what followed
 ```
 
 `Load` replays the lines: a message appends, a reset empties the

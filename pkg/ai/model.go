@@ -71,9 +71,12 @@ const VertexDefaultRegion = "global"
 // driver: the deployment is how a Vertex caller says who they are, and both
 // Vertex drivers refuse the same way.
 func VertexDeployment(cfg Config, driver string) (VertexConfig, error) {
-	deployment, err := protocolValueAs[VertexConfig](cfg.ProtocolConfig, "native driver configuration")
-	if err != nil {
-		return VertexConfig{}, err
+	deployment, ok := cfg.ProtocolConfig.(VertexConfig)
+	if cfg.ProtocolConfig != nil && !ok {
+		return VertexConfig{}, &Error{
+			Kind:    KindInvalidRequest,
+			Message: fmt.Sprintf("ai: got native driver configuration of type %T; driver expects ai.VertexConfig", cfg.ProtocolConfig),
+		}
 	}
 	if deployment.Project == "" {
 		return VertexConfig{}, &Error{

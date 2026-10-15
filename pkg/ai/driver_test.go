@@ -9,22 +9,15 @@ type fakeConfig struct{ Project string }
 
 func (fakeConfig) ProtocolConfig() {}
 
-type otherConfig struct{}
-
-func (otherConfig) ProtocolConfig() {}
-
 // ProtocolConfig carries a driver's own value through an interface, and
 // falling back to the zero value would look like the option having no effect.
-func TestAProtocolValueOfTheWrongTypeIsReportedRatherThanIgnored(t *testing.T) {
-	if got, err := protocolValueAs[fakeConfig](nil, "config"); err != nil || got != (fakeConfig{}) {
-		t.Errorf("no config gave %v, %v; want the zero value and no error", got, err)
+func TestAProtocolConfigOfTheWrongTypeIsReportedRatherThanIgnored(t *testing.T) {
+	want := VertexConfig{Project: "p", Region: "r"}
+	if got, err := VertexDeployment(Config{ProtocolConfig: want}, "stub"); err != nil || got != want {
+		t.Errorf("deployment = %v, %v; want %v", got, err, want)
 	}
-	want := fakeConfig{Project: "p"}
-	if got, err := protocolValueAs[fakeConfig](want, "config"); err != nil || got != want {
-		t.Errorf("config = %v, %v; want %v", got, err, want)
-	}
-	_, err := protocolValueAs[fakeConfig](otherConfig{}, "config")
-	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "otherConfig") {
+	_, err := VertexDeployment(Config{ProtocolConfig: fakeConfig{}}, "stub")
+	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "fakeConfig") {
 		t.Errorf("err = %v, want it to name the type that was actually given", err)
 	}
 }

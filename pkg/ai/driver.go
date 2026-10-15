@@ -6,7 +6,6 @@ import (
 	"iter"
 	"maps"
 	"net/http"
-	"reflect"
 	"slices"
 	"sync"
 )
@@ -216,23 +215,5 @@ func RejectProtocolConfig(config Config, driver string) error {
 	return &Error{
 		Driver: driver, Kind: KindInvalidRequest,
 		Message: "ai: driver " + driver + " does not define native configuration",
-	}
-}
-
-// protocolValueAs pulls one driver's own value out of the interface carrying
-// it. what names the side for the error message. A value the driver cannot use
-// is an error, not a silent fall back to the zero value.
-func protocolValueAs[T any](held any, what string) (T, error) {
-	var zero T
-	if held == nil {
-		return zero, nil
-	}
-	if native, ok := held.(T); ok {
-		return native, nil
-	}
-	return zero, &Error{
-		Kind: KindInvalidRequest,
-		Message: fmt.Sprintf("ai: got %s of type %T; driver expects %s",
-			what, held, reflect.TypeFor[T]()),
 	}
 }

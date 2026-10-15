@@ -407,10 +407,10 @@ type Store interface {
 ```
 sessions/                       jsonl.Open("sessions")
   20261016-101500.jsonl         一个会话；文件名就是它的 id
-    {"at":…,"type":"message","message":{…}}   ┐
-    {"at":…,"type":"message","message":{…}}   │ 对话增长时逐条追加
-    {"at":…,"type":"reset"}                   ← 压缩：对话从这里重新开始
-    {"at":…,"type":"message","message":{…}}   ┘ 压缩后的对话，以及之后的消息
+    {"type":"message","message":{…}}   ┐
+    {"type":"message","message":{…}}   │ 对话增长时逐条追加
+    {"type":"reset"}                   ← 压缩：对话从这里重新开始
+    {"type":"message","message":{…}}   ┘ 压缩后的对话，以及之后的消息
 ```
 
 `Load` 按顺序重放这些行：遇到 message 就追加，遇到 reset 就清空。所以文件记的是发生过的一切，对话是重放到最后的结果。`Save` 只追加文件里还没有的部分——对话只是变长了，就追加新消息；对话被改写了，就追加一行 reset 和整份新对话。写到一半崩溃会留下没写完的最后一行，`Load` 忽略它，下一次 `Save` 把它截掉。

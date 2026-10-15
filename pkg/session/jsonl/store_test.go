@@ -178,7 +178,7 @@ func TestAnUnfinishedLastLineIsDropped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = f.WriteString(`{"at":"2026-01-01T00:00:00Z","type":"mess`)
+	_, _ = f.WriteString(`{"type":"mess`)
 	_ = f.Close()
 
 	s := open(t, dir)

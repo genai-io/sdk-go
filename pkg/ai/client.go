@@ -30,20 +30,14 @@ func NewClientWithDriver(d Driver, m Model, defaults ...Option) *Client {
 //	other := ai.NewClientWithDriver(driver, tweaked)                         // talk to a different model
 func (c *Client) Model() Model { return c.model.Clone() }
 
-// unsupportedBy reports that a driver does not implement an optional
-// capability, naming both so the message says what to do about it.
-func unsupportedBy(d Driver, capability string) error {
-	return &Error{
-		Driver: d.Name(), Kind: KindUnsupported,
-		Message: fmt.Sprintf("ai: driver %q does not support %s", d.Name(), capability),
-	}
-}
-
 // Models lists the models the underlying endpoint currently serves.
 func (c *Client) Models(ctx context.Context) ([]Model, error) {
 	lister, ok := c.driver.(ModelLister)
 	if !ok {
-		return nil, unsupportedBy(c.driver, "model listing")
+		return nil, &Error{
+			Driver: c.driver.Name(), Kind: KindUnsupported,
+			Message: fmt.Sprintf("ai: driver %q does not support model listing", c.driver.Name()),
+		}
 	}
 	models, err := lister.Models(ctx)
 	if err != nil {
@@ -142,18 +136,13 @@ func (c *Client) Complete(ctx context.Context, messages []Message, opts ...Optio
 // aggregate it without re-running the request.
 func Collect(events iter.Seq2[Event, error]) (*Response, error) {
 	var resp *Response
-	var failure error
 	for event, err := range events {
 		if event.Type == EventDone && event.Response != nil {
 			resp = event.Response
 		}
 		if err != nil {
-			failure = err
-			break
+			return resp, err
 		}
-	}
-	if failure != nil {
-		return resp, failure
 	}
 	if resp == nil {
 		// The driver closed its iterator without a terminal error and without
@@ -231,9 +220,6 @@ type blockTracker struct {
 }
 
 func (b *blockTracker) write(fragment Block) bool {
-	if fragment.Type == "" {
-		return true
-	}
 	if fragment.Type != BlockText && fragment.Type != BlockThinking {
 		return b.complete(fragment)
 	}

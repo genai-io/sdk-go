@@ -55,20 +55,13 @@ error.
 Register from `init` so a blank import is enough to make the protocol
 reachable.
 
-A setting only your protocol has goes in a typed `ProtocolOptions` value rather
-than a new field on `Request`:
-
-```go
-response, err := client.Complete(ctx, messages,
-	ai.WithProtocolOptions(anthropic.Options{ThinkingDisplay: "omitted"}))
-```
-
-Your type implements `ai.ProtocolOptions` — a one-line marker method — so the
-field is not a bare `any` and a value that was never meant to go there is a
-compile error. A value of the *wrong driver's* type, or one sent to a protocol
+A setting only your protocol has is not a new field on `Request`. If your
+protocol is in the OpenAI family, `SamplingParams` already reaches it. A
+construction setting goes in a typed `ai.ProtocolConfig` value, the way
+`ai.VertexConfig` does: a one-line marker method keeps the field from being a
+bare `any`. A value of the *wrong driver's* type, or one sent to a protocol
 that defines none, is an invalid request caught when that driver reads it. It
-is never ignored silently. Construction settings work the same way through
-`ai.ProtocolConfig`.
+is never ignored silently.
 
 ## Tests
 

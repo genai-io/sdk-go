@@ -487,7 +487,7 @@ func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
 // snapshot of an empty conversation, which a fold then reads as corrupt.
 func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("hello"), aitest.Says("still here")))
-	a.SetMessages(nil) // what session.Open hands back for a session that is new
+	a.SetMessages(nil) // what a new session loads as
 
 	events, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {

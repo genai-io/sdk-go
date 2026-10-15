@@ -2,7 +2,6 @@ package ai
 
 import (
 	"strings"
-	"unicode/utf8"
 )
 
 // Repair returns a conversation every protocol will accept: tool calls and
@@ -197,9 +196,4 @@ func sanitizeBlock(block Block) (Block, bool) {
 }
 
 // sanitizeText replaces invalid UTF-8 with the replacement character.
-func sanitizeText(s string) string {
-	if utf8.ValidString(s) {
-		return s
-	}
-	return strings.ToValidUTF8(s, "�")
-}
+func sanitizeText(s string) string { return strings.ToValidUTF8(s, "�") }

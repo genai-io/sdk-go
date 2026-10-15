@@ -12,20 +12,12 @@ import (
 
 func (d *Driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatCompletionNewParams {
 	params := sdk.ChatCompletionNewParams{
-		Model:    d.model.ID,
-		Messages: d.convertMessages(req),
-	}
-	if !d.compat.NoUsageInStream {
-		params.StreamOptions = sdk.ChatCompletionStreamOptionsParam{IncludeUsage: sdk.Bool(true)}
+		Model:         d.model.ID,
+		Messages:      d.convertMessages(req),
+		StreamOptions: sdk.ChatCompletionStreamOptionsParam{IncludeUsage: sdk.Bool(true)},
 	}
 	if req.MaxTokens > 0 {
-		// Servers that predate max_completion_tokens only understand the older
-		// name and ignore the new one, which silently uncaps the response.
-		if d.compat.MaxTokensField == "max_tokens" {
-			params.MaxTokens = sdk.Int(int64(req.MaxTokens))
-		} else {
-			params.MaxCompletionTokens = sdk.Int(int64(req.MaxTokens))
-		}
+		params.MaxCompletionTokens = sdk.Int(int64(req.MaxTokens))
 	}
 	if req.Temperature != nil {
 		params.Temperature = sdk.Float(*req.Temperature)

@@ -86,7 +86,7 @@ turn 有八种结束方式,**每个出口都必须说出是哪一种**。失败�
 agent.WithContinuation(2, "你的回答被输出上限截断了。从你停下的地方继续,不要重复任何内容。")
 ```
 
-循环知道这件事**什么时候**发生;要不要为更多 token 付费、以及说什么,是你的 —— 所以它**默认关**。这句 prompt 作为普通消息进入对话,并作为 `MessageAdded` 播报,所以会话会记下问了什么。次数用完仍然以 `max_tokens` 收尾:答案本来就是断的。
+循环知道这件事**什么时候**发生;要不要为更多 token 付费、以及说什么,是你的 —— 所以它**默认关**。这句 prompt 作为普通消息进入对话,并作为 `MessageAdded` 播报,所以监听者能看到问了什么。次数用完仍然以 `max_tokens` 收尾:答案本来就是断的。
 
 ### 重试
 
@@ -310,7 +310,7 @@ PreStep: func(ctx context.Context, c agent.PreStepContext) ([]ai.Message, error)
 
 `ai.EstimateTokens` 接一个字符串,给按类别拆解窗口的应用用;`(*ai.Request).EstimateTokens` 量整个 prompt。
 
-替换在**当场**以 `MessagesReplaced` 播报,所以会话把这次压缩记在做出它的那一步上,折叠时不会路过一份 agent 早已丢弃的对话。`PreInfer` 是这一对里的另一半:它只改这一次调用,不动对话。
+替换在**当场**以 `MessagesReplaced` 播报,就在做出它的那一步上。`PreInfer` 是这一对里的另一半:它只改这一次调用,不动对话。
 
 不过 `Tokens` 终究是估算,**真正知道的是端点**——算下来在阈值以内的 prompt,照样可能被判太长,而开了 prompt 缓存之后,响应里报的那些数字也很容易读错。那种情况归 [`OnInferError`](#重试答不了的失败):等提供方开口之后,在调用的另一侧做同一件缩短。`agent.Compacting` 从那里也开得出同一个 span,这正是它不按任何一个 hook 命名的原因。
 
@@ -343,7 +343,7 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 
 返回 error 就是工具失败的方式:循环会把它变成模型看得见、能自己纠正的工具错误,而不是让整个 turn 失败。
 
-**工具看到了什么,就能拿它回答。** `Result.Content` 是 `ai.Content`,所以一张截图、一张画好的图表可以和文字并排走,完整地到模型手里——在 Anthropic 和 OpenAI Responses 这两个协议上,它们的工具结果能带图片;另外两个会**拒绝这个请求**,而不是在半路把图悄悄丢掉。`ResultText` 是同一个答案的文字形式,给日志或会话记录用。
+**工具看到了什么,就能拿它回答。** `Result.Content` 是 `ai.Content`,所以一张截图、一张画好的图表可以和文字并排走,完整地到模型手里——在 Anthropic 和 OpenAI Responses 这两个协议上,它们的工具结果能带图片;另外两个会**拒绝这个请求**,而不是在半路把图悄悄丢掉。`ResultText` 是同一个答案的文字形式,给日志用。
 
 **跑得久的工具要边跑边给人看。** `agent.Report(ctx, partial)` 会作为 `ToolUpdate` 到达消费者——命令的输出边出边报、文件列表边走边报。它走 context 而不是参数,**这样没东西可报的工具一分钱都不付**。
 
@@ -351,7 +351,7 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 
 **并行。** 一批工具默认并发执行。`agent.Sequential(t)` 标记一个不能与别人同时跑的工具,而**一批里只要有一个这样的,整批就串行**——一批工具只有在每个成员都安全时才能并行。
 
-**并行批次里有两种顺序,谁也不能让步。** `ToolEnd` 按**完成顺序**发出,所以界面能在某个工具一停就收掉它的 spinner;而交回给模型的结果按**模型提问的顺序**排列,所以重放一个会话每次得到的是同一份记录。
+**并行批次里有两种顺序,谁也不能让步。** `ToolEnd` 按**完成顺序**发出,所以界面能在某个工具一停就收掉它的 spinner;而交回给模型的结果按**模型提问的顺序**排列,所以同一次运行每次得到的是同一份记录。
 
 ### 来自 MCP 服务器的工具
 
@@ -379,133 +379,57 @@ a, err := agent.New(client, agent.WithTools(tools...))
 
 ## 会话
 
-**agent 完全不知道存储这回事。** 记录发生在应用自己的事件循环里:
+agent 不知道存储的存在。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，用完把 agent 手里的那份存回去。
 
 ```go
-rec, history, err := session.Open(ctx, store, resume)   // 恢复已有会话
-defer rec.Close()
+history, err := store.Load(ctx, id)   // 新会话返回 session.ErrNotFound
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.RecordEvent(ctx, e)   // 先写盘
-    render(e)       // 再画屏
+    render(e)
+}
+err = store.Save(ctx, id, a.Messages())
+```
+
+```go
+type Store interface {
+    Save(ctx context.Context, id string, msgs []ai.Message) error
+    Load(ctx context.Context, id string) ([]ai.Message, error)
 }
 ```
 
-这个顺序是有讲究的:进程在两者之间被杀,不该留下一条**屏幕上有、文件里没有**的消息。
+`Save` 用整份对话替换会话原来存的内容，所以压缩不需要任何额外处理：`SetMessages(summary)`，下一次保存存的就是摘要。`Load` 返回的正是上一次 `Save` 写进去的东西。
 
-```mermaid
-flowchart LR
-    agent(["agent"]) -->|"Event"| loop["你的循环"]
-    loop --> ui["你的界面"]
-    loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
-    rec -->|"Entry"| store[("Store")]
-    store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
-    hist -.->|"SetMessages"| agent
+什么时候存由你决定。通常是每次 `Run` 之后。如果不能接受崩溃时丢掉一长串工具调用，就在每个 `MessageAdded` 时存；用 `jsonl.Store` 的话，每条消息只多追加一行。
+
+`jsonl.Store` 把会话存成一份只追加的日志。store 是一个目录，会话是其中一个文件，每行一条记录：
+
+```
+sessions/                       jsonl.Open("sessions")
+  20261016-101500.jsonl         一个会话；文件名就是它的 id
+    {"type":"message","message":{…}}   ┐
+    {"type":"message","message":{…}}   │ 对话增长时逐条追加
+    {"type":"reset"}                   ← 压缩：对话从这里重新开始
+    {"type":"message","message":{…}}   ┘ 压缩后的对话，以及之后的消息
 ```
 
-实线是写路径,虚线是读路径。**两条路在 agent 内部没有任何交点**:它拿到的只是一个 `[]ai.Message`,从头到尾不知道它从哪来。
+`Load` 按顺序重放这些行：遇到 message 就追加，遇到 reset 就清空。所以文件记的是发生过的一切，对话是重放到最后的结果。`Save` 只追加文件里还没有的部分——对话只是变长了，就追加新消息；对话被改写了，就追加一行 reset 和整份新对话。写到一半崩溃会留下没写完的最后一行，`Load` 忽略它，下一次 `Save` 把它截掉。
 
-### 会话职责
+`List` 按文件时间从新到旧列出会话。改名、复制、删除会话，就是对文件做操作。一个会话同一时刻只能有一个写入者：两个写入者往同一个文件追加，行会交错。
 
-`Store` 管理多份持久化会话，提供创建、读取、追加、元数据和独占写锁。
-`Session` 是已打开的一份固定身份，在恢复前取得写锁，直到 `Close` 才释放。
-`Append` 写入有类型的记录；`RecordEvent` 只将原生 Agent 事件适配到同一实现。
-Agent 自己管理运行和实时原生消息。恢复返回的 `[]ai.Message` 是数据，没有独立生命周期。
-
-`session.Create` 创建新会话；`session.Open` 恢复已有会话；
-`session.Open` 返回需要关闭的会话。恢复同一 ID 前先关闭
-旧句柄。自定义 Store 必须实现 `Claim`，释放函数必须幂等。底层存储操作属于实现约定，
-写入时必须遵守会话所有权。`Writer`、`Handle`、`Record` 和回调工厂均无兼容别名。
-对话替换明确命名为 `EntryConversationReplaced`，载荷保留原生 `Messages`。
+一轮花了多少、怎么结束的，在 `MessageEnd` 和 `TurnEnd` 上。它们不是对话，所以会话不存；要计费或审计的应用，把它们和自己的其他记录放在一起。
 
 ### 给每一轮起名字
 
-一个要**回头指着某一条消息**的存储——用户正在编辑的那一行、它手里已经有的那条记录、fork 分叉的那一轮——问它要名字:
+一个要**回头指着某一条消息**的应用——用户正在编辑的那一行、fork 分叉的那一轮——问它要名字:
 
 ```go
 agent.WithMessageIDs(func() string { return uuid.NewString() })
 ```
 
-进入对话的**每一条**消息都会拿到一个,循环自己造的那些也不例外——模型的回答、一批工具结果、续写提示——因为**一份只有一半能被指到的对话,是没法拿来做存储的**。已经带着名字进来的消息保留原名,这正是 resume 之后能落回它当初被存成的那些记录、而不是把整份转录重新命名一遍的原因。格式和唯一性都是你的事:这个包只负责调用你的生成器,并原样留下它返回的东西。
+进入对话的**每一条**消息都会拿到一个,循环自己造的那些也不例外——模型的回答、一批工具结果、续写提示——因为**一份只有一半能被指到的对话,是没法拿来做存储的**。已经带着名字进来的消息保留原名,这正是加载回来的对话保留存进去时的名字、而不是换一批新名字的原因。格式和唯一性都是你的事:这个包只负责调用你的生成器,并原样留下它返回的东西。
 
 默认关闭,那时每个 `ID` 都是空的。**它永远不会被发出去**——没有任何协议有这个字段,`Repair` 原样带着它走,它也不占 token,所以模型读到的那份对话开不开都一模一样。
-
-### 写进去什么
-
-一个 span 只在**收尾时**存一次——收尾事件已经带了完整值,所以不需要把开始事件挂着,片段也根本不存。
-
-| 事件 | 记录 | 为什么 |
-| --- | --- | --- |
-| `MessageAdded` | `message` | 对话,一次一条 |
-| `MessagesReplaced` | `conversation.replaced` | 对话被整体扔掉换了一份 |
-| `MessageEnd` | `inference` | 一次模型调用:问了什么、花了多少 |
-| `ToolEnd` | `tool` | 一次工具执行 |
-| `TurnEnd` | `outcome` | 这一轮怎么结束的,以及为什么 |
-| `MessageStart` `MessageUpdate` `ToolStart` `ToolUpdate` `TurnStart` | —— | 收尾事件已经说完了 |
-
-### 你自己的事件,进同一条日志
-
-上面那五种条目,是 agent 循环产生的东西。应用有它**自己的**事件也该记在旁边——一次权限的询问与回答、一个 hook 触发了、有人中途加了个工具——而它们值得记在这里而不是另起一条日志,原因是**顺序**:「权限是在第三次工具调用和第四次之间批的」这件事,两条日志说不出来。
-
-```go
-data, err := json.Marshal(decision)
-if err != nil { return err }
-err = rec.Append(ctx, session.Entry{
-    Turn: turn,
-    Type: session.EntryCustom,
-    Custom: &session.Custom{Kind: "permission.decided", Data: data},
-})
-```
-
-`Data` 存进去、原样交回来、从不解读:值是你的,它回答的问题也是你的。`Kind` 同样是你的词汇——**加个命名空间**,这样一个 store 里放着多个应用的会话时还读得懂。折叠会走过这些条目:它们解释对话,但不是对话。
-
-`Session.Append` 是有类型记录的统一持久化入口，负责应用恢复后的轮次偏移。
-Open 保留独立快照，仅跳过 agent 首次报告的未变化历史；修改返回的历史会写入替换记录，
-成功追加或替换消息后，恢复去重即失效。
-`RecordEvent` 只把原生 Agent 事件适配到这个入口。无效的自定义数据会返回错误。
-
-### 读出来什么
-
-恢复就是把这些记录折回去。消息往后追加,**遇到 conversation.replaced 则从头开始折**——因为在它之前播报过的一切,都是 agent 已经丢弃的:
-
-```
-seq   1         2         3          4         5         6
-      message   message   conversation.replaced   message   message   outcome
-                          ▲
-                          └─ 折叠从这里开始。1 和 2 已经没了:
-                             把它们读回来,等于把压缩掉的历史
-                             又塞回给 agent。
-```
-
-除 `message` 和 `conversation.replaced` 之外的记录**不参与恢复** —— 它们是用来解释和计费的。每条上面的轮次号是**会话自己的**,不是 agent 的:agent 每次运行都从 1 开始数,`session.Open` 把会话已有的轮数加上去,两边才对得齐。
-
-**换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——opened session 把它存成折叠的新起点:
-
-```go
-summary := compact(a.Messages())
-a.SetMessages(summary)   // 就这一行
-```
-
-**没有第二行可以忘。** 之所以推迟到下一轮而不是当场播报:进程如果死在这两者之间,恢复出来的是压缩前的那份对话——那是丢了一次优化,不是坏了一段历史。
-
-`Store` 提供持久化与所有权操作:
-
-```go
-type Store interface {
-    Claim(ctx context.Context, id string) (func() error, error)
-    Create(ctx context.Context, meta Meta) (Meta, error)
-    Append(ctx context.Context, id string, entries ...Entry) error
-    Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
-}
-```
-
-列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,`jsonl.Store` 多给了一个 `List`,一个会话就是一个目录,复制、删除都由应用自己来。**接口只需要写出这个包自己会调的东西。**
-
-已打开的 Session 在恢复和后续写入期间一直持有 `.session.lock`，直到 Close。
-每次 JSONL 追加还会取得 `.lock`，分配序号并同步整批记录到磁盘。Store 可以继续复用。
-Meta 与 List 从日志读取数量和事件时间，不需要退出时再刷新元数据。末尾未完成片段会
-在追加前修复；缺少换行的完整条目会保留；已经换行但损坏的条目会报错。
 
 ## 包结构
 
@@ -517,12 +441,9 @@ pkg/agent/
   hook.go      4 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   mcp/         MCP 服务器的工具,变成这个包自己的
-pkg/session/  事件 → 持久条目,以及折回来
-  entry.go    原生消息和审计条目
-  store.go    持久化接口
-  session.go   事件写入
-  restore.go  恢复会话
-  jsonl/      文件系统 store,一个会话一个目录
+pkg/session/  保存与加载对话
+  store.go    Store 接口
+  jsonl/      一个会话一个文件、一行一条消息的 Store
 ```
 
 ## 它不做的事

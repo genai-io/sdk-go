@@ -141,5 +141,5 @@
 // replaying the same prompt fails the same way — so it asks, and shortening it
 // there is the same six lines shortening it at a boundary was.
 //
-// Persisting what happened, and restoring it, is agent/session.
+// Saving a conversation and loading it back is pkg/session.
 package agent

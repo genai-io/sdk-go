@@ -15,7 +15,7 @@ type Result struct {
 	// structured form of the answer: the rows behind a count, the paths behind
 	// a total, the diff behind an edit.
 	//
-	// A session does not keep it.
+	// It is not part of the conversation, so a saved session does not keep it.
 	//
 	// Not a type parameter, because that would land on Tool and an agent's
 	// tools are a heterogeneous list. Producer and consumer agree out of band.

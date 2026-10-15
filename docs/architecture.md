@@ -114,8 +114,8 @@ The cardinality is what keeps the two words apart:
 ```
 
 So **provider** names a configured host you can reach, and **protocol** names
-the request shape it speaks. `ProtocolOptions` scopes to the second, which is
-why `anthropic.Options` reaches MiniMax and Volcengine too: they speak that
+the request shape it speaks. `Compat` scopes to the second, which is why
+`AnthropicCompat` describes MiniMax and Volcengine too: they speak that
 protocol without being that vendor.
 
 ## 28 vendors, 6 protocols, 6 driver packages
@@ -219,7 +219,7 @@ The dividing line for every setting:
 | | Where it goes |
 | --- | --- |
 | Every protocol can express it, spelled differently | a `With*` option; the driver translates |
-| Only one protocol has it | that driver's own `ProtocolOptions` value, passed through |
+| Only one protocol has it | not modeled; `SamplingParams` (OpenAI family) or `Config.Headers` reach it untranslated |
 
 Reasoning effort is the clearest case of the first. "How hard should it think"
 exists everywhere, and every vendor spells it differently — Anthropic wants
@@ -236,13 +236,14 @@ may declare a rung this package has never heard of; asking for it by exact
 name sends it. A name that is neither portable nor in that model's ladder is
 refused, and the error names what the model does offer.
 
-`thinking.display` is the second case. No other protocol has the concept, so it
-is `anthropic.Options.ThinkingDisplay` and travels untranslated.
+`prompt_cache_key` is the second case. No other protocol has the concept, so
+it goes in `SamplingParams` and lands in the body as written.
 
-These are typed, not `any`: `ai.ProtocolOptions` and `ai.ProtocolConfig` are
-marker interfaces, so a value that was never meant to go there is a compile
-error. A value of the *wrong driver's* type is caught at the moment that driver
-reads it — Go has no union type, so that half cannot be a compile error.
+Construction settings only one protocol needs travel in `Config.ProtocolConfig`,
+typed rather than `any`: `ai.ProtocolConfig` is a marker interface, so a value
+that was never meant to go there is a compile error. A value of the *wrong
+driver's* type is caught when that driver reads it — Go has no union type, so
+that half cannot be a compile error.
 
 ## Protocol dialects
 
@@ -383,8 +384,8 @@ Some rules here are conventions and some are checked. It is worth knowing which:
   enters the build only through the driver you blank-import — and
   `pkg/agent/mcp` is the same bargain for the Model Context Protocol SDK:
   import it and you link it, do not and you do not.
-- `ProtocolOptions` / `ProtocolConfig` reject a value that was never meant to be
-  one, at compile time.
+- `ProtocolConfig` rejects a value that was never meant to be one, at compile
+  time.
 - `Driver` is two methods, so a stub in a test is two methods. `pkg/ai/aitest`
   is that stub, shipped, so no one writes it again.
 

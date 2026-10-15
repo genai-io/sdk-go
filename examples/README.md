@@ -25,8 +25,8 @@ idea; the last is a working assistant with all of them in it.
 | --- | --- |
 | [`agent-chat/`](agent-chat) | One exchange per line you type: `Run` advances the conversation once and returns, so repeating it is your `for` loop rather than a mode the agent is in. Ctrl-C ends the exchange in flight and hands the prompt back |
 | [`agent-progress/`](agent-progress) | A tool that takes a while and shows its work — `agent.Report` from inside the tool arriving as `ToolUpdate` — and the split between `Result.Content`, which the model reads, and `Result.Details`, which only your interface does |
-| [`agent-session/`](agent-session) | Record and resume: run it twice and the second run continues the first. The agent is handed a plain `[]ai.Message` and never learns where it came from — and `-keep` shows the one case that needs saying out loud, compacting a history the session would otherwise hand straight back |
-| [`agent/`](agent) | All of it at once: a system prompt built from the environment, a `PreTool` gate that refuses anything that writes, and a session on disk that the next run resumes from |
+| [`agent-session/`](agent-session) | Save and resume: run it twice and the second run continues the first. The agent is handed a plain `[]ai.Message` and never learns where it came from; `-keep` compacts, and the next save is the compacted conversation |
+| [`agent/`](agent) | A coding assistant: a system prompt built from the environment, and a `PreTool` gate that refuses anything that writes |
 
 ```sh
 go run ./examples/agent-chat

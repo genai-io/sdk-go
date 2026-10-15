@@ -1,19 +1,30 @@
+// Package session saves an agent's conversation and loads it back.
+//
+//	history, err := store.Load(ctx, id)   // session.ErrNotFound for a new one
+//	a.SetMessages(history)
+//	for e, err := range a.Run(ctx, msg) { … }
+//	err = store.Save(ctx, id, a.Messages())
+//
+// Save is handed the whole conversation, so compaction needs nothing of its
+// own: the next save is the compacted conversation. Save as often as losing
+// work would hurt — after each run, or on every agent.MessageAdded.
 package session
 
 import (
 	"context"
-	"iter"
+	"errors"
+
+	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// Store is what a Session appends to and a conversation is restored from.
+// ErrNotFound is returned by Load for a session that was never saved.
+var ErrNotFound = errors.New("session: not found")
+
+// Store keeps conversations by id.
 type Store interface {
-	// Claim obtains exclusive session ownership before restoration or writing.
-	// The returned release must be idempotent.
-	Claim(ctx context.Context, id string) (func() error, error)
-	// Create starts a session. A blank Meta.ID means the store assigns one.
-	Create(ctx context.Context, meta Meta) (Meta, error)
-	// Append writes entries in order, assigning Seq to any that lack one.
-	Append(ctx context.Context, id string, entries ...Entry) error
-	// Entries reads from the beginning and stops at the first error.
-	Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
+	// Save replaces the session's conversation with msgs, creating the
+	// session if it does not exist.
+	Save(ctx context.Context, id string, msgs []ai.Message) error
+	// Load returns the session's conversation, which is the caller's.
+	Load(ctx context.Context, id string) ([]ai.Message, error)
 }

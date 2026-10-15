@@ -117,7 +117,7 @@ agent.WithContinuation(2, "Your answer was cut off by the output limit. "+
 
 The loop knows when it happened; whether to pay for more tokens, and what to
 say, are yours — so this is off by default. The prompt enters as an ordinary
-message and is reported as `MessageAdded`, so a session records what was asked.
+message and is reported as `MessageAdded`, so a listener sees what was asked.
 Running out of attempts still ends with `max_tokens`: the answer is still cut
 off.
 
@@ -446,9 +446,8 @@ reads it at four times its size.
 `ai.EstimateTokens` takes a string, for an application breaking a window down by
 category; `(*ai.Request).EstimateTokens` sizes a whole prompt.
 
-The replacement is announced there and then as `MessagesReplaced`, so a session
-records the compaction at the step that made it, and a fold never passes
-through a conversation the agent had already discarded. `PreInfer` is the other
+The replacement is announced there and then as `MessagesReplaced`, at the step
+that made it. `PreInfer` is the other
 half of the pair: it edits one call and leaves the conversation alone.
 
 `Tokens` is an estimate, though, and the endpoint is the one that actually
@@ -495,7 +494,7 @@ model can see and correct, rather than failing the turn.
 reaches the model whole — inside the tool result on the Anthropic and OpenAI
 Responses protocols, in a user message right after it on Chat Completions;
 Gemini refuses the request rather than dropping the picture on the way. `ResultText` is the same answer as text,
-for a log or a session record.
+for a log.
 
 **A tool that takes a while shows its work.** `agent.Report(ctx, partial)`
 reaches the consumer as `ToolUpdate` — the output of a command as it arrives,
@@ -515,8 +514,8 @@ every member of it is.
 **Two orders are in play in a parallel batch, and neither gives way.**
 `ToolEnd` is emitted as each tool finishes, so an interface can retire that
 spinner the moment it stops; the results handed back to the model go in the
-order it asked for them, so replaying a session produces the same transcript
-every time.
+order it asked for them, so the same run produces the same transcript every
+time.
 
 ### Tools from an MCP server
 
@@ -566,59 +565,65 @@ the same way with `Decision.Terminate`.
 
 ## Sessions
 
-The agent knows nothing about storage. Recording happens in the application's
-own event loop:
+The agent knows nothing about storage. A conversation is a `[]ai.Message`:
+load one, hand it to the agent, and save what the agent holds afterwards.
 
 ```go
-rec, history, err := session.Open(ctx, store, resume)   // an existing session
-defer rec.Close()
+history, err := store.Load(ctx, id)   // session.ErrNotFound for a new one
 a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
-    rec.RecordEvent(ctx, e)   // write first
-    render(e)       // then paint
+    render(e)
+}
+err = store.Save(ctx, id, a.Messages())
+```
+
+```go
+type Store interface {
+    Save(ctx context.Context, id string, msgs []ai.Message) error
+    Load(ctx context.Context, id string) ([]ai.Message, error)
 }
 ```
 
-That order matters: a process killed between them should not leave a message on
-the screen that is not in the file.
+`Save` replaces what the session held with the whole conversation, so
+compaction needs nothing of its own: `SetMessages(summary)`, and the next save
+is the summary. `Load` returns exactly what the last save wrote.
 
-```mermaid
-flowchart LR
-    agent(["agent"]) -->|"Event"| loop["your loop"]
-    loop --> ui["your interface"]
-    loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
-    rec -->|"Entry"| store[("Store")]
-    store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
-    hist -.->|"SetMessages"| agent
+When to save is yours. After each `Run` is the usual answer. A program that
+must not lose a long run of tools to a crash saves on every `MessageAdded`;
+with `jsonl.Store` that costs one appended line per message.
+
+`jsonl.Store` keeps a session as an append-only log. The store is a directory,
+the session is one file in it, and each line is one record:
+
+```
+sessions/                       jsonl.Open("sessions")
+  20261016-101500.jsonl         one session; the file name is its id
+    {"type":"message","message":{…}}   ┐
+    {"type":"message","message":{…}}   │ appended as the conversation grew
+    {"type":"reset"}                   ← compaction: the conversation starts over
+    {"type":"message","message":{…}}   ┘ the compacted conversation, then what followed
 ```
 
-Solid arrows are the write path, dotted the read path. They meet nowhere inside
-the agent: it is handed a `[]ai.Message` and never learns where it came from.
+`Load` replays the lines: a message appends, a reset empties the
+conversation. So the file is everything that happened, and the conversation
+is what the replay ends with. `Save` appends only what the file does not hold
+yet — new messages if the conversation grew, a reset and the whole
+conversation if it changed. A crash mid-write leaves an unterminated last
+line, which `Load` ignores and the next `Save` cuts off.
 
-### Session responsibilities
+`List` returns the sessions newest first, by file time. Renaming, copying and
+deleting a session are file operations. Give a session one writer at a time:
+two writers appending to one file interleave their lines.
 
-`Store` manages persisted sessions and implements create, read, append, metadata,
-and exclusive claims. `Session` is one opened identity: it holds the claim before
-restoration and keeps it until `Close`, including while idle. `Append` writes typed
-entries; `RecordEvent` adapts the native stream to the same implementation.
-`Err` reports a write failure. All later recording stops after a storage failure.
-
-The agent owns its live native messages and execution. The restored `[]ai.Message`
-is data handed to the agent, with no independent save method or lifecycle.
-`session.Create` opens a new identity; `session.Open` restores an existing one.
-`session.Open` returns an owned
-Session, so close it before reopening the same identity. Custom stores implement
-`Claim`; the returned release must be idempotent. Raw storage operations are the
-implementation contract and callers must respect session ownership when writing.
-
-There are no `Writer`, `Handle`, `Record`, or callback-factory compatibility aliases.
-Conversation replacements are `EntryConversationReplaced` with native `Messages`.
+What a turn cost and how it ended are on `MessageEnd` and `TurnEnd`. They are
+not the conversation, so a session does not keep them; an application that
+bills or audits keeps them with the rest of its records.
 
 ### Naming the turns
 
-A store that has to point back at one message — the row a person is editing,
-the entry it already holds, the turn a fork branches at — asks for names:
+An application that has to point back at one message — the row a person is
+editing, the turn a fork branches at — asks for names:
 
 ```go
 agent.WithMessageIDs(func() string { return uuid.NewString() })
@@ -627,118 +632,14 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 Every message that enters the conversation gets one, the loop's own answers,
 tool-result batches and continuation prompts included, because a conversation
 half of which can be pointed at is one you cannot build a store on. A message
-that arrived already named keeps its name, which is what makes a restore land
-on the entries it was stored as rather than renaming the whole transcript. The
+that arrived already named keeps its name, which is what makes a loaded
+conversation keep the names it was saved with rather than gaining new ones. The
 format and the uniqueness are yours; this calls your generator and keeps what
 it returns.
 
 It is off by default and then every `ID` is empty. Nothing is ever sent — no
 protocol has a field for it, `Repair` carries it through untouched, and it
 costs no tokens, so a conversation the model reads is the same either way.
-
-### What is written
-
-A span is stored once, when it closes — the closing event already carried the
-whole value, so nothing needs to be held open and fragments are not stored at
-all.
-
-| event | entry | why |
-| --- | --- | --- |
-| `MessageAdded` | `message` | the conversation, one message at a time |
-| `MessagesReplaced` | `conversation.replaced` | the conversation, thrown away and replaced |
-| `MessageEnd` | `inference` | one model call: what was asked, what it cost |
-| `ToolEnd` | `tool` | one tool execution |
-| `TurnEnd` | `outcome` | how the turn ended, and why |
-| `MessageStart` `MessageUpdate` `ToolStart` `ToolUpdate` `TurnStart` | — | the closing event says it all |
-
-### Your own events, in the same log
-
-The five entries above are what an agent's loop produces. An application has
-events of its own that belong beside them — a permission asked for and
-answered, a hook that fired, a tool a person added mid-session — and what makes
-them worth storing here rather than in a log of their own is the order. That a
-permission was granted between the third tool call and the fourth is the fact;
-two logs cannot state it.
-
-```go
-data, err := json.Marshal(decision)
-if err != nil { return err }
-err = rec.Append(ctx, session.Entry{
-    Turn: turn,
-    Type: session.EntryCustom,
-    Custom: &session.Custom{Kind: "permission.decided", Data: data},
-})
-```
-
-`Data` is stored and handed back and never read: the value is yours, and so is
-the question it answers. `Kind` is
-your vocabulary too — namespace it, so a store holding more than one
-application's sessions stays legible. A fold walks past these: they explain the
-conversation, they are not it.
-
-`Session.Append` is the shared persistence entrance for typed entries. It applies
-the restored turn offset once. Open retains an independent snapshot for suppressing
-the agent's initial unchanged replacement. Editing the returned history is a real
-replacement; any successful conversation append ends this resume deduplication.
-`RecordEvent` only adapts native agent events
-to that entrance. Invalid custom payloads return an error rather than losing data.
-
-### What is read
-
-Restoring folds the entries back. Messages append; **a conversation replacement starts the fold over**, because everything announced before one is what the agent discarded:
-
-```
-seq   1         2         3          4         5         6
-      message   message   conversation.replaced   message   message   outcome
-                          ▲
-                          └─ the fold starts here. 1 and 2 are gone:
-                             reading them back would hand the agent
-                             the history compaction just removed.
-```
-
-Entries other than `message` and `conversation.replaced` are not read to restore — they are
-there to explain and to bill. The turn number on each is the session's own, not
-the agent's: an agent counts from one on every run, and `session.Open` adds what
-the session already held so the two agree.
-
-**Replacing the conversation is an event too.** Compaction swaps the whole
-history, and a fold over `MessageAdded` alone would hand back what was thrown
-away. So `SetMessages` is announced — as `MessagesReplaced`, at the start of
-the next exchange, which is when the agent next has anywhere to say it — and
-the opened session stores it as the point a fold starts from:
-
-```go
-summary := compact(a.Messages())
-a.SetMessages(summary)   // that is the whole of it
-```
-
-There is no second line to forget. Announcing it at the next exchange rather
-than at the call means a process that dies between the two restores the
-conversation as it stood before compaction — which is a lost optimisation, not
-a broken history.
-
-`Store` supplies the persistence and ownership operations:
-
-```go
-type Store interface {
-    Claim(ctx context.Context, id string) (func() error, error)
-    Create(ctx context.Context, meta Meta) (Meta, error)
-    Append(ctx context.Context, id string, entries ...Entry) error
-    Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
-}
-```
-
-Listing, renaming, forking and deleting are the application's business with the
-store it chose — `jsonl.Store` adds `List`, and a session is a directory the
-application can copy or remove. An interface only has to name what this package
-calls.
-
-An opened Session holds a `.session.lock` across restoration and all appends.
-Each JSONL append also locks `.lock` while assigning sequence numbers and syncing
-the batch to disk. Close releases the ownership claim; the Store remains reusable.
-Meta and List derive counts and event timestamps from the log. No deferred metadata
-flush is needed. A torn final fragment is repaired before append; a complete record
-without a newline is retained. An invalid terminated record is an error.
 
 ## Package layout
 
@@ -750,12 +651,9 @@ pkg/agent/
   hook.go      the four hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   mcp/         an MCP server's tools, as this package's own
-pkg/session/  events → durable entries, and back
-  entry.go    native message and audit entry contracts
-  store.go    persistence interface
-  session.go   event handler
-  restore.go  resume fold
-  jsonl/      filesystem store, a directory per session
+pkg/session/  Save and Load a conversation
+  store.go    the Store interface
+  jsonl/      a Store as one file per session, one message per line
 ```
 
 ## What it does not do

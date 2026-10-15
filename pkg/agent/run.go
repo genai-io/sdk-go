@@ -781,8 +781,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			// A model stopped by the output cap was interrupted, not finished,
 			// so a caller who asked for it gets another step rather than half
 			// an answer. The prompt goes into the conversation like any other
-			// message, which is what makes the next call see it and a session
-			// record that it was asked.
+			// message, which is what makes the next call see it.
 			if resp.StopReason == ai.StopMaxTokens && a.resumeTries > resumed {
 				resumed++
 				a.add(emit, ai.UserMessage(a.resumePrompt))

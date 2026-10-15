@@ -106,7 +106,6 @@ type goldenRow struct {
 	KeyEnv          []string          `json:"key_env,omitempty"`
 	DeploymentEnv   map[string]string `json:"deployment_env,omitempty"`
 	Compat          any               `json:"compat,omitempty"`
-	SamplingParams  map[string]any    `json:"sampling_params,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
 	Note            string            `json:"note,omitempty"`
 }
@@ -118,7 +117,7 @@ func goldenRows() []goldenRow {
 			ID: v.ID, DisplayName: v.DisplayName, API: string(v.API),
 			BaseURL: v.BaseURL, BaseURLEnv: v.BaseURLEnv, BaseURLSuffix: v.BaseURLSuffix,
 			RequiresBaseURL: v.RequiresBaseURL, KeyEnv: v.KeyEnv, DeploymentEnv: v.DeploymentEnv,
-			Compat: v.Compat, SamplingParams: v.SamplingParams, Headers: v.Headers,
+			Compat: v.Compat, Headers: v.Headers,
 			Note: v.Note,
 		})
 	}

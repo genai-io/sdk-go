@@ -27,18 +27,9 @@ type AnthropicCompat struct {
 	// x-api-key. Volcengine Ark wants this.
 	BearerAuth bool `json:"bearer_auth,omitempty"`
 
-	// NoPromptCache omits the cache_control breakpoint on the system prompt.
-	// Set it for an endpoint that rejects the field.
-	NoPromptCache bool `json:"no_prompt_cache,omitempty"`
-
 	// NoTemperature omits the temperature field. Claude Opus 4.7 and later
 	// reject a non-default value.
 	NoTemperature bool `json:"no_temperature,omitempty"`
-
-	// NoLongCacheRetention marks an endpoint that rejects cache_control.ttl.
-	// A request asking for CacheLong falls back to the short lifetime rather
-	// than failing.
-	NoLongCacheRetention bool `json:"no_long_cache_retention,omitempty"`
 }
 
 // ThinkingFormat is which request field an OpenAI Chat Completions endpoint
@@ -75,19 +66,6 @@ type OpenAIChatCompat struct {
 	// message, empty when there is none. Moonshot and Z.ai reject a
 	// thinking-enabled request whose history omits it.
 	ReasoningContent bool `json:"reasoning_content,omitempty"`
-
-	// MaxTokensField names the output-cap field. Empty means
-	// max_completion_tokens; set it to "max_tokens" for a server that only
-	// understands the older name.
-	MaxTokensField string `json:"max_tokens_field,omitempty"`
-
-	// NoUsageInStream skips stream_options.include_usage for endpoints that
-	// reject it. Token counts are then whatever the final chunk carries.
-	NoUsageInStream bool `json:"no_usage_in_stream,omitempty"`
-
-	// NoFinishReason marks an endpoint that never sends finish_reason. The
-	// driver then infers tool_use or end_turn from what the turn produced.
-	NoFinishReason bool `json:"no_finish_reason,omitempty"`
 }
 
 // OpenAIResponsesCompat is the behavior an OpenAI Responses endpoint needs.

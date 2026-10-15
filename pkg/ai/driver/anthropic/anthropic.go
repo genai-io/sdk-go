@@ -119,30 +119,16 @@ func NewWithOptions(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai
 // speaks it to.
 func (d *Driver) Name() string { return string(d.api) }
 
-// requestOptions are the headers one call carries beyond the client's own: the
-// betas this protocol takes per request.
-func requestOptions(native Options) []option.RequestOption {
-	if betas := native.Betas; len(betas) > 0 {
-		return []option.RequestOption{option.WithHeader("anthropic-beta", strings.Join(betas, ","))}
-	}
-	return nil
-}
-
 // Stream runs one Messages call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		native, err := ai.ProtocolOptionsAs[Options](req)
-		if err != nil {
-			yield(ai.Delta{}, err)
-			return
-		}
-		params, err := d.buildParams(req, native)
+		params, err := d.buildParams(req)
 		if err != nil {
 			yield(ai.Delta{}, err)
 			return
 		}
 
-		stream := d.client.Messages.NewStreaming(ctx, *params, requestOptions(native)...)
+		stream := d.client.Messages.NewStreaming(ctx, *params)
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// Tool input is kept per content-block index: a compatible endpoint
@@ -286,11 +272,7 @@ func mapStopReason(reason string) ai.StopReason {
 // CountTokens asks the endpoint how large a prompt is, without generating
 // from it. Anthropic publishes this, so a caller never has to estimate.
 func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) {
-	native, err := ai.ProtocolOptionsAs[Options](req)
-	if err != nil {
-		return 0, err
-	}
-	params, err := d.buildParams(req, native)
+	params, err := d.buildParams(req)
 	if err != nil {
 		return 0, err
 	}
@@ -305,7 +287,7 @@ func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 	if !param.IsOmitted(params.Thinking) {
 		count.Thinking = params.Thinking
 	}
-	res, err := d.client.Messages.CountTokens(ctx, count, requestOptions(native)...)
+	res, err := d.client.Messages.CountTokens(ctx, count)
 	if err != nil {
 		return 0, d.fail.Wrap(err)
 	}

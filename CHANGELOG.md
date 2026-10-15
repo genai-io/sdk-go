@@ -11,12 +11,22 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
-- Move session persistence to `pkg/session` and `pkg/session/jsonl`.
-  Rename `session.Recorder` to `session.Writer`. Update imports and type names;
-  the old package and aliases are removed.
-- JSONL stores serialize appends across store instances and processes. Sequence
-  numbers and listing counts come from the log, with no shutdown flush or
-  `Store.Close` required.
+- **A session is a saved conversation.** It moves to `pkg/session`, and
+  `session.Store` is `Save(ctx, id, msgs)` and `Load(ctx, id)`. Replace the
+  recorder with a load before the run and a save after it:
+
+  ```go
+  history, err := store.Load(ctx, id)   // session.ErrNotFound if new
+  a.SetMessages(history)
+  // run the agent
+  err = store.Save(ctx, id, a.Messages())
+  ```
+
+  Compaction needs nothing extra: the next save holds the compacted
+  conversation. `pkg/agent/session/jsonl` becomes `pkg/session/jsonl`: one
+  append-only `<id>.jsonl` per session. A save appends only what is new, and a
+  rewritten conversation is appended after a `reset` line. `List` returns
+  `jsonl.Session{ID, SavedAt}`. The application chooses the id.
 
 ### Removed
 
@@ -41,18 +51,19 @@ Each such change is listed under **Changed** with what to write instead.
 - `mcp.Client.Resources`, `Prompts` and `Alive`, the `Resource` and `Prompt`
   types, `Server.SSE`, and `mcp.Option`; set `Server.OnToolsChanged`.
 - `agent.Agent.System`.
-- `session.Read`, `Meta.Created`, `ByRecency`, and `Meta` from `session.Store`.
-
-### Fixed
-
-- Session recency comes from the last logged event timestamp, so coarse
-  filesystem modification times cannot put a recently active session behind
-  a newer empty session.
-
-- Resumed sessions continue after incomplete turns without reusing turn numbers.
-- Complete final records missing a newline survive the next append; terminated
-  corrupt records are reported instead of hidden.
-- Failed batch encoding does not append a partial batch or consume sequence numbers.
+- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
+  `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,
+  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and
+  `jsonl.Store.Close`. Read cost and outcome from `MessageEnd` and `TurnEnd` in
+  your event loop, and keep them with your own records.
+- `ai.ProtocolOptions`, `ai.WithProtocolOptions`, `ai.ProtocolOptionsAs`,
+  `ai.RejectProtocolOptions`, `Request.ProtocolOptions`, `anthropic.Options` and
+  `responses.Options`. Send an `anthropic-beta` header through `Config.Headers`;
+  put a Responses field such as `prompt_cache_key` in `SamplingParams`.
+- `AnthropicCompat.NoPromptCache` and `NoLongCacheRetention`;
+  `OpenAIChatCompat.MaxTokensField`, `NoUsageInStream` and `NoFinishReason`.
+- `catalog.Vendor.SamplingParams`; set `Model.SamplingParams`.
+- `ai.ToolChoice.String`.
 
 ## [0.8.0] - 2026-10-01
 

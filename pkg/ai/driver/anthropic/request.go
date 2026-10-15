@@ -75,7 +75,7 @@ func (t *toolIDs) mint() string {
 	return fmt.Sprintf("toolu_compat_%d", t.n)
 }
 
-func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewParams, error) {
+func (d *Driver) buildParams(req *ai.Request) (*sdk.MessageNewParams, error) {
 	var ids toolIDs
 
 	// The rung carries both halves of the mapping: Value is what
@@ -137,10 +137,7 @@ func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewPa
 	}
 	switch {
 	case d.compat.ForceAdaptiveThinking && thinkingOn:
-		adaptive := &sdk.ThinkingConfigAdaptiveParam{
-			Display: sdk.ThinkingConfigAdaptiveDisplay(native.ThinkingDisplay),
-		}
-		params.Thinking = sdk.ThinkingConfigParamUnion{OfAdaptive: adaptive}
+		params.Thinking = sdk.ThinkingConfigParamUnion{OfAdaptive: &sdk.ThinkingConfigAdaptiveParam{}}
 		params.OutputConfig.Effort = sdk.OutputConfigEffort(level.Value)
 	case d.compat.ForceAdaptiveThinking && hasLevel:
 		// These models think by default, so "off" has to be said out loud. No
@@ -157,7 +154,7 @@ func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewPa
 	if len(req.StopSequences) > 0 {
 		params.StopSequences = req.StopSequences
 	}
-	if choice := toolChoice(req, native); choice != nil {
+	if choice := toolChoice(req); choice != nil {
 		params.ToolChoice = *choice
 	}
 	if req.System != "" {
@@ -184,40 +181,17 @@ func (d *Driver) buildParams(req *ai.Request, native Options) (*sdk.MessageNewPa
 	return params, nil
 }
 
-// Options carries the Anthropic-only settings the normalized Options do not
-// model. Pass it with ai.WithProtocolOptions; the zero value changes nothing.
-type Options struct {
-	// ThinkingDisplay controls how thinking comes back: "summarized" returns
-	// readable reasoning, "omitted" returns an empty thinking field with the
-	// signature still attached for multi-turn continuity. Omitted is faster to
-	// first text token, which is what a UI that never shows reasoning wants.
-	// Empty leaves the API's own default in place.
-	ThinkingDisplay string
-
-	// Betas are extra anthropic-beta header values for this driver's requests.
-	Betas []string
-
-	// DisableParallelToolUse limits the model to one tool call per turn. It
-	// only applies alongside a tool constraint.
-	DisableParallelToolUse bool
-}
-
-// ProtocolOptions marks this as one driver's request settings.
-func (Options) ProtocolOptions() {}
-
 // cacheControl maps the requested retention onto a cache_control marker. A nil
-// result means no breakpoint, which is what CacheNone asks for and what an
-// endpoint with no prompt cache gets.
+// result means no breakpoint, which is what CacheNone asks for.
 func (d *Driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphemeralParam {
-	if d.compat.NoPromptCache || retention == ai.CacheNone {
+	if retention == ai.CacheNone {
 		return nil
 	}
 	cc := sdk.NewCacheControlEphemeralParam()
 	// A 1-hour write costs twice the input rate against 1.25x for five
 	// minutes, so it only pays off from the second read — the caller asks for
-	// it deliberately, and an endpoint that rejects the field falls back
-	// rather than failing.
-	if retention == ai.CacheLong && !d.compat.NoLongCacheRetention {
+	// it deliberately.
+	if retention == ai.CacheLong {
 		cc.TTL = sdk.CacheControlEphemeralTTLTTL1h
 	}
 	return &cc
@@ -225,24 +199,14 @@ func (d *Driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphe
 
 // toolChoice maps the neutral constraint onto Anthropic's union. A nil result
 // leaves the field off, which is the API's own default.
-func toolChoice(req *ai.Request, native Options) *sdk.ToolChoiceUnionParam {
-	// disable_parallel_tool_use is sent only when it is on: an
-	// Anthropic-compatible host may reject a property it has never heard of.
+func toolChoice(req *ai.Request) *sdk.ToolChoiceUnionParam {
 	switch name, forced := req.ToolChoice.Tool(); {
 	case forced:
-		choice := &sdk.ToolChoiceToolParam{Name: name}
-		if native.DisableParallelToolUse {
-			choice.DisableParallelToolUse = sdk.Bool(true)
-		}
-		return &sdk.ToolChoiceUnionParam{OfTool: choice}
+		return &sdk.ToolChoiceUnionParam{OfTool: &sdk.ToolChoiceToolParam{Name: name}}
 	case req.ToolChoice == ai.ToolChoiceNone:
 		return &sdk.ToolChoiceUnionParam{OfNone: &sdk.ToolChoiceNoneParam{}}
 	case req.ToolChoice == ai.ToolChoiceRequired:
-		choice := &sdk.ToolChoiceAnyParam{}
-		if native.DisableParallelToolUse {
-			choice.DisableParallelToolUse = sdk.Bool(true)
-		}
-		return &sdk.ToolChoiceUnionParam{OfAny: choice}
+		return &sdk.ToolChoiceUnionParam{OfAny: &sdk.ToolChoiceAnyParam{}}
 	}
 	return nil
 }

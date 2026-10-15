@@ -44,12 +44,6 @@ type Request struct {
 	// reach a parameter this SDK does not model. Only the OpenAI-family
 	// drivers apply them.
 	SamplingParams map[string]any
-
-	// ProtocolOptions carries settings only one protocol has, as that driver's
-	// own value — anthropic.Options, responses.Options. It is the escape hatch for
-	// what the fields above deliberately do not model, so needing one thing a
-	// protocol offers does not mean writing a whole driver.
-	ProtocolOptions ProtocolOptions
 }
 
 // Option sets one field of a Request.
@@ -106,11 +100,6 @@ func WithSchema(s *Schema) Option {
 	return func(r *Request) { r.Schema = cloneSchema(s) }
 }
 
-// WithProtocolOptions supplies one driver's protocol-specific settings.
-func WithProtocolOptions(native ProtocolOptions) Option {
-	return func(r *Request) { r.ProtocolOptions = native }
-}
-
 // newRequest builds the request for one call: the model's own defaults first,
 // then the client's, then the call's. Later layers overwrite earlier ones,
 // which is the whole of the resolution rule.
@@ -162,19 +151,6 @@ func ToolChoiceNamed(name string) ToolChoice {
 
 // Tool returns the tool this choice requires, and whether it requires one.
 func (c ToolChoice) Tool() (string, bool) { return c.name, c.mode == choiceNamed }
-
-// String describes the choice the way an error message wants it.
-func (c ToolChoice) String() string {
-	switch c.mode {
-	case choiceNone:
-		return "none"
-	case choiceRequired:
-		return "required"
-	case choiceNamed:
-		return "tool " + c.name
-	}
-	return "auto"
-}
 
 // Effort is a reasoning rung, named the same way whichever vendor serves it.
 type Effort string
@@ -235,26 +211,3 @@ const (
 	// than one.
 	CacheLong CacheRetention = "long"
 )
-
-// ProtocolOptions is one driver's protocol-specific request settings.
-type ProtocolOptions interface {
-	// ProtocolOptions marks this type as one driver's request settings. A no-op:
-	//
-	//	func (Options) ProtocolOptions() {}
-	ProtocolOptions()
-}
-
-// ProtocolOptionsAs reads a driver's protocol-specific settings out of a request. A
-// non-nil value of the wrong concrete type is an invalid request.
-//
-//	native, err := ai.ProtocolOptionsAs[anthropic.Options](req)
-//	if native.ThinkingDisplay != "" { … }
-func ProtocolOptionsAs[T ProtocolOptions](req *Request) (T, error) {
-	return protocolValueAs[T](req.ProtocolOptions, "native request options")
-}
-
-// RejectProtocolOptions returns an invalid-request error when a protocol with no native
-// option type receives one. Drivers call it before building their wire request.
-func RejectProtocolOptions(req *Request, driver string) error {
-	return rejectProtocolValue(req.ProtocolOptions, driver, "native request options")
-}

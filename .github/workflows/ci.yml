@@ -15,18 +15,14 @@ concurrency:
 
 jobs:
   test:
-    name: Go ${{ matrix.go }}
+    name: Test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Test the minimum supported patch; it contains the HTTP/2 security fix.
-        go: ['1.26.9']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ matrix.go }}
+          # The minimum supported patch; it contains the HTTP/2 security fix.
+          go-version: '1.26.9'
           cache: true
       - name: Build
         run: make build
@@ -35,9 +31,8 @@ jobs:
       - name: Test
         run: make test
 
-  # A job of its own, and on one Go version: the linters are the same whichever
-  # compiler runs them, and the action fetches a pinned binary rather than
-  # building one, which `make golangci-lint` would do on both matrix entries.
+  # A job of its own: the action fetches a pinned binary rather than building
+  # one, which `make golangci-lint` would do.
   lint:
     name: Lint
     runs-on: ubuntu-latest

@@ -194,39 +194,6 @@ func TestAFailureKeepsItsCodeAndItsMessage(t *testing.T) {
 	}
 }
 
-// The zero value of the option changes nothing, so the field is sent only when
-// it is on: an Anthropic-compatible host may reject a property it has never
-// heard of.
-func TestParallelToolUseIsOnlyDisabledWhenAsked(t *testing.T) {
-	tool := ai.Tool{Schema: ai.Schema{Name: "weather", Definition: map[string]any{"type": "object"}}}
-
-	for _, tc := range []struct {
-		name  string
-		off   bool
-		wants bool
-	}{
-		{name: "left alone", off: false, wants: false},
-		{name: "asked for", off: true, wants: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s := sse(t, done...)
-			req := &ai.Request{
-				Messages:        []ai.Message{ai.UserMessage("hi")},
-				Tools:           []ai.Tool{tool},
-				ToolChoice:      ai.ToolChoiceRequired,
-				ProtocolOptions: Options{DisableParallelToolUse: tc.off},
-			}
-			if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), req); err != nil {
-				t.Fatalf("stream: %v", err)
-			}
-			_, body, _ := s.seen()
-			if got := strings.Contains(body, "disable_parallel_tool_use"); got != tc.wants {
-				t.Errorf("disable_parallel_tool_use present = %v, want %v; body was %s", got, tc.wants, body)
-			}
-		})
-	}
-}
-
 // Redacted thinking is unreadable but not disposable: the API rejects a
 // tool-use continuation whose history dropped it.
 func TestRedactedThinkingComesBackAndGoesBackOut(t *testing.T) {

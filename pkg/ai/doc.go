@@ -129,7 +129,6 @@
 //	pricing.go     a rate card, and the money one call cost
 //
 //	client.go      one call: prepared, run, and streamed back
-//	retry.go       the one execution policy this package ships, and why
 //	history.go     the repairs every protocol needs
 //	validate.go    everything caught before the network
 //	tokens.go      how large a prompt is, and whether it fit

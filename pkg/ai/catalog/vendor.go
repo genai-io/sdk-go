@@ -56,9 +56,6 @@ type Vendor struct {
 	// ai.OpenAIResponsesCompat or ai.GoogleCompat, by value.
 	Compat any
 
-	// SamplingParams are default sampling parameters for this vendor's models.
-	SamplingParams map[string]any
-
 	// Headers are sent with every request to this vendor.
 	Headers map[string]string
 
@@ -75,7 +72,6 @@ func (v Vendor) clone() Vendor {
 	out.Headers = maps.Clone(v.Headers)
 	// Compat needs no clone: every compat is a struct held in an interface, so
 	// the field copy above is already a copy of the value.
-	out.SamplingParams = maps.Clone(v.SamplingParams)
 	return out
 }
 
@@ -99,9 +95,6 @@ func (v Vendor) Resolve(m ai.Model) ai.Model {
 	}
 	if m.Compat == nil && m.API == v.API {
 		m.Compat = v.Compat
-	}
-	if m.SamplingParams == nil {
-		m.SamplingParams = maps.Clone(v.SamplingParams)
 	}
 	if m.Headers == nil {
 		m.Headers = maps.Clone(v.Headers)

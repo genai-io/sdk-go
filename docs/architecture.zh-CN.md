@@ -87,7 +87,7 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 1 个 model     ->  1 个 client
 ```
 
-所以 **provider** 命名的是"一台你能连上的、配好的主机"，**protocol** 命名的是"它说的那套请求格式"。`ProtocolOptions` 作用于后者——这就是为什么 `anthropic.Options` 也能作用到 MiniMax 和火山引擎：**它们说那个协议，但不是那个厂商**。
+所以 **provider** 命名的是"一台你能连上的、配好的主机"，**protocol** 命名的是"它说的那套请求格式"。`Compat` 作用于后者——这就是为什么 `AnthropicCompat` 也能描述 MiniMax 和火山引擎：**它们说那个协议，但不是那个厂商**。
 
 ## 28 家厂商，6 个协议，6 个 driver 包
 
@@ -160,15 +160,15 @@ client.Complete(ctx, messages, ai.WithSystem(s), ai.WithEffort(ai.EffortHigh))
 | | 去哪 |
 | --- | --- |
 | 每个协议都能表达，只是拼写不同 | 一个 `With*` 选项，由 driver 翻译 |
-| 只有一个协议有 | 那个 driver 的 `ProtocolOptions` 值，原样透传 |
+| 只有一个协议有 | 不建模；`SamplingParams`（OpenAI 一族）或 `Config.Headers` 原样送达 |
 
 reasoning 档位是第一类最清楚的例子。"该想多久"这个概念到处都有，而每家拼写都不同——Anthropic 要 `thinking.budget_tokens` 或 `output_config.effort`，Gemini 要 `thinkingLevel`，DashScope 要 `enable_thinking` 加 `thinking_budget`。所以它是 `ai.WithEffort(ai.EffortHigh)`，每个 `Model` 自带一份 `[]ReasoningLevel` 梯子，写明它提供哪几档。
 
 **拼写属于协议，所以推一次就够，不必每个模型各写一遍**：`ResolveLevel` 会按模型的 `API` 和 `Compat` 给没写 `Value`、`Budget` 的档位补上线上的值，没有任何 driver 里有 effort 映射表。写明了值的档位（比如实时列表给的）原样发出。一个模型还可以声明本包从没听说过的档位，按名字精确匹配就会原样发出去。一个既不在便携词表里、也不在该模型梯子里的名字会被拒绝，而且错误信息里会列出这个模型实际提供哪些档。
 
-`thinking.display` 是第二类。别的协议没有这个概念，所以它是 `anthropic.Options.ThinkingDisplay`，不经翻译直接送出。
+`prompt_cache_key` 是第二类。别的协议没有这个概念，所以它放进 `SamplingParams`，原样落进请求体。
 
-这两个字段**有类型，不是 `any`**：`ai.ProtocolOptions` 和 `ai.ProtocolConfig` 是标记接口，所以一个本来就不该放进去的值是**编译期错误**。而放进去的是**另一个 driver 的**类型时，会在那个 driver 读取的那一刻被抓住——Go 没有 union type，那一半没法做成编译期检查。
+只有一个协议需要的构造设置放在 `Config.ProtocolConfig` 里，**有类型，不是 `any`**：`ai.ProtocolConfig` 是标记接口，所以一个本来就不该放进去的值是**编译期错误**。而放进去的是**另一个 driver 的**类型时，会在那个 driver 读取的那一刻被抓住——Go 没有 union type，那一半没法做成编译期检查。
 
 ## 协议方言
 
@@ -269,7 +269,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 - `driver/openai/internal/errs` 对 `driver/anthropic` 不可达，靠 `internal/`。
 - `pkg/ai`、`pkg/ai/jsonschema`、`pkg/ai/catalog`、`pkg/ai/provider` 的**模块依赖数是 0**——除标准库外什么都不依赖。厂商 SDK 只能通过你 blank import 的那个 driver 进入构建；`pkg/agent/mcp` 对 Model Context Protocol SDK 是同一笔交易：import 它才链进去，不 import 就不会。
-- `ProtocolOptions` / `ProtocolConfig` 在编译期拒绝一个本来就不该是它的值。
+- `ProtocolConfig` 在编译期拒绝一个本来就不该是它的值。
 - `Driver` 只有两个方法，所以测试里的桩也只有两个方法。`pkg/ai/aitest` 就是那个桩，已经随包发出去，于是不必再写一遍。
 
 **只写在文档里的**（意味着只有 review 能拦住）：

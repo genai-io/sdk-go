@@ -60,12 +60,7 @@ func (d *Driver) Name() string { return Name }
 // Stream runs one Responses call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		params, err := d.buildParams(req)
-		if err != nil {
-			yield(ai.Delta{}, err)
-			return
-		}
-		stream := d.client.Responses.NewStreaming(ctx, params)
+		stream := d.client.Responses.NewStreaming(ctx, d.buildParams(req))
 		defer func() { _ = stream.Close() }() // the request is over; a close error changes nothing
 
 		// A call is keyed by its call_id, the one name every event agrees on:

@@ -42,6 +42,14 @@ Each such change is listed under **Changed** with what to write instead.
   types, `Server.SSE`, and `mcp.Option`; set `Server.OnToolsChanged`.
 - `agent.Agent.System`.
 - `session.Read`, `Meta.Created`, `ByRecency`, and `Meta` from `session.Store`.
+- `ai.ProtocolOptions`, `ai.WithProtocolOptions`, `ai.ProtocolOptionsAs`,
+  `ai.RejectProtocolOptions`, `Request.ProtocolOptions`, `anthropic.Options` and
+  `responses.Options`. Send an `anthropic-beta` header through `Config.Headers`;
+  put a Responses field such as `prompt_cache_key` in `SamplingParams`.
+- `AnthropicCompat.NoPromptCache` and `NoLongCacheRetention`;
+  `OpenAIChatCompat.MaxTokensField`, `NoUsageInStream` and `NoFinishReason`.
+- `catalog.Vendor.SamplingParams`; set `Model.SamplingParams`.
+- `ai.ToolChoice.String`.
 
 ### Fixed
 

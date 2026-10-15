@@ -95,9 +95,7 @@ type Config struct {
 	Headers map[string]string
 
 	// ProtocolConfig carries construction settings only one protocol needs, as
-	// that driver's value — VertexConfig for a model served through Vertex AI. It
-	// is the Config-level counterpart to Request.ProtocolOptions: the latter varies per
-	// request, this one is fixed for the endpoint.
+	// that driver's value — VertexConfig for a model served through Vertex AI.
 	ProtocolConfig ProtocolConfig
 }
 
@@ -202,25 +200,28 @@ func unregistered(api API, registered []API) error {
 	return fmt.Errorf("ai: no driver registered for API %q (registered: %v)", api, registered)
 }
 
-// ProtocolConfig is one driver's protocol-specific construction settings — the
-// Config-level counterpart to ProtocolOptions.
+// ProtocolConfig is one driver's protocol-specific construction settings.
 type ProtocolConfig interface {
 	// ProtocolConfig marks this type as one driver's construction settings. A
-	// no-op, as ProtocolOptions.ProtocolOptions is.
+	// no-op.
 	ProtocolConfig()
 }
 
 // RejectProtocolConfig returns an invalid-request error for a protocol with no
 // native construction options.
 func RejectProtocolConfig(config Config, driver string) error {
-	return rejectProtocolValue(config.ProtocolConfig, driver, "native configuration")
+	if config.ProtocolConfig == nil {
+		return nil
+	}
+	return &Error{
+		Driver: driver, Kind: KindInvalidRequest,
+		Message: "ai: driver " + driver + " does not define native configuration",
+	}
 }
 
-// Both escape hatches share these helpers: a value the driver cannot use is an
-// error, not a silent fall back to the zero value.
-
 // protocolValueAs pulls one driver's own value out of the interface carrying
-// it. what names the side for the error message.
+// it. what names the side for the error message. A value the driver cannot use
+// is an error, not a silent fall back to the zero value.
 func protocolValueAs[T any](held any, what string) (T, error) {
 	var zero T
 	if held == nil {
@@ -233,17 +234,5 @@ func protocolValueAs[T any](held any, what string) (T, error) {
 		Kind: KindInvalidRequest,
 		Message: fmt.Sprintf("ai: got %s of type %T; driver expects %s",
 			what, held, reflect.TypeFor[T]()),
-	}
-}
-
-// rejectProtocolValue reports a driver-specific value handed to a protocol that
-// defines none.
-func rejectProtocolValue(held any, driver, what string) error {
-	if held == nil {
-		return nil
-	}
-	return &Error{
-		Driver: driver, Kind: KindInvalidRequest,
-		Message: "ai: driver " + driver + " does not define " + what,
 	}
 }

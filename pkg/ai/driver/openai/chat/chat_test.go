@@ -406,19 +406,6 @@ func TestReasoningIsKeptFromAModelThatDeclaresNoLadder(t *testing.T) {
 	}
 }
 
-func TestNoFinishReasonCompatibilityStillInfersToolUse(t *testing.T) {
-	s := sse(t, `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"action","arguments":"{}"}}]}}]}`)
-	d := driverFor(t, ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "gateway", Compat: ai.OpenAIChatCompat{NoFinishReason: true}}})
-	client := ai.NewClientWithDriver(d, ai.Model{ID: "gateway", API: ai.APIOpenAIChat})
-	response, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("go")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.StopReason != ai.StopToolUse || len(response.Content.ToolCalls()) != 1 {
-		t.Errorf("compatible gateway lost its inferred finish: %+v", response)
-	}
-}
-
 func TestDoneRemainsTerminalAfterTrailingEvents(t *testing.T) {
 	s := sse(t, `{"choices":[{"delta":{"content":"ok"}}]}`, "[DONE]", `{}`)
 	d := driverFor(t, ai.Config{BaseURL: s.URL})

@@ -5,50 +5,37 @@ import (
 	"testing"
 )
 
-type fakeOptions struct{ Display string }
-
-func (fakeOptions) ProtocolOptions() {}
-
-type otherOptions struct{}
-
-func (otherOptions) ProtocolOptions() {}
-
 type fakeConfig struct{ Project string }
 
 func (fakeConfig) ProtocolConfig() {}
 
-// The escape hatches carry a driver's own value through an interface, and
+type otherConfig struct{}
+
+func (otherConfig) ProtocolConfig() {}
+
+// ProtocolConfig carries a driver's own value through an interface, and
 // falling back to the zero value would look like the option having no effect.
 func TestAProtocolValueOfTheWrongTypeIsReportedRatherThanIgnored(t *testing.T) {
-	if got, err := ProtocolOptionsAs[fakeOptions](&Request{}); err != nil || got != (fakeOptions{}) {
-		t.Errorf("no options gave %v, %v; want the zero value and no error", got, err)
+	if got, err := protocolValueAs[fakeConfig](nil, "config"); err != nil || got != (fakeConfig{}) {
+		t.Errorf("no config gave %v, %v; want the zero value and no error", got, err)
 	}
-	want := fakeOptions{Display: "on"}
-	if got, err := ProtocolOptionsAs[fakeOptions](&Request{ProtocolOptions: want}); err != nil || got != want {
-		t.Errorf("options = %v, %v; want %v", got, err, want)
+	want := fakeConfig{Project: "p"}
+	if got, err := protocolValueAs[fakeConfig](want, "config"); err != nil || got != want {
+		t.Errorf("config = %v, %v; want %v", got, err, want)
 	}
-	_, err := ProtocolOptionsAs[fakeOptions](&Request{ProtocolOptions: otherOptions{}})
-	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "otherOptions") {
+	_, err := protocolValueAs[fakeConfig](otherConfig{}, "config")
+	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "otherConfig") {
 		t.Errorf("err = %v, want it to name the type that was actually given", err)
 	}
-
 }
 
 // A protocol that defines no escape hatch must say so rather than drop what it
 // was handed.
 func TestAProtocolWithNoEscapeHatchRefusesOne(t *testing.T) {
-	if err := RejectProtocolOptions(&Request{}, "stub"); err != nil {
-		t.Errorf("RejectProtocolOptions with none given = %v, want nil", err)
-	}
-	err := RejectProtocolOptions(&Request{ProtocolOptions: fakeOptions{}}, "stub")
-	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "stub") {
-		t.Errorf("err = %v, want it to name the driver", err)
-	}
-
 	if err := RejectProtocolConfig(Config{}, "stub"); err != nil {
 		t.Errorf("RejectProtocolConfig with none given = %v, want nil", err)
 	}
-	err = RejectProtocolConfig(Config{ProtocolConfig: fakeConfig{}}, "stub")
+	err := RejectProtocolConfig(Config{ProtocolConfig: fakeConfig{}}, "stub")
 	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "stub") {
 		t.Errorf("err = %v, want it to name the driver", err)
 	}

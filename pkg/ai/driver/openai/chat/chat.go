@@ -65,10 +65,6 @@ func (d *Driver) Name() string { return Name }
 // Stream runs one Chat Completions call.
 func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		if err := ai.RejectProtocolOptions(req, Name); err != nil {
-			yield(ai.Delta{}, err)
-			return
-		}
 		level, _ := d.model.ResolveLevel(req.Effort)
 		params := d.buildParams(req, level)
 
@@ -120,7 +116,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				}
 				var out ai.Delta
 				complete = complete || choice.FinishReason != ""
-				if choice.FinishReason != "" && !d.compat.NoFinishReason {
+				if choice.FinishReason != "" {
 					out.StopReason = mapFinishReason(choice.FinishReason)
 					if refused {
 						out.StopReason = ai.StopRefusal
@@ -177,7 +173,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 			}
 			return
 		}
-		if !complete && !decoder.done && !d.compat.NoFinishReason {
+		if !complete && !decoder.done {
 			if flush() {
 				yield(ai.Delta{}, fail.WrapStream(io.ErrUnexpectedEOF))
 			}

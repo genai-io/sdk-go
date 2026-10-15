@@ -9,11 +9,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
-func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
-	native, err := ai.ProtocolOptionsAs[Options](req)
-	if err != nil {
-		return wire.ResponseNewParams{}, err
-	}
+func (d *Driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	params := wire.ResponseNewParams{
 		Model: d.model.ID,
 		Input: wire.ResponseNewParamsInputUnion{OfInputItemList: d.convertInput(req)},
@@ -66,10 +62,6 @@ func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 	if req.CacheRetention == ai.CacheLong && !d.compat.NoLongCacheRetention {
 		params.PromptCacheRetention = wire.ResponseNewParamsPromptCacheRetention24h
 	}
-	params.Include = append(params.Include, includables(native.Include)...)
-	if native.PromptCacheKey != "" {
-		params.PromptCacheKey = sdk.Opt(native.PromptCacheKey)
-	}
 	if len(req.Tools) > 0 {
 		tools := make([]wire.ToolUnionParam, len(req.Tools))
 		for i, t := range req.Tools {
@@ -89,23 +81,8 @@ func (d *Driver) buildParams(req *ai.Request) (wire.ResponseNewParams, error) {
 	if len(req.SamplingParams) > 0 {
 		params.SetExtraFields(req.SamplingParams)
 	}
-	return params, nil
+	return params
 }
-
-// Options carries the Responses-only settings the normalized Options do not
-// model. Pass it with ai.WithProtocolOptions; the zero value changes nothing.
-type Options struct {
-	// Include asks for extra response fields, e.g.
-	// "reasoning.encrypted_content". A reasoning model sets that one itself;
-	// this is for anything else.
-	Include []string
-
-	// PromptCacheKey routes requests that share a prefix to the same cache.
-	PromptCacheKey string
-}
-
-// ProtocolOptions marks this as one driver's request settings.
-func (Options) ProtocolOptions() {}
 
 // toolChoice maps the neutral constraint onto the Responses union. A nil
 // result leaves the field off, which is the API's own default.
@@ -121,14 +98,6 @@ func toolChoice(req *ai.Request) *wire.ResponseNewParamsToolChoiceUnion {
 		return &wire.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: sdk.Opt(wire.ToolChoiceOptionsRequired)}
 	}
 	return nil
-}
-
-func includables(names []string) []wire.ResponseIncludable {
-	out := make([]wire.ResponseIncludable, len(names))
-	for i, n := range names {
-		out[i] = wire.ResponseIncludable(n)
-	}
-	return out
 }
 
 func (d *Driver) convertInput(req *ai.Request) wire.ResponseInputParam {

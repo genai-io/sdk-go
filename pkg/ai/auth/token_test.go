@@ -125,7 +125,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 	if err := store.Save(Credential{Vendor: stubVendor, Access: "stored"}); err != nil {
 		t.Fatal(err)
 	}
-	client, err := httpClient(stubVendor, Credential{Access: "stored"}, store, nil)
+	client, err := HTTPClient(stubVendor, Credential{Access: "stored"}, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestATokenWithNoStatedLifetimeIsMintedOnce(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := httpClient(stubVendor, Credential{Access: "stored"}, nil, nil)
+	client, err := HTTPClient(stubVendor, Credential{Access: "stored"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestClientsWithoutAStoreKeepTheirOwnCredentials(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, token := range []string{"account-a", "account-b"} {
-		client, err := httpClient(stubVendor, Credential{Access: token}, nil, nil)
+		client, err := HTTPClient(stubVendor, Credential{Access: token}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestAuthenticatedRedirectsStayOnTheOriginalOrigin(t *testing.T) {
 		checks++
 		return nil
 	}
-	client, err := httpClient(stubVendor, Credential{Access: "secret"}, nil, base)
+	client, err := HTTPClient(stubVendor, Credential{Access: "secret"}, nil, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestAuthenticatedRedirectsWithoutOriginAreRejected(t *testing.T) {
 			visited = true
 			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
 		})}
-		client, err := httpClient(stubVendor, Credential{Access: "secret"}, nil, base)
+		client, err := HTTPClient(stubVendor, Credential{Access: "secret"}, nil, base)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -322,11 +322,11 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := httpClient(rotateVendor, start, store, nil)
+	first, err := HTTPClient(rotateVendor, start, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := httpClient(rotateVendor, start, otherHandle, nil)
+	second, err := HTTPClient(rotateVendor, start, otherHandle, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestARotatedTokenThatCannotBeStoredFailsLoudly(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := httpClient(rotateVendor, Credential{Access: "a", Refresh: "r1"}, readOnlyStore{}, nil)
+	client, err := HTTPClient(rotateVendor, Credential{Access: "a", Refresh: "r1"}, readOnlyStore{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestASaveFailureThatLosesNothingDoesNotFailTheTurn(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := httpClient(stubVendor, Credential{Access: "a"}, readOnlyStore{}, nil)
+	client, err := HTTPClient(stubVendor, Credential{Access: "a"}, readOnlyStore{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestARenewalFailureIsReportedToTheCaller(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer upstream.Close()
 
-	client, err := httpClient(stubVendor, Credential{Access: "a"}, nil, nil)
+	client, err := HTTPClient(stubVendor, Credential{Access: "a"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestARenewalFailureIsReportedToTheCaller(t *testing.T) {
 }
 
 func TestHTTPClientNeedsARegisteredFlow(t *testing.T) {
-	if _, err := httpClient("deepseek", Credential{}, nil, nil); err == nil {
+	if _, err := HTTPClient("deepseek", Credential{}, nil, nil); err == nil {
 		t.Error("built a token-renewing client for a vendor that takes an API key")
 	}
 }

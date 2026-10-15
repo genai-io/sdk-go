@@ -1,5 +1,5 @@
 // Package jsonl stores sessions on the filesystem: a directory per session
-// holding its entries, one JSON object per line.
+// holding a log of what happened to its conversation, one JSON object per line.
 package jsonl
 
 import (
@@ -13,19 +13,19 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"iter"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/session"
 )
 
 const (
-	entriesFile = "entries.jsonl"
-	lockFile    = ".lock"
+	logFile  = "log.jsonl"
+	lockFile = ".lock"
 )
 
 // Store is a session store rooted at a directory.
@@ -70,15 +70,33 @@ func (s *Store) Claim(ctx context.Context, id string) (func() error, error) {
 		_ = lock.Close()
 		return nil, fmt.Errorf("jsonl: claiming session %s: %w", id, err)
 	}
-	if err := repairTail(filepath.Join(dir, entriesFile)); err != nil {
+	if err := repairTail(filepath.Join(dir, logFile)); err != nil {
 		_ = lock.Close()
 		return nil, err
 	}
 	return lock.Close, nil
 }
 
-// Append writes one entry and syncs it to disk.
-func (s *Store) Append(ctx context.Context, id string, entry session.Entry) error {
+// record is one line of the log: a message appended, or the whole
+// conversation replaced.
+type record struct {
+	At       time.Time    `json:"at"`
+	Replace  bool         `json:"replace,omitempty"`
+	Messages []ai.Message `json:"messages"`
+}
+
+// Append adds a message to the end of the conversation.
+func (s *Store) Append(ctx context.Context, id string, msg ai.Message) error {
+	return s.write(ctx, id, record{Messages: []ai.Message{msg}})
+}
+
+// Replace swaps the whole conversation for msgs.
+func (s *Store) Replace(ctx context.Context, id string, msgs []ai.Message) error {
+	return s.write(ctx, id, record{Replace: true, Messages: msgs})
+}
+
+// write appends one record and syncs it to disk.
+func (s *Store) write(ctx context.Context, id string, r record) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -86,11 +104,12 @@ func (s *Store) Append(ctx context.Context, id string, entry session.Entry) erro
 	if err != nil {
 		return err
 	}
-	line, err := json.Marshal(entry)
+	r.At = time.Now().UTC()
+	line, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Errorf("jsonl: encoding entry: %w", err)
+		return fmt.Errorf("jsonl: encoding record: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, entriesFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, logFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
@@ -101,51 +120,49 @@ func (s *Store) Append(ctx context.Context, id string, entry session.Entry) erro
 	return errors.Join(err, f.Close())
 }
 
-// Entries reads the log. An incomplete final record — a crash mid-write, or a
-// writer still writing — ends it; a bad record anywhere else is an error.
-func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry, error] {
-	return func(yield func(session.Entry, error) bool) {
-		dir, err := s.dir(id)
-		if err != nil {
-			yield(session.Entry{}, err)
-			return
+// Load folds the log into the conversation: messages append, a replacement
+// starts over. An incomplete final record — a crash mid-write — ends it; a bad
+// record anywhere else is an error, because a conversation with a hole in it
+// is not a shorter one.
+func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dir, err := s.dir(id)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(filepath.Join(dir, logFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	var messages []ai.Message
+	reader := bufio.NewReader(f)
+	for n := 1; ; n++ {
+		line, readErr := reader.ReadBytes('\n')
+		if readErr != nil && readErr != io.EOF {
+			return nil, readErr
 		}
-		f, err := os.Open(filepath.Join(dir, entriesFile))
-		if errors.Is(err, fs.ErrNotExist) {
-			return
-		}
-		if err != nil {
-			yield(session.Entry{}, err)
-			return
-		}
-		defer func() { _ = f.Close() }() // read-only
-		reader := bufio.NewReader(f)
-		for n := 1; ; n++ {
-			if err := ctx.Err(); err != nil {
-				yield(session.Entry{}, err)
-				return
-			}
-			line, readErr := reader.ReadBytes('\n')
-			if readErr != nil && readErr != io.EOF {
-				yield(session.Entry{}, readErr)
-				return
-			}
-			if len(bytes.TrimSpace(line)) > 0 {
-				var e session.Entry
-				if err := json.Unmarshal(line, &e); err != nil {
-					if readErr == io.EOF {
-						return // torn
-					}
-					yield(session.Entry{}, fmt.Errorf("jsonl: %s: line %d does not parse: %w", id, n, err))
-					return
+		if len(bytes.TrimSpace(line)) > 0 {
+			var r record
+			if err := json.Unmarshal(line, &r); err != nil {
+				if readErr == io.EOF {
+					return messages, nil // torn
 				}
-				if !yield(e, nil) {
-					return
-				}
+				return nil, fmt.Errorf("jsonl: %s: line %d does not parse: %w", id, n, err)
 			}
-			if readErr == io.EOF {
-				return
+			if r.Replace {
+				messages = r.Messages
+			} else {
+				messages = append(messages, r.Messages...)
 			}
+		}
+		if readErr == io.EOF {
+			return messages, nil
 		}
 	}
 }
@@ -153,8 +170,8 @@ func (s *Store) Entries(ctx context.Context, id string) iter.Seq2[session.Entry,
 // Meta is a session as List reports it.
 type Meta struct {
 	ID string
-	// UpdatedAt is when the last entry was written, or when the session was
-	// created if it has none.
+	// UpdatedAt is when the conversation last changed, or when the session
+	// was created if it never has.
 	UpdatedAt time.Time
 }
 
@@ -176,7 +193,7 @@ func (s *Store) List(ctx context.Context) ([]Meta, error) {
 		if err != nil {
 			continue // removed while listing
 		}
-		at, err := lastAt(filepath.Join(s.root, d.Name(), entriesFile))
+		at, err := lastAt(filepath.Join(s.root, d.Name(), logFile))
 		if err != nil {
 			return nil, err
 		}

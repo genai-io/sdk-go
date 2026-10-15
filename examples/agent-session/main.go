@@ -59,7 +59,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	ctx := context.Background()
 
 	// A store is a directory. Nothing about it is agent-specific: it holds
-	// the conversation's entries, and listing reads recency from the log.
+	// a log of each conversation, and listing reads recency from it.
 	store, err := jsonl.Open(dir)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		resume = ""
 	}
 
-	// Restore. What comes back is the conversation, folded out of the entries
+	// Restore. What comes back is the conversation, folded out of the log
 	// that were recorded — the agent is handed a plain []ai.Message and never
 	// learns where it came from.
 	var rec *session.Session

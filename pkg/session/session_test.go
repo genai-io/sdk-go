@@ -47,7 +47,7 @@ func converse(t *testing.T, a *agent.Agent, rec *session.Session, msgs ...ai.Mes
 // they exercise is the Store contract rather than a filesystem. The one test
 // about a second process opens a jsonl store itself, because that is a claim
 // about that store and not about sessions.
-func store(t *testing.T) session.Store {
+func store(t *testing.T) *memStore {
 	t.Helper()
 	return &memStore{}
 }
@@ -112,7 +112,7 @@ func TestASessionResumesWhereItLeftOff(t *testing.T) {
 		t.Errorf("after continuing, %d messages, want 4", got)
 	}
 
-	all, err := messages(ctx, st, rec.ID())
+	all, err := st.Load(ctx, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -135,15 +135,8 @@ func TestOnlyTheConversationIsRecorded(t *testing.T) {
 	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("hi"))
 
-	var types []session.EntryType
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		types = append(types, e.Type)
-	}
-	if want := []session.EntryType{session.EntryMessage, session.EntryMessage}; !slices.Equal(types, want) {
-		t.Errorf("entries = %v, want %v", types, want)
+	if got, want := st.opsOf(rec.ID()), []string{"append", "append"}; !slices.Equal(got, want) {
+		t.Errorf("writes = %v, want %v", got, want)
 	}
 }
 
@@ -223,7 +216,7 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	b := newAgent(t, restored, aitest.Says("afternoon"))
 	converse(t, b, rec2, ai.UserMessage("still there?"))
 
-	final, err := messages(ctx, second, id)
+	final, err := second.Load(ctx, id)
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -235,19 +228,33 @@ func TestASecondProcessPicksUpTheConversation(t *testing.T) {
 	}
 }
 
-// flaky fails one append and works for everything else.
+// flaky fails one write and works for everything else.
 type flaky struct {
 	session.Store
-	failOn  int
-	appends int
+	failOn int
+	writes int
 }
 
-func (f *flaky) Append(ctx context.Context, id string, e session.Entry) error {
-	f.appends++
-	if f.appends == f.failOn {
+func (f *flaky) fail() error {
+	f.writes++
+	if f.writes == f.failOn {
 		return errors.New("the disk, briefly")
 	}
-	return f.Store.Append(ctx, id, e)
+	return nil
+}
+
+func (f *flaky) Append(ctx context.Context, id string, msg ai.Message) error {
+	if err := f.fail(); err != nil {
+		return err
+	}
+	return f.Store.Append(ctx, id, msg)
+}
+
+func (f *flaky) Replace(ctx context.Context, id string, msgs []ai.Message) error {
+	if err := f.fail(); err != nil {
+		return err
+	}
+	return f.Store.Replace(ctx, id, msgs)
 }
 
 // A conversation is read back by folding it, so a hole in the middle is not a
@@ -272,7 +279,7 @@ func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 	if rec.Err() == nil {
 		t.Fatal("a failed write was not reported")
 	}
-	restored, err := messages(ctx, st, rec.ID())
+	restored, err := st.Load(ctx, rec.ID())
 	if err != nil {
 		t.Fatalf("the session no longer folds: %v", err)
 	}
@@ -283,8 +290,8 @@ func TestRecordingStopsAtTheFirstFailedWrite(t *testing.T) {
 			len(restored)-len(repaired), len(restored))
 	}
 	// And nothing was written after the failure.
-	if st.appends != 2 {
-		t.Errorf("the store saw %d appends, want 2 — recording carried on past the failure", st.appends)
+	if st.writes != 2 {
+		t.Errorf("the store saw %d writes, want 2 — recording carried on past the failure", st.writes)
 	}
 }
 
@@ -320,17 +327,8 @@ func TestResumingDoesNotRecordACopyOfWhatItRead(t *testing.T) {
 		}
 	}
 
-	snapshots := 0
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		if e.Type == session.EntryConversationReplaced {
-			snapshots++
-		}
-	}
-	if snapshots != 0 {
-		t.Errorf("%d snapshots written by resuming alone; the conversation was never replaced", snapshots)
+	if snapshots := slices.Index(st.opsOf(rec.ID()), "replace"); snapshots >= 0 {
+		t.Errorf("write %d replaced the conversation; resuming alone never does", snapshots)
 	}
 }
 
@@ -360,7 +358,7 @@ func TestNamesSurviveTheRoundTrip(t *testing.T) {
 	a.SetMessages([]ai.Message{ai.UserMessage("(the summary)")})
 	converse(t, a, rec, ai.UserMessage("and again"))
 
-	restored, err := messages(context.Background(), st, rec.ID())
+	restored, err := st.Load(context.Background(), rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -393,33 +391,6 @@ func counterIDs() func() string {
 		n++
 		return "m" + strconv.Itoa(n)
 	}
-}
-
-func messages(ctx context.Context, st session.Store, id string) ([]ai.Message, error) {
-	var out []ai.Message
-	for entry, err := range st.Entries(ctx, id) {
-		if err != nil {
-			return nil, err
-		}
-		switch entry.Type {
-		case session.EntryConversationReplaced:
-			out = slices.Clone(entry.Messages)
-		case session.EntryMessage:
-			out = append(out, entry.Messages...)
-		}
-	}
-	return out, nil
-}
-
-func entryCount(ctx context.Context, st session.Store, id string) (int, error) {
-	n := 0
-	for _, err := range st.Entries(ctx, id) {
-		if err != nil {
-			return 0, err
-		}
-		n++
-	}
-	return n, nil
 }
 
 func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
@@ -458,8 +429,8 @@ func TestOpenedSessionKeepsExclusiveOwnershipUntilClose(t *testing.T) {
 				_ = competing.Close()
 				t.Fatal("old Close released the newer claim")
 			}
-			if n, err := entryCount(ctx, st, reopened.ID()); err != nil || n != 1 {
-				t.Fatalf("late event wrote an entry: %d entries, %v", n, err)
+			if got, err := st.Load(ctx, reopened.ID()); err != nil || len(got) != 1 {
+				t.Fatalf("late event was written: %v, %v", got, err)
 			}
 		})
 	}
@@ -472,11 +443,8 @@ func TestOpenFailureReleasesItsClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(ctx, id, session.Entry{Type: "unheard-of"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := session.Open(ctx, st, id); err == nil {
-		t.Fatal("an entry of unknown type restored as if it meant nothing")
+	if _, _, err := session.Open(ctx, unloadable{st}, id); err == nil {
+		t.Fatal("a conversation that would not load was opened")
 	}
 	release, err := st.Claim(ctx, id)
 	if err != nil {
@@ -485,4 +453,11 @@ func TestOpenFailureReleasesItsClaim(t *testing.T) {
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// unloadable is a store whose conversation will not load.
+type unloadable struct{ session.Store }
+
+func (unloadable) Load(context.Context, string) ([]ai.Message, error) {
+	return nil, errors.New("unreadable")
 }

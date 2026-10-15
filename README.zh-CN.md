@@ -401,7 +401,7 @@ flowchart LR
     agent(["agent"]) -->|"Event"| loop["你的循环"]
     loop --> ui["你的界面"]
     loop -->|"rec.Handle(ctx, e)"| rec["Writer"]
-    rec -->|"Entry"| store[("Store")]
+    rec -->|"Append / Replace"| store[("Store")]
     store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
 ```

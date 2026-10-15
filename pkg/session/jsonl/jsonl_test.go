@@ -31,9 +31,7 @@ func open(t *testing.T, dir string) *jsonl.Store {
 
 func store(t *testing.T) *jsonl.Store { return open(t, t.TempDir()) }
 
-func msg(text string) session.Entry {
-	return session.Entry{Type: session.EntryMessage, Messages: []ai.Message{ai.UserMessage(text)}}
-}
+func msg(text string) ai.Message { return ai.UserMessage(text) }
 
 func create(t *testing.T, s *jsonl.Store) string {
 	t.Helper()
@@ -44,10 +42,10 @@ func create(t *testing.T, s *jsonl.Store) string {
 	return id
 }
 
-func appendAll(t *testing.T, s *jsonl.Store, id string, entries ...session.Entry) {
+func appendAll(t *testing.T, s *jsonl.Store, id string, msgs ...ai.Message) {
 	t.Helper()
-	for _, e := range entries {
-		if err := s.Append(ctx(), id, e); err != nil {
+	for _, m := range msgs {
+		if err := s.Append(ctx(), id, m); err != nil {
 			t.Fatalf("Append: %v", err)
 		}
 	}
@@ -55,12 +53,13 @@ func appendAll(t *testing.T, s *jsonl.Store, id string, entries ...session.Entry
 
 func texts(t *testing.T, s *jsonl.Store, id string) []string {
 	t.Helper()
+	msgs, err := s.Load(ctx(), id)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 	var out []string
-	for e, err := range s.Entries(ctx(), id) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		out = append(out, e.Messages[0].Text())
+	for _, m := range msgs {
+		out = append(out, m.Text())
 	}
 	return out
 }
@@ -77,17 +76,17 @@ func claim(t *testing.T, s *jsonl.Store, id string) {
 	}
 }
 
-func entriesPath(dir, id string) string { return filepath.Join(dir, id, "entries.jsonl") }
+func logPath(dir, id string) string { return filepath.Join(dir, id, "log.jsonl") }
 
-func TestEntriesAcceptBlankCRLFLines(t *testing.T) {
+func TestBlankCRLFLinesAreSkipped(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
 	id := create(t, s)
-	line, err := json.Marshal(msg("restored"))
+	line, err := json.Marshal(map[string]any{"messages": []ai.Message{msg("restored")}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(entriesPath(dir, id), []byte("\r\n"+string(line)+"\r\n"), 0o600); err != nil {
+	if err := os.WriteFile(logPath(dir, id), []byte("\r\n"+string(line)+"\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := texts(t, s, id); !slices.Equal(got, []string{"restored"}) {
@@ -116,9 +115,7 @@ func TestListIsNewestFirst(t *testing.T) {
 	s := store(t)
 	first := create(t, s)
 	second := create(t, s)
-	e := msg("touches the older one")
-	e.At = time.Now().Add(time.Hour)
-	appendAll(t, s, first, e)
+	appendAll(t, s, first, msg("touches the older one"))
 
 	list, err := s.List(ctx())
 	if err != nil {
@@ -137,20 +134,18 @@ func TestListUsesTheLoggedTime(t *testing.T) {
 	s := open(t, dir)
 	first := create(t, s)
 	second := create(t, s)
-	at := time.Now().Add(time.Hour).UTC()
-	long := msg(strings.Repeat("x", 64*1024))
-	long.At = at
-	appendAll(t, s, first, long)
-	coarse := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(entriesPath(dir, first), coarse, coarse); err != nil {
+	before := time.Now()
+	appendAll(t, s, first, msg(strings.Repeat("x", 64*1024)))
+	coarse := before.Add(-time.Hour)
+	if err := os.Chtimes(logPath(dir, first), coarse, coarse); err != nil {
 		t.Fatal(err)
 	}
 	list, err := open(t, dir).List(ctx())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 2 || list[0].ID != first || list[1].ID != second || !list[0].UpdatedAt.Equal(at) {
-		t.Fatalf("List = %+v, want %s first at %s", list, first, at)
+	if len(list) != 2 || list[0].ID != first || list[1].ID != second || list[0].UpdatedAt.Before(before) {
+		t.Fatalf("List = %+v, want %s first, updated after %s", list, first, before)
 	}
 }
 
@@ -161,11 +156,11 @@ func TestATornLastLineEndsTheSessionRatherThanFailingIt(t *testing.T) {
 	s := open(t, dir)
 	id := create(t, s)
 	appendAll(t, s, id, msg("first"), msg("second"))
-	raw, err := os.ReadFile(entriesPath(dir, id))
+	raw, err := os.ReadFile(logPath(dir, id))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(entriesPath(dir, id), raw[:len(raw)-12], 0o600); err != nil {
+	if err := os.WriteFile(logPath(dir, id), raw[:len(raw)-12], 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := texts(t, s, id); !slices.Equal(got, []string{"first"}) {
@@ -180,11 +175,11 @@ func TestAClaimRepairsATornTail(t *testing.T) {
 	s := open(t, dir)
 	id := create(t, s)
 	appendAll(t, s, id, msg("one"), msg("two"), msg("three"))
-	raw, err := os.ReadFile(entriesPath(dir, id))
+	raw, err := os.ReadFile(logPath(dir, id))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(entriesPath(dir, id), raw[:len(raw)-20], 0o600); err != nil {
+	if err := os.WriteFile(logPath(dir, id), raw[:len(raw)-20], 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,11 +197,11 @@ func TestAClaimKeepsACompleteTailWithoutItsNewline(t *testing.T) {
 	s := open(t, dir)
 	id := create(t, s)
 	appendAll(t, s, id, msg("first"))
-	raw, err := os.ReadFile(entriesPath(dir, id))
+	raw, err := os.ReadFile(logPath(dir, id))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(entriesPath(dir, id), bytes.TrimSuffix(raw, []byte{'\n'}), 0o600); err != nil {
+	if err := os.WriteFile(logPath(dir, id), bytes.TrimSuffix(raw, []byte{'\n'}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	claim(t, s, id)
@@ -224,22 +219,16 @@ func TestACorruptRecordIsReported(t *testing.T) {
 	s := open(t, dir)
 	id := create(t, s)
 	appendAll(t, s, id, msg("one"), msg("two"), msg("three"))
-	raw, err := os.ReadFile(entriesPath(dir, id))
+	raw, err := os.ReadFile(logPath(dir, id))
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 	lines[1] = lines[1][:len(lines[1])/2]
-	if err := os.WriteFile(entriesPath(dir, id), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(logPath(dir, id), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var failure error
-	for _, err := range s.Entries(ctx(), id) {
-		if err != nil {
-			failure = err
-		}
-	}
-	if failure == nil {
+	if _, err := s.Load(ctx(), id); err == nil {
 		t.Fatal("the middle of the session is missing and nothing said so")
 	}
 	if _, _, err := session.Open(ctx(), s, id); err == nil {
@@ -314,16 +303,15 @@ func TestAnIdThatIsNotOneIsRefused(t *testing.T) {
 			if err := s.Append(ctx(), id, msg("x")); err == nil {
 				t.Error("Append accepted it")
 			}
-			var failed bool
-			for _, err := range s.Entries(ctx(), id) {
-				failed = failed || err != nil
+			if err := s.Replace(ctx(), id, nil); err == nil {
+				t.Error("Replace accepted it")
 			}
-			if !failed {
-				t.Error("Entries accepted it")
+			if _, err := s.Load(ctx(), id); err == nil {
+				t.Error("Load accepted it")
 			}
 		})
 	}
-	if _, err := os.Stat(filepath.Join(root, "beside", "entries.jsonl")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root, "beside", "log.jsonl")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a directory outside the store was written to: %v", err)
 	}
 }

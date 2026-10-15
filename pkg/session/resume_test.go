@@ -36,7 +36,7 @@ func TestResumeSnapshotDoesNotAliasReturnedMessages(t *testing.T) {
 			if err := opened.Err(); err != nil {
 				t.Fatal(err)
 			}
-			got, err := messages(ctx, st, s.ID())
+			got, err := st.Load(ctx, s.ID())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +68,7 @@ func TestResumeDeduplicationEndsAfterAppendingMessage(t *testing.T) {
 	if err := opened.Err(); err != nil {
 		t.Fatal(err)
 	}
-	got, err := messages(ctx, st, s.ID())
+	got, err := st.Load(ctx, s.ID())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -399,7 +399,7 @@ flowchart LR
     agent(["agent"]) -->|"Event"| loop["你的循环"]
     loop --> ui["你的界面"]
     loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
-    rec -->|"Entry"| store[("Store")]
+    rec -->|"Append / Replace"| store[("Store")]
     store -.->|"session.Open<br/><i>折回成对话</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
 ```
@@ -428,24 +428,22 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 
 改变对话的事件有两种，写进去的也就是这两种。一个 span 只在收尾时存一次，片段根本不存。
 
-| 事件 | 记录 | |
+| 事件 | store 调用 | |
 | --- | --- | --- |
-| `MessageAdded` | `message` | 对话,一次一条 |
-| `MessagesReplaced` | `conversation.replaced` | 对话被整体扔掉换了一份 |
+| `MessageAdded` | `Append` | 对话,一次一条 |
+| `MessagesReplaced` | `Replace` | 对话被整体扔掉换了一份 |
 
 ### 读出来什么
 
-恢复就是把这些记录折回去。消息往后追加,**遇到 conversation.replaced 则从头开始折**——因为在它之前播报过的一切,都是 agent 已经丢弃的:
+`Load` 返回对话当前的样子：上一次替换的内容，加上之后追加的所有消息。按日志存的 store 就把日志折回去——**遇到替换就从头开始折**，因为在它之前的一切，都是 agent 已经丢弃的:
 
 ```
-      message   message   conversation.replaced   message   message
+      append    append    replace    append    append
                           ▲
                           └─ 折叠从这里开始。前两条已经没了:
                              把它们读回来,等于把压缩掉的历史
                              又塞回给 agent。
 ```
-
-折叠不认识的记录类型是**错误**，不是跳过：悄悄漏掉一段日志恢复出来的，是另一份对话。
 
 **换掉对话本身也是一个事件。** 压缩会把整段历史换掉,只折叠 `MessageAdded` 的话,恢复出来的正是你刚扔掉的那份。所以 `SetMessages` 会被**播报**——作为 `MessagesReplaced`,在下一轮交换开始时发出,因为那是 agent 下一次有地方可说的时刻——会话把它存成折叠的新起点:
 
@@ -458,20 +456,21 @@ a.SetMessages(summary)   // 就这一行
 
 把 `Open` 返回的历史交给 agent 也会这样被播报，而存下它等于每次恢复都写一份对话的副本。所以会话会跳过**和恢复出来的内容相同**的那次替换，直到对话往前走了为止。先改了返回的历史，那就是一次真正的替换，会被写入。
 
-`Store` 只有四个操作:
+`Store` 只写会话需要的东西，中间没有记录类型，所以 store 想怎么存对话都行:
 
 ```go
 type Store interface {
     Create(ctx context.Context) (string, error)
     Claim(ctx context.Context, id string) (release func() error, err error)
-    Append(ctx context.Context, id string, entry Entry) error
-    Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
+    Append(ctx context.Context, id string, msg ai.Message) error
+    Replace(ctx context.Context, id string, msgs []ai.Message) error
+    Load(ctx context.Context, id string) ([]ai.Message, error)
 }
 ```
 
-只有持有 claim 的一方追加。列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,`jsonl.Store` 多给了一个 `List`,一个会话就是一个目录,复制、删除都由应用自己来。**接口只需要写出这个包自己会调的东西。**
+只有持有 claim 的一方写入。列表、改名、分叉、删除是**应用拿着它选定的 store** 干的事,`jsonl.Store` 多给了一个 `List`,一个会话就是一个目录,复制、删除都由应用自己来。**接口只需要写出这个包自己会调的东西。**
 
-`jsonl.Store` 靠锁住会话目录里的 `.lock` 文件来 claim，别的进程和本进程都会被挡住。claim 时还会修复崩溃留下的末尾：写了一半的最后一条被截掉，完整但缺了换行的那条补上换行。读取遇到写了一半的最后一条就安静地停下；其他位置读不出的记录是错误。
+`jsonl.Store` 把每个会话存成一份日志 `log.jsonl`，每次调用一行；靠锁住 `.lock` 来 claim，别的进程和本进程都会被挡住。claim 时还会修复崩溃留下的末尾：写了一半的最后一行被截掉，完整但缺了换行的那行补上换行。`Load` 遇到写了一半的最后一行就安静地停下；其他位置读不出的行是错误，因为一份中间有洞的对话不是更短的对话。
 
 ## 包结构
 
@@ -484,9 +483,8 @@ pkg/agent/
   tool.go      Tool、Result、ToolFunc、Sequential
   mcp/         MCP 服务器的工具,变成这个包自己的
 pkg/session/  对话的持久化与恢复
-  entry.go    一条记录改变了什么
   store.go    持久化接口
-  session.go  Create、Open、RecordEvent,以及恢复时的折叠
+  session.go  Create、Open、RecordEvent
   jsonl/      文件系统 store,一个会话一个目录
 ```
 

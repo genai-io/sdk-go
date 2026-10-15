@@ -588,7 +588,7 @@ flowchart LR
     agent(["agent"]) -->|"Event"| loop["your loop"]
     loop --> ui["your interface"]
     loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
-    rec -->|"Entry"| store[("Store")]
+    rec -->|"Append / Replace"| store[("Store")]
     store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
 ```
@@ -635,25 +635,25 @@ costs no tokens, so a conversation the model reads is the same either way.
 Two events change the conversation, and they are the two that are written. A
 span is stored once, when it closes, so fragments are not stored at all.
 
-| event | entry | |
+| event | store call | |
 | --- | --- | --- |
-| `MessageAdded` | `message` | the conversation, one message at a time |
-| `MessagesReplaced` | `conversation.replaced` | the conversation, thrown away and replaced |
+| `MessageAdded` | `Append` | the conversation, one message at a time |
+| `MessagesReplaced` | `Replace` | the conversation, thrown away and replaced |
 
 ### What is read
 
-Restoring folds the entries back. Messages append; **a conversation replacement starts the fold over**, because everything announced before one is what the agent discarded:
+`Load` returns the conversation as it stands: everything appended since the
+last replacement, after what that replacement held. A store that keeps a log
+folds it — **a replacement starts the fold over**, because everything before
+one is what the agent discarded:
 
 ```
-      message   message   conversation.replaced   message   message
+      append    append    replace    append    append
                           ▲
                           └─ the fold starts here. The first two are gone:
                              reading them back would hand the agent
                              the history compaction just removed.
 ```
-
-An entry of a type the fold does not know is an error, not something to skip:
-a restore that silently leaves part of a log out is a different conversation.
 
 **Replacing the conversation is an event too.** Compaction swaps the whole
 history, and a fold over `MessageAdded` alone would hand back what was thrown
@@ -677,27 +677,30 @@ skips a replacement equal to what it restored, until the conversation moves
 on. Editing the returned history first makes it a real replacement, and it is
 written.
 
-`Store` is four operations:
+`Store` is what the session needs and nothing more — no record type in
+between, so a store keeps the conversation however suits it:
 
 ```go
 type Store interface {
     Create(ctx context.Context) (string, error)
     Claim(ctx context.Context, id string) (release func() error, err error)
-    Append(ctx context.Context, id string, entry Entry) error
-    Entries(ctx context.Context, id string) iter.Seq2[Entry, error]
+    Append(ctx context.Context, id string, msg ai.Message) error
+    Replace(ctx context.Context, id string, msgs []ai.Message) error
+    Load(ctx context.Context, id string) ([]ai.Message, error)
 }
 ```
 
-Only the claim holder appends. Listing, renaming, forking and deleting are the
+Only the claim holder writes. Listing, renaming, forking and deleting are the
 application's business with the store it chose — `jsonl.Store` adds `List`,
 and a session is a directory the application can copy or remove. An interface
 only has to name what this package calls.
 
-`jsonl.Store` claims a session by locking its `.lock` file, which excludes
-other processes as well as this one. A claim also repairs the tail a crash
-left: a torn final record is cut, and a complete one that lost its newline gets
-it back. Reading stops quietly at a torn final record; an unreadable record
-anywhere else is an error.
+`jsonl.Store` keeps each session as a log, `log.jsonl`, one line per call, and
+claims it by locking `.lock`, which excludes other processes as well as this
+one. A claim also repairs the tail a crash left: a torn final line is cut, and
+a complete one that lost its newline gets it back. `Load` stops quietly at a
+torn final line; an unreadable line anywhere else is an error, because a
+conversation with a hole in it is not a shorter one.
 
 ## Package layout
 
@@ -710,9 +713,8 @@ pkg/agent/
   tool.go      Tool, Result, ToolFunc, Sequential
   mcp/         an MCP server's tools, as this package's own
 pkg/session/  the conversation, persisted and restored
-  entry.go    what one entry changes
   store.go    the persistence interface
-  session.go  Create, Open, RecordEvent, and the restore fold
+  session.go  Create, Open, RecordEvent
   jsonl/      filesystem store, a directory per session
 ```
 

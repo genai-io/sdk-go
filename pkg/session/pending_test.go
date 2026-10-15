@@ -34,11 +34,11 @@ func TestPendingInputSurvivesFailedSessionResume(t *testing.T) {
 	if err := rec.Close(); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := messages(ctx, st, rec.ID())
+	got, err := st.Load(ctx, rec.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 2 || messages[1].ID != "pending" {
-		t.Fatalf("resume lost accepted input: %+v", messages)
+	if len(got) != 2 || got[1].ID != "pending" {
+		t.Fatalf("resume lost accepted input: %+v", got)
 	}
 }

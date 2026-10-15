@@ -486,7 +486,7 @@ flowchart LR
     agent(["agent"]) -->|"Event"| loop["your loop"]
     loop --> ui["your interface"]
     loop -->|"rec.RecordEvent(ctx, e)"| rec["Session"]
-    rec -->|"Entry"| store[("Store")]
+    rec -->|"Append / Replace"| store[("Store")]
     store -.->|"session.Open<br/><i>folds it back</i>"| hist["[]ai.Message"]
     hist -.->|"SetMessages"| agent
 ```

@@ -3,11 +3,9 @@ package session
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -47,7 +45,7 @@ func Open(ctx context.Context, store Store, id string) (*Session, []ai.Message, 
 	if err != nil {
 		return nil, nil, err
 	}
-	messages, err := restore(ctx, store, id)
+	messages, err := store.Load(ctx, id)
 	if err != nil {
 		return nil, nil, errors.Join(err, release())
 	}
@@ -59,25 +57,6 @@ func Open(ctx context.Context, store Store, id string) (*Session, []ai.Message, 
 	return &Session{store: store, id: id, release: release, resumed: resumed}, messages, nil
 }
 
-// restore folds a session's entries into its conversation.
-func restore(ctx context.Context, store Store, id string) ([]ai.Message, error) {
-	var messages []ai.Message
-	for entry, err := range store.Entries(ctx, id) {
-		if err != nil {
-			return nil, err
-		}
-		switch entry.Type {
-		case EntryMessage:
-			messages = append(messages, entry.Messages...)
-		case EntryConversationReplaced:
-			messages = entry.Messages
-		default:
-			return nil, fmt.Errorf("session: %s: unknown entry type %q", id, entry.Type)
-		}
-	}
-	return messages, nil
-}
-
 // RecordEvent persists what an agent event does to the conversation and
 // ignores the rest. Call it from your event loop, in order, before rendering.
 //
@@ -85,28 +64,23 @@ func restore(ctx context.Context, store Store, id string) ([]ai.Message, error) 
 // conversation with a hole in it is not shorter but broken, so stopping
 // leaves a prefix that still restores.
 func (s *Session) RecordEvent(ctx context.Context, e agent.Event) {
-	var entry Entry
-	switch v := e.(type) {
-	case agent.MessageAdded:
-		entry = Entry{Type: EntryMessage, Messages: []ai.Message{v.Message}}
-	case agent.MessagesReplaced:
-		entry = Entry{Type: EntryConversationReplaced, Messages: v.Messages}
-	default:
-		return
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil || s.closed {
 		return
 	}
-	resumed := s.resumed
-	s.resumed = nil
-	if entry.Type == EntryConversationReplaced && resumed != nil && reflect.DeepEqual(resumed, entry.Messages) {
-		return
+	switch v := e.(type) {
+	case agent.MessageAdded:
+		s.resumed = nil
+		s.err = s.store.Append(ctx, s.id, v.Message)
+	case agent.MessagesReplaced:
+		resumed := s.resumed
+		s.resumed = nil
+		if resumed != nil && reflect.DeepEqual(resumed, v.Messages) {
+			return
+		}
+		s.err = s.store.Replace(ctx, s.id, v.Messages)
 	}
-	entry.At = time.Now().UTC()
-	s.err = s.store.Append(ctx, s.id, entry)
 }
 
 // Close gives up the claim.

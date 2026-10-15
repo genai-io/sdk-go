@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
@@ -32,7 +33,7 @@ func TestCompactionSurvivesARestore(t *testing.T) {
 
 	converse(t, a, rec, ai.UserMessage("third"))
 
-	restored, err := messages(ctx, st, rec.ID())
+	restored, err := st.Load(ctx, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestACompactionInTheLastExchangeIsRecorded(t *testing.T) {
 	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("go"))
 
-	restored, err := messages(ctx, st, rec.ID())
+	restored, err := st.Load(ctx, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -123,26 +124,20 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 	t.Cleanup(func() { _ = rec.Close() })
 	converse(t, a, rec, ai.UserMessage("go"))
 
-	snapshot, after := false, 0
-	for e, err := range st.Entries(ctx, rec.ID()) {
-		if err != nil {
-			t.Fatalf("Entries: %v", err)
-		}
-		switch {
-		case e.Type == session.EntryConversationReplaced:
-			snapshot = true
-		case e.Type == session.EntryMessage && snapshot:
-			after++
-		}
+	ops := st.opsOf(rec.ID())
+	snapshot := slices.Index(ops, "replace")
+	after := 0
+	if snapshot >= 0 {
+		after = len(ops[snapshot+1:])
 	}
-	if !snapshot {
+	if snapshot < 0 {
 		t.Fatal("the compaction was never recorded")
 	}
 	if after == 0 {
 		t.Error("the snapshot is the last thing in the session; the step that ran against it recorded nothing")
 	}
 
-	restored, err := messages(ctx, st, rec.ID())
+	restored, err := st.Load(ctx, rec.ID())
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -158,13 +153,7 @@ func TestAPreStepCompactionIsRecordedWhereItHappened(t *testing.T) {
 // agent whatever came back, answer. What comes back from a new session is
 // nothing, and a second run still has to reopen what the first wrote.
 func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
-	for _, impl := range []struct {
-		name string
-		open func(*testing.T) session.Store
-	}{
-		{"memory", store},
-		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
-	} {
+	for _, impl := range stores {
 		t.Run(impl.name, func(t *testing.T) {
 			st := impl.open(t)
 			ctx := context.Background()
@@ -197,7 +186,7 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 			second.SetMessages(restored)
 			converse(t, second, rec2, ai.UserMessage("again"))
 
-			all, err := messages(ctx, st, rec.ID())
+			all, err := st.Load(ctx, rec.ID())
 			if err != nil {
 				t.Fatalf("Messages: %v", err)
 			}
@@ -212,13 +201,7 @@ func TestASessionSeededWithItsOwnEmptyHistoryReopens(t *testing.T) {
 // says everything before it is gone, which is not a record that carries
 // nothing. Both stores, because it is the wire format that loses the difference.
 func TestAClearedConversationRestoresAsCleared(t *testing.T) {
-	for _, impl := range []struct {
-		name string
-		open func(*testing.T) session.Store
-	}{
-		{"memory", store},
-		{"jsonl", func(t *testing.T) session.Store { return jsonlStore(t) }},
-	} {
+	for _, impl := range stores {
 		t.Run(impl.name, func(t *testing.T) {
 			st := impl.open(t)
 			ctx := context.Background()
@@ -234,7 +217,7 @@ func TestAClearedConversationRestoresAsCleared(t *testing.T) {
 			a.SetMessages(nil)
 			converse(t, a, rec, ai.UserMessage("starting over"))
 
-			restored, err := messages(ctx, st, rec.ID())
+			restored, err := st.Load(ctx, rec.ID())
 			if err != nil {
 				t.Fatalf("Messages: %v", err)
 			}

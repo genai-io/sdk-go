@@ -16,12 +16,30 @@ import (
 func TestStoreContract(t *testing.T) {
 	for _, impl := range stores {
 		t.Run(impl.name, func(t *testing.T) {
-			t.Run("Create assigns distinct ids", func(t *testing.T) {
+			created := func(t *testing.T) (session.Store, string) {
+				t.Helper()
 				st := impl.open(t)
-				a, err := st.Create(ctx())
+				id, err := st.Create(ctx())
 				if err != nil {
 					t.Fatal(err)
 				}
+				return st, id
+			}
+			load := func(t *testing.T, st session.Store, id string) []string {
+				t.Helper()
+				msgs, err := st.Load(ctx(), id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var texts []string
+				for _, m := range msgs {
+					texts = append(texts, m.Text())
+				}
+				return texts
+			}
+
+			t.Run("Create assigns distinct ids to empty conversations", func(t *testing.T) {
+				st, a := created(t)
 				b, err := st.Create(ctx())
 				if err != nil {
 					t.Fatal(err)
@@ -29,29 +47,29 @@ func TestStoreContract(t *testing.T) {
 				if a == "" || a == b {
 					t.Errorf("Create gave %q then %q", a, b)
 				}
+				if got := load(t, st, a); len(got) != 0 {
+					t.Errorf("a new session holds %v", got)
+				}
 			})
 
 			t.Run("an absent session is ErrNotFound", func(t *testing.T) {
 				st := impl.open(t)
 				if _, err := st.Claim(ctx(), "nope"); !errors.Is(err, session.ErrNotFound) {
-					t.Errorf("Claim = %v, want ErrNotFound", err)
+					t.Errorf("Claim = %v", err)
 				}
-				if err := st.Append(ctx(), "nope", msg("x")); !errors.Is(err, session.ErrNotFound) {
-					t.Errorf("Append = %v, want ErrNotFound", err)
+				if err := st.Append(ctx(), "nope", ai.UserMessage("x")); !errors.Is(err, session.ErrNotFound) {
+					t.Errorf("Append = %v", err)
 				}
-				for _, err := range st.Entries(ctx(), "nope") {
-					if !errors.Is(err, session.ErrNotFound) {
-						t.Errorf("Entries = %v, want ErrNotFound", err)
-					}
+				if err := st.Replace(ctx(), "nope", nil); !errors.Is(err, session.ErrNotFound) {
+					t.Errorf("Replace = %v", err)
+				}
+				if _, err := st.Load(ctx(), "nope"); !errors.Is(err, session.ErrNotFound) {
+					t.Errorf("Load = %v", err)
 				}
 			})
 
 			t.Run("a claim excludes a second until released", func(t *testing.T) {
-				st := impl.open(t)
-				id, err := st.Create(ctx())
-				if err != nil {
-					t.Fatal(err)
-				}
+				st, id := created(t)
 				release, err := st.Claim(ctx(), id)
 				if err != nil {
 					t.Fatal(err)
@@ -69,72 +87,52 @@ func TestStoreContract(t *testing.T) {
 				_ = again()
 			})
 
-			t.Run("Entries reads back what was appended, in order", func(t *testing.T) {
-				st := impl.open(t)
-				id, err := st.Create(ctx())
-				if err != nil {
+			t.Run("appends keep their order and a replacement starts over", func(t *testing.T) {
+				st, id := created(t)
+				for _, text := range []string{"one", "two"} {
+					if err := st.Append(ctx(), id, ai.UserMessage(text)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got, want := load(t, st, id), []string{"one", "two"}; !slices.Equal(got, want) {
+					t.Errorf("after appends: %v, want %v", got, want)
+				}
+				if err := st.Replace(ctx(), id, []ai.Message{ai.UserMessage("summary")}); err != nil {
 					t.Fatal(err)
 				}
-				for _, text := range []string{"one", "two", "three"} {
-					if err := st.Append(ctx(), id, msg(text)); err != nil {
-						t.Fatal(err)
-					}
+				if err := st.Append(ctx(), id, ai.UserMessage("three")); err != nil {
+					t.Fatal(err)
 				}
-				var texts []string
-				for e, err := range st.Entries(ctx(), id) {
-					if err != nil {
-						t.Fatal(err)
-					}
-					texts = append(texts, e.Messages[0].Text())
+				if got, want := load(t, st, id), []string{"summary", "three"}; !slices.Equal(got, want) {
+					t.Errorf("after a replacement: %v, want %v", got, want)
 				}
-				if want := []string{"one", "two", "three"}; !slices.Equal(texts, want) {
-					t.Errorf("order = %v, want %v", texts, want)
+				if err := st.Replace(ctx(), id, nil); err != nil {
+					t.Fatal(err)
+				}
+				if got := load(t, st, id); len(got) != 0 {
+					t.Errorf("a cleared conversation loads as %v", got)
 				}
 			})
 
-			t.Run("a cancelled read ends with the cancellation", func(t *testing.T) {
-				st := impl.open(t)
-				id, err := st.Create(ctx())
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := st.Append(ctx(), id, msg("one")); err != nil {
-					t.Fatal(err)
-				}
+			t.Run("a cancelled load reports the cancellation", func(t *testing.T) {
+				st, id := created(t)
 				stopped, cancel := context.WithCancel(context.Background())
 				cancel()
-				var failure error
-				for _, err := range st.Entries(stopped, id) {
-					if err != nil {
-						failure = err
-						break
-					}
-				}
-				if !errors.Is(failure, context.Canceled) {
-					t.Errorf("Entries = %v, want the cancellation — a read that stops "+
-						"quietly reads as a shorter session", failure)
+				if _, err := st.Load(stopped, id); !errors.Is(err, context.Canceled) {
+					t.Errorf("Load = %v, want the cancellation — a load that stops "+
+						"quietly reads as a shorter conversation", err)
 				}
 			})
 
 			t.Run("what was stored is not what the caller still holds", func(t *testing.T) {
-				st := impl.open(t)
-				id, err := st.Create(ctx())
-				if err != nil {
+				st, id := created(t)
+				m := ai.UserMessage("as written")
+				if err := st.Append(ctx(), id, m); err != nil {
 					t.Fatal(err)
 				}
-				e := msg("as written")
-				if err := st.Append(ctx(), id, e); err != nil {
-					t.Fatal(err)
-				}
-				e.Messages[0].Content = ai.TextContent("rewritten after the fact")
-				for got, err := range st.Entries(ctx(), id) {
-					if err != nil {
-						t.Fatal(err)
-					}
-					if got.Messages[0].Text() != "as written" {
-						t.Errorf("stored entry reads %q; the caller edited it after appending",
-							got.Messages[0].Text())
-					}
+				m.Content[0].Text = "rewritten after the fact"
+				if got := load(t, st, id); !slices.Equal(got, []string{"as written"}) {
+					t.Errorf("stored %v; the caller edited it after appending", got)
 				}
 			})
 		})

@@ -16,56 +16,36 @@ import (
 //
 //	for e, err := range a.Run(ctx, ai.UserMessage("hi")) { … }
 type Agent struct {
-	// Settled at construction and never written again, so they are read
-	// without the lock. Anything given a setter has to move to the group
-	// below and take the lock with it.
-	maxSteps      int
-	retryAttempts int
-	retryBackoff  time.Duration
-	// resumeTries and resumePrompt carry WithContinuation: how many times a
-	// cut-off answer may be asked to carry on, and what to ask with.
-	resumeTries  int
-	resumePrompt string
-	// streamFirst bounds how long the endpoint may say nothing at all,
-	// streamIdle how long it may pause once it has started. WithStreamTimeout
-	// normalises "off" to never, so neither is ever zero here and nothing
-	// reading them needs a case for it.
+	// Set at construction and read without the lock.
+	maxSteps       int
+	retries        int
+	retryBackoff   time.Duration
+	continueTries  int
+	continuePrompt string
+	// streamFirst and streamIdle are never zero; WithStreamTimeout maps "off"
+	// to never.
 	streamFirst time.Duration
 	streamIdle  time.Duration
-	// mintID names a message that arrived without a name, or is nil and none
-	// are named. Read without the lock, and called without it too: it is the
-	// caller's code, and one that reached back into the agent under the lock
-	// would deadlock on it.
+	// mintID is nil when messages are not named. Called without the lock: it
+	// is the caller's code.
 	mintID func() string
 
-	// Everything a caller can change while the agent runs, and the lock that
-	// makes that safe. Read or write one of these and you hold mu.
+	// mu guards everything below it.
 	mu       sync.Mutex
 	client   *ai.Client
 	system   string
 	messages []ai.Message
 	tools    []Tool
 	hooks    []Hook
-	// replaced and pending are the two ways the conversation changes from
-	// outside the loop, and settle applies both at the next step boundary.
+	// replaced and pending are applied by settle at the next step boundary.
 	replaced bool
 	pending  []ai.Message
-	// stopTurn ends the turn in flight. Never nil: between turns it is a
-	// no-op, so Interrupt needs no case for having nothing to interrupt.
+	// stopTurn cancels the turn in flight; a no-op between turns.
 	stopTurn context.CancelFunc
-	// stopped closes when the exchange in flight has finished, and between
-	// exchanges is an already-closed channel — for the same reason stopTurn is
-	// a no-op there.
-	stopped chan struct{}
 
-	// Their own synchronisation, because they are read outside mu.
-	//
-	// turnCount is how many exchanges this agent has held. It counts the ones
-	// it actually ran, so a restored conversation starts again at zero — what
-	// came back from storage was someone else's counting.
+	// turnCount is how many turns this agent has run.
 	turnCount atomic.Int64
-	// running is held for the length of one exchange and released after it: a
-	// second Run while one is in flight is ErrBusy, not a queue.
+	// running is held for the length of one turn: a second Run is ErrBusy.
 	running atomic.Bool
 }
 
@@ -75,13 +55,10 @@ const (
 	defaultIdle       = time.Minute
 )
 
-// Option sets one thing an agent does not need in order to exist — New's
-// parameter is what it cannot be built without, so a plain agent is
-// agent.New(client).
+// Option configures an agent built by New.
 type Option func(*Agent)
 
-// WithSystem sets the system prompt, verbatim. Assembling one is the
-// application's business. Change it later with SetSystem.
+// WithSystem sets the system prompt, verbatim. Change it later with SetSystem.
 func WithSystem(prompt string) Option { return func(a *Agent) { a.system = prompt } }
 
 // WithTools sets what the model may call. Change it later with SetTools.
@@ -89,50 +66,34 @@ func WithTools(tools ...Tool) Option {
 	return func(a *Agent) { a.tools = slices.Clone(tools) }
 }
 
-// WithHooks adds hooks. Several may be registered: a permission gate and an
-// audit log should not have to be one function.
+// WithHooks adds hooks, which run in the order added.
 func WithHooks(hooks ...Hook) Option {
 	return func(a *Agent) { a.hooks = append(a.hooks, hooks...) }
 }
 
-// WithMaxSteps caps model calls per exchange. Zero means no cap.
+// WithMaxSteps caps model calls per turn. Zero means no cap.
 func WithMaxSteps(n int) Option { return func(a *Agent) { a.maxSteps = n } }
 
-// WithMessageIDs names every message in the conversation, using the generator
-// given — the identity an application needs when it has to point at one turn
-// later: the row a person is editing, the entry a store already holds, the
-// turn a fork branches at.
+// WithMessageIDs names every message that enters the conversation without an
+// ID, the loop's own answers, tool results and continuation prompts included,
+// by calling next. A message that already has an ID keeps it. The format and
+// uniqueness are yours. Off by default, and then IDs are left empty. IDs are
+// never sent to the model.
 //
 //	agent.WithMessageIDs(func() string { return uuid.NewString() })
-//
-// next is called once per message that arrives without an ID, so a restored
-// conversation keeps the names it was stored with and a message you named
-// yourself keeps yours. Everything the loop makes is named too — the answer,
-// the batch of tool results, a continuation prompt — since a conversation
-// half of which can be pointed at is one an application cannot rely on.
-//
-// The format is yours, and so is uniqueness: this package calls next and
-// keeps what it returns. Off by default, and then every ID is empty, because
-// a conversation nothing outside the loop has to point at needs no names.
 func WithMessageIDs(next func() string) Option {
 	return func(a *Agent) { a.mintID = next }
 }
 
-// WithStreamTimeout bounds how long a model stream may say nothing: first is
-// how long the endpoint has to say anything at all, idle how long it may pause
-// once it has started. Either at zero turns that half off.
-//
-// A stalled stream is the one failure that looks like work, so this is on by
-// default at five minutes and one minute; a model that reasons silently for
-// longer needs a longer idle, or none. Running out is a network failure,
-// because it is one.
+// WithStreamTimeout bounds how long a model stream may say nothing: first
+// before the endpoint says anything, idle between events once it has. Zero
+// turns that half off. The defaults are five minutes and one minute. Running
+// out is an ai.KindNetwork failure.
 func WithStreamTimeout(first, idle time.Duration) Option {
 	return func(a *Agent) { a.streamFirst, a.streamIdle = orNever(first), orNever(idle) }
 }
 
-// orNever turns "off" into a duration no timer reaches, so that a disabled
-// timeout is a timer that does not fire rather than a branch every reader of
-// these fields has to remember.
+// orNever maps "off" to a duration no timer reaches.
 func orNever(d time.Duration) time.Duration {
 	if d <= 0 {
 		return never
@@ -141,37 +102,29 @@ func orNever(d time.Duration) time.Duration {
 }
 
 // WithContinuation asks the model to carry on when the output cap cut its
-// answer off, at most attempts times in one exchange, by putting prompt into
-// the conversation and taking another step.
-//
-// A model stopped by max_tokens did not finish: it was interrupted. The loop
-// knows when that happened and has budget left, but what to say about it — and
-// whether to pay for more tokens at all — is the application's, so this is off
-// by default and the words are yours.
+// answer off, at most attempts times in one turn, by adding prompt to the
+// conversation (reported as MessageAdded) and taking another step. Running out
+// of attempts ends the turn with StopMaxTokens. Off by default.
 //
 //	agent.WithContinuation(2, "Your answer was cut off by the output limit. "+
 //	    "Carry on from exactly where you stopped, and do not repeat anything.")
-//
-// The prompt enters the conversation as an ordinary message and is reported as
-// MessageAdded, and stays in the conversation like any other.
-// Running out of attempts ends the exchange with StopMaxTokens, the same as
-// never asking: the answer is still cut off.
 func WithContinuation(attempts int, prompt string) Option {
 	return func(a *Agent) {
 		if attempts > 0 && prompt != "" {
-			a.resumeTries, a.resumePrompt = attempts, prompt
+			a.continueTries, a.continuePrompt = attempts, prompt
 		}
 	}
 }
 
-// WithRetry replays a failed model call, at most attempts times, waiting
-// backoff before the second and doubling after each further failure. A stream
-// that already yielded output is replayed as a new message, and a stalled one
-// is ended and replayed. Off by default; no driver retries on its own.
-func WithRetry(attempts int, backoff time.Duration) Option {
+// WithRetry replays a call that failed retryably, up to retries more times,
+// waiting backoff before the first replay and doubling after each further
+// failure. A stream that already yielded output is replayed as a new message,
+// and a stalled one is ended and replayed. Off by default; no driver retries
+// on its own.
+func WithRetry(retries int, backoff time.Duration) Option {
 	return func(a *Agent) {
-		if attempts > 0 {
-			a.retryAttempts = attempts
+		if retries > 0 {
+			a.retries = retries
 		}
 		if backoff >= 0 {
 			a.retryBackoff = backoff
@@ -179,20 +132,17 @@ func WithRetry(attempts int, backoff time.Duration) Option {
 	}
 }
 
-// New builds an agent on a model handle, which is the parameter because an
-// agent without one can do nothing. A missing client is an error, not a panic.
+// New builds an agent that calls client. A nil client is an error.
 func New(client *ai.Client, opts ...Option) (*Agent, error) {
 	if client == nil {
 		return nil, errors.New("agent: a client is required")
 	}
 	a := &Agent{
-		client:        client,
-		retryAttempts: 1,
-		retryBackoff:  time.Second,
-		streamFirst:   defaultFirstChunk,
-		streamIdle:    defaultIdle,
-		stopTurn:      func() {},
-		stopped:       closed,
+		client:       client,
+		retryBackoff: time.Second,
+		streamFirst:  defaultFirstChunk,
+		streamIdle:   defaultIdle,
+		stopTurn:     func() {},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -210,14 +160,10 @@ func (a *Agent) Messages() []ai.Message {
 	return slices.Clone(a.messages)
 }
 
-// SetMessages replaces the conversation — how compaction and session restore
-// both work. To add to it instead use AddMessages: reading Messages and
-// setting the result back races with the exchange that may be running.
-//
-// It is announced as MessagesReplaced at the next step boundary, which is
-// where queued messages enter too and where an idle agent's next exchange
-// starts. Replacing nothing with nothing is not announced: that happened to
-// nobody.
+// SetMessages replaces the conversation, for compaction or restoring a saved
+// one. It is announced as MessagesReplaced at the next step boundary. To add
+// messages, use AddMessages: reading Messages and setting it back races with
+// a running turn.
 func (a *Agent) SetMessages(msgs []ai.Message) {
 	msgs = a.named(msgs)
 
@@ -229,11 +175,8 @@ func (a *Agent) SetMessages(msgs []ai.Message) {
 	a.messages = slices.Clone(msgs)
 }
 
-// named fills in the messages that arrived without an ID, and is a copy
-// whenever it does: the slice belongs to whoever passed it, and naming their
-// messages behind their back is not this package's to do.
-//
-// Called off the lock, since next is the caller's code.
+// named returns msgs with missing IDs filled in, copying rather than editing
+// the caller's slice. Called off the lock.
 func (a *Agent) named(msgs []ai.Message) []ai.Message {
 	if a.mintID == nil {
 		return msgs
@@ -247,7 +190,7 @@ func (a *Agent) named(msgs []ai.Message) []ai.Message {
 	return out
 }
 
-// takeReplaced reports a replacement since the last exchange, and what it left.
+// takeReplaced reports a replacement since the last boundary, and what it left.
 func (a *Agent) takeReplaced() (bool, []ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -258,16 +201,13 @@ func (a *Agent) takeReplaced() (bool, []ai.Message) {
 	return true, slices.Clone(a.messages)
 }
 
-// turnNow is the exchange being held. Only turn advances it, so every event
+// turnNow is the turn being run. Only turn advances it, so every event
 // in one agrees.
 func (a *Agent) turnNow() int { return int(a.turnCount.Load()) }
 
-// AddMessages puts messages into the conversation from outside the loop —
-// typed while the model worked, or routed in from elsewhere. They enter at the
-// next step boundary, which is the one place it is safe to change what the
-// model is about to see, and ahead of the next exchange's own input when that
-// boundary is the one an exchange opens with. Between exchanges, pass them to
-// Run instead.
+// AddMessages queues messages to enter the conversation at the next step
+// boundary, ahead of the next turn's own input if no turn is running. Use it
+// for input that arrives while a turn runs; between turns, pass input to Run.
 func (a *Agent) AddMessages(msgs ...ai.Message) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -275,16 +215,16 @@ func (a *Agent) AddMessages(msgs ...ai.Message) {
 }
 
 // Pending is how many added messages have not entered the conversation yet.
-// An exchange does not end while any wait, so a non-zero count between
-// exchanges means one arrived after the last ended and another is owed.
+// A turn does not end while any wait, so a non-zero count between turns means
+// one arrived after the last ended and another is owed.
 func (a *Agent) Pending() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return len(a.pending)
 }
 
-// taken empties the queue AddMessages fills.
-func (a *Agent) taken() []ai.Message {
+// takePending empties the queue AddMessages fills.
+func (a *Agent) takePending() []ai.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -293,8 +233,8 @@ func (a *Agent) taken() []ai.Message {
 	return msgs
 }
 
-// Tools returns a snapshot of what the model may call.
-func (a *Agent) Tools() []Tool {
+// toolset is what the model may call now.
+func (a *Agent) toolset() []Tool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return slices.Clone(a.tools)
@@ -310,26 +250,25 @@ func (a *Agent) SetTools(tools ...Tool) {
 }
 
 // definitions is what the model is told about the toolset. Caller holds a.mu.
-func (a *Agent) definitions() []ai.Tool {
-	defs := make([]ai.Tool, len(a.tools))
+func (a *Agent) definitions() []ai.Schema {
+	defs := make([]ai.Schema, len(a.tools))
 	for i, t := range a.tools {
-		defs[i] = ai.Tool{Schema: t.Schema()}
+		defs[i] = t.Schema()
 	}
 	return defs
 }
 
-// Client returns the model handle the agent calls by default. Where a given
-// inference actually went is on its Inference, which a hook may have pointed
-// elsewhere.
-func (a *Agent) Client() *ai.Client {
+// clientFor is where inf goes: its own client, or the agent's.
+func (a *Agent) clientFor(inf *Inference) *ai.Client {
+	if inf.Client != nil {
+		return inf.Client
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.client
 }
 
-// SetSystem replaces the system prompt. It takes effect on the next inference,
-// so an application that rebuilds its prompt when something changes — the
-// working directory, the active skills — calls this and is done.
+// SetSystem replaces the system prompt from the next inference on.
 func (a *Agent) SetSystem(prompt string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -362,38 +301,12 @@ func toolNamed(tools []Tool, name string) (Tool, bool) {
 	return nil, false
 }
 
-// Interrupt ends the exchange in flight — it stops with StopCanceled, Run
-// returns, and the next one starts clean. This is what a user pressing escape
-// asks for; cancelling Run's own context is the other thing, and ends
-// everything.
-//
-// The returned channel closes when that exchange has actually finished: after
-// its last event, and after the agent is free to run another. Wait on it when
-// something has to happen once the agent has stopped touching the
-// conversation, from a goroutine that is not the one ranging over Run — the
-// keystroke handler that asked for the interrupt, typically, which cannot see
-// the range end.
-//
-//	<-a.Interrupt()      // the turn is over; the agent is idle
-//	a.SetMessages(fresh)
-//
-// A tool already running is asked to stop through its context and then waited
-// for: one that ignores cancellation holds this channel open until it returns.
-//
-// Between exchanges there is nothing to interrupt: the channel is already
-// closed and this does nothing.
-func (a *Agent) Interrupt() <-chan struct{} {
+// Interrupt ends the turn in flight: it stops with StopCanceled, Run returns,
+// and the next turn starts clean. Cancelling Run's context instead ends
+// everything. A running tool is asked to stop through its context. Between
+// turns it does nothing.
+func (a *Agent) Interrupt() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopTurn()
-	return a.stopped
 }
-
-// closed stands in for the exchange that is not running, so that Interrupt
-// between two of them returns something a caller can wait on without a case
-// for there being nothing to wait for.
-var closed = func() chan struct{} {
-	c := make(chan struct{})
-	close(c)
-	return c
-}()

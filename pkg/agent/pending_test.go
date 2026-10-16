@@ -24,7 +24,7 @@ func TestPendingInputIsAnnouncedBeforeAnUnfinishedTurnEnds(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch e := event.(type) {
-				case agent.MessageStart:
+				case agent.InferenceStart:
 					a.AddMessages(input)
 					if cancelTurn {
 						cancel()

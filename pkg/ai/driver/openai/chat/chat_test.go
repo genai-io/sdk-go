@@ -15,7 +15,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/provider"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 )
 
 // stub is a Chat Completions endpoint that replays a scripted stream and
@@ -430,8 +430,8 @@ func TestARateLimitCarriesItsRetryAfter(t *testing.T) {
 		t.Errorf("retry after = %v, want 30s", got)
 	}
 	var e *ai.Error
-	if errors.As(err, &e) && e.Driver != Name {
-		t.Errorf("driver = %q, want %q", e.Driver, Name)
+	if errors.As(err, &e) && e.Driver != name {
+		t.Errorf("driver = %q, want %q", e.Driver, name)
 	}
 }
 
@@ -481,7 +481,7 @@ func TestModelsReadTheWindowUnderEitherSpelling(t *testing.T) {
 		{"id":"gateway","object":"model","max_input_tokens":128000},
 		{"id":"bare","object":"model"}]}`)
 
-	models, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*Driver).Models(context.Background())
+	models, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*driver).Models(context.Background())
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestModelsRouteResponsesOnlyEntriesToResponses(t *testing.T) {
 		{"id":"claude","object":"model","supported_endpoints":["/chat/completions"]},
 		{"id":"bare","object":"model"}]}`)
 
-	listed, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*Driver).Models(context.Background())
+	listed, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*driver).Models(context.Background())
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
@@ -520,17 +520,13 @@ func TestModelsRouteResponsesOnlyEntriesToResponses(t *testing.T) {
 		"claude":     ai.APIOpenAIChat,
 		"bare":       ai.APIOpenAIChat,
 	}
-	msgs := []ai.Message{ai.UserMessage("hi")}
 	for _, live := range listed {
 		for path, m := range map[string]ai.Model{
 			"decorated": copilot.Resolve(live),
-			"merged":    provider.MergeListing(copilot.Model(live.ID), live),
+			"merged":    endpoint.MergeListing(copilot.Model(live.ID), live),
 		} {
 			if m.API != want[m.ID] {
 				t.Errorf("%s %s: API = %s, want %s", path, m.ID, m.API, want[m.ID])
-			}
-			if err := m.Validate(msgs); err != nil {
-				t.Errorf("%s %s: %v", path, m.ID, err)
 			}
 		}
 	}

@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -11,38 +10,6 @@ import (
 	"strings"
 	"unicode"
 )
-
-// TokenCount is how large a prompt is, and how much that number can be
-// trusted.
-type TokenCount struct {
-	// Tokens is the prompt size.
-	Tokens int
-	// Exact is true when the provider counted, false when this package
-	// estimated.
-	Exact bool
-}
-
-// CountTokens reports how large a prompt is before it is sent.
-func (c *Client) CountTokens(ctx context.Context, messages []Message, opts ...Option) (TokenCount, error) {
-	req, err := c.prepare(ctx, messages, opts)
-	if err != nil {
-		return TokenCount{}, err
-	}
-	if counter, ok := c.driver.(TokenCounter); ok {
-		n, err := counter.CountTokens(ctx, req)
-		if err == nil {
-			return TokenCount{Tokens: n, Exact: true}, nil
-		}
-		// A counting endpoint that is down should not stop a caller sizing a
-		// prompt. Auth, malformed requests and cancellation are different:
-		// estimating would hide a failure generation will hit too.
-		if IsUnsupported(err) || IsRetryable(err) {
-			return TokenCount{Tokens: req.EstimateTokens()}, nil
-		}
-		return TokenCount{}, err
-	}
-	return TokenCount{Tokens: req.EstimateTokens()}, nil
-}
 
 // Token-estimation constants, leaning towards over-counting: compacting early
 // costs some context, discovering the prompt was too large costs a request.
@@ -96,9 +63,9 @@ func (r *Request) EstimateTokens() int {
 		total += messageOverhead + estimateContent(m.Content)
 	}
 	for _, t := range r.Tools {
-		total += messageOverhead + EstimateTokens(t.Schema.Name) + EstimateTokens(t.Schema.Description)
-		if t.Schema.Definition != nil {
-			if schema, err := json.Marshal(t.Schema.Definition); err == nil {
+		total += messageOverhead + EstimateTokens(t.Name) + EstimateTokens(t.Description)
+		if t.Definition != nil {
+			if schema, err := json.Marshal(t.Definition); err == nil {
 				total += EstimateTokens(string(schema))
 			}
 		}
@@ -230,12 +197,4 @@ func estimateImage(img *Image) int {
 		return unsizedImageTokens
 	}
 	return (cfg.Width*cfg.Height + pixelsPerImageToken - 1) / pixelsPerImageToken
-}
-
-// SplitPromptTokens separates a combined prompt count into its fresh and
-// cached halves.
-func SplitPromptTokens(promptTokens, cachedTokens int) (fresh, cached int) {
-	promptTokens = max(promptTokens, 0)
-	cached = min(max(cachedTokens, 0), promptTokens)
-	return promptTokens - cached, cached
 }

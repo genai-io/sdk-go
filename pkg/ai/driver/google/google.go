@@ -4,7 +4,7 @@
 //
 // # Where things live
 //
-//	google.go     construction, Stream, Models and CountTokens
+//	google.go     construction, Stream and Models
 //	request.go    an ai.Request translated into a generate call
 //	wire.go       the protocol's own types, transcribed from the API definition
 //	transport.go  URLs, headers and the server-sent-event stream
@@ -27,9 +27,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
 )
 
-// Name is the driver's identifier.
-const Name = string(ai.APIGoogleGenAI)
-
 // defaultBaseURL is the Gemini API host; apiVersion is the path segment every
 // method sits under.
 const (
@@ -43,62 +40,56 @@ const generateContentMethod = "generateContent"
 
 func init() { ai.RegisterAPI(ai.APIGoogleGenAI, New) }
 
-// Driver talks to one Gemini endpoint.
-type Driver struct {
+// driver talks to one Gemini endpoint.
+type driver struct {
 	client *http.Client
 	// api is the protocol as the caller reached it: the Gemini API, or the
-	// same body through Vertex AI, which counts tokens in its own shape. It
-	// is what the driver and its errors answer to, so a failure on Vertex
+	// same body through Vertex AI. It is what the driver and its errors
+	// answer to, so a failure on Vertex
 	// does not send anyone to the Gemini API's console.
 	api  ai.API
 	fail errs.Classifier
-	// models is the collection the model sits in — the URL up to "/{model}:{method}".
-	// On the Gemini API that is "{base}/v1beta/models"; on Vertex the project
-	// and location come before "publishers/google/models".
-	models  string
-	apiKey  string
-	headers map[string]string
-	model   ai.Model
-	compat  ai.GoogleCompat
+	// modelsURL is the collection the model sits in — the URL up to
+	// "/{model}:{method}". On the Gemini API that is "{base}/v1beta/models";
+	// on Vertex the project and location come before "publishers/google/models".
+	modelsURL string
+	apiKey    string
+	headers   map[string]string
+	model     ai.Model
+	compat    ai.GoogleCompat
 }
 
 // New builds a driver from a Config. Registered as the factory for
 // ai.APIGoogleGenAI.
 func New(cfg ai.Config) (ai.Driver, error) {
-	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
-		return nil, err
-	}
-	base := cmp.Or(cfg.URL(), defaultBaseURL)
-	return NewAt(cfg, ai.APIGoogleGenAI, strings.TrimSuffix(base, "/")+"/"+apiVersion+"/models")
+	base := cmp.Or(cfg.MergedBaseURL(), defaultBaseURL)
+	return NewDeployment(cfg, ai.APIGoogleGenAI, strings.TrimSuffix(base, "/")+"/"+apiVersion+"/models")
 }
 
-// NewAt builds a driver for a model collection, for a package that serves
-// this protocol from another address: google/vertex passes the collection its
-// project and location name, with the Config's client carrying its Google
-// credential. A nil Config.HTTPClient is http.DefaultClient.
-func NewAt(cfg ai.Config, api ai.API, models string) (*Driver, error) {
-	if cfg.Model.ID == "" {
-		return nil, fmt.Errorf("%s: model ID is required", api)
-	}
-	return &Driver{
-		client:  cmp.Or(cfg.HTTPClient, http.DefaultClient),
-		api:     api,
-		fail:    errs.For(string(api), details),
-		models:  models,
-		apiKey:  cfg.APIKey,
-		headers: cfg.MergedHeaders(),
-		model:   cfg.Model,
-		compat:  ai.CompatOf[ai.GoogleCompat](cfg.Model),
+// NewDeployment builds a driver for a model collection, for a package that
+// serves this protocol from another address: google/vertex passes the
+// collection its project and location name, with the Config's client carrying
+// its Google credential. A nil Config.HTTPClient is http.DefaultClient.
+func NewDeployment(cfg ai.Config, api ai.API, modelsURL string) (ai.Driver, error) {
+	return &driver{
+		client:    cmp.Or(cfg.HTTPClient, http.DefaultClient),
+		api:       api,
+		fail:      errs.For(string(api), details),
+		modelsURL: modelsURL,
+		apiKey:    cfg.APIKey,
+		headers:   cfg.MergedHeaders(),
+		model:     cfg.Model,
+		compat:    ai.CompatOf[ai.GoogleCompat](cfg.Model),
 	}, nil
 }
 
 // Name identifies the driver by the protocol it was reached through.
-func (d *Driver) Name() string { return string(d.api) }
+func (d *driver) Name() string { return string(d.api) }
 
 // Stream runs one streamGenerateContent call.
-func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		body, err := d.request(req)
+		body, err := d.buildParams(req)
 		if err != nil {
 			yield(ai.Delta{}, err)
 			return
@@ -113,12 +104,7 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 		// Gemini finishes a turn that called a function with STOP, and the call
 		// may arrive in an earlier chunk than the finish.
-		called := false
-		complete := false
-		emit := func(delta ai.Delta, err error) bool {
-			complete = complete || delta.StopReason != ""
-			return yield(delta, err)
-		}
+		var called, complete bool
 		for chunk, err := range sseEvents(res.Body) {
 			if err != nil {
 				yield(ai.Delta{}, d.fail.WrapStream(err))
@@ -129,9 +115,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				yield(ai.Delta{}, d.fail.WrapStream(fmt.Errorf("undecodable stream chunk: %w", err)))
 				return
 			}
-			if !d.emit(out, &called, emit) {
+			var stopped, ok bool
+			if called, stopped, ok = d.emit(out, called, yield); !ok {
 				return
 			}
+			complete = complete || stopped
 		}
 		if !complete {
 			yield(ai.Delta{}, d.fail.WrapStream(io.ErrUnexpectedEOF))
@@ -139,9 +127,11 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 	}
 }
 
-// emit turns one decoded chunk into deltas, noting in called whether the turn
-// made a function call. It reports false when the consumer stopped iterating.
-func (d *Driver) emit(out generateResponse, called *bool, yield func(ai.Delta, error) bool) bool {
+// emit turns one decoded chunk into deltas. called is whether the turn has
+// made a function call so far, and comes back updated; stopped is whether the
+// chunk carried a stop reason; ok is false when the consumer stopped iterating.
+func (d *driver) emit(out generateResponse, called bool, yield func(ai.Delta, error) bool) (bool, bool, bool) {
+	stopped := false
 	// A blocked prompt gets no candidate, only the reason, which is carried as
 	// the refusal's text so the caller does not see an empty answer.
 	if f := out.PromptFeedback; f != nil && f.BlockReason != "" {
@@ -149,8 +139,9 @@ func (d *Driver) emit(out generateResponse, called *bool, yield func(ai.Delta, e
 		if msg == "" {
 			msg = "prompt blocked: " + f.BlockReason
 		}
+		stopped = true
 		if !yield(ai.Delta{Block: ai.TextBlock(msg), StopReason: ai.StopRefusal}, nil) {
-			return false
+			return called, stopped, false
 		}
 	}
 	for _, c := range out.Candidates {
@@ -161,26 +152,27 @@ func (d *Driver) emit(out generateResponse, called *bool, yield func(ai.Delta, e
 					continue
 				}
 				if delta.Block.ToolCall != nil {
-					*called = true
+					called = true
 				}
 				if !yield(delta, nil) {
-					return false
+					return called, stopped, false
 				}
 			}
 		}
 		if c.FinishReason != "" {
 			stop := mapFinishReason(c.FinishReason)
-			if stop == ai.StopEndTurn && *called {
+			if stop == ai.StopEndTurn && called {
 				stop = ai.StopToolUse
 			}
+			stopped = true
 			if !yield(ai.Delta{StopReason: stop}, nil) {
-				return false
+				return called, stopped, false
 			}
 		}
 	}
 	if out.ResponseID != "" {
 		if !yield(ai.Delta{ID: out.ResponseID}, nil) {
-			return false
+			return called, stopped, false
 		}
 	}
 	if u := out.UsageMetadata; u != nil {
@@ -196,10 +188,10 @@ func (d *Driver) emit(out generateResponse, called *bool, yield func(ai.Delta, e
 			Reasoning: reasoning,
 			CacheRead: cached,
 		}}, nil) {
-			return false
+			return called, stopped, false
 		}
 	}
-	return true
+	return called, stopped, true
 }
 
 // convertPart turns one response part into a delta. Gemini distinguishes
@@ -244,53 +236,18 @@ func mapFinishReason(reason string) ai.StopReason {
 	}
 }
 
-// CountTokens asks the endpoint how large a prompt is, without generating from
-// it. Gemini publishes this, so a caller never has to estimate.
-func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) {
-	contents, err := d.convertContents(req)
-	if err != nil {
-		return 0, err
-	}
-	inner := &countTokensInner{Contents: contents}
-	// The system instruction and the tool declarations count against the
-	// window too.
-	if req.System != "" {
-		inner.SystemInstruction = &content{Parts: []*part{{Text: req.System}}}
-	}
-	inner.Tools = declarations(req.Tools)
-
-	// Vertex takes those fields flat. The Gemini API takes them only inside a
-	// generateContentRequest wrapper, which also has to name the model.
-	var body any = inner
-	if d.api == ai.APIGoogleGenAI {
-		inner.Model = "models/" + d.model.ID
-		body = &countTokensRequest{GenerateContentRequest: inner}
-	}
-	res, err := d.post(ctx, d.methodURL("countTokens", ""), body)
-	if err != nil {
-		return 0, d.fail.Wrap(err)
-	}
-	defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
-
-	var out countTokensResponse
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return 0, d.fail.Wrap(err)
-	}
-	return int(out.TotalTokens), nil
-}
-
 // Models lists the models the endpoint serves that can answer a prompt. The
 // listing also carries embedding, image, speech and live models, which say so
 // in supportedGenerationMethods. Experimental and "-latest" aliases are dropped
 // too: they duplicate a concrete model under a name whose meaning can change.
-func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
+func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 	var out []ai.Model
 	for token := ""; ; {
 		query := "pageSize=1000"
 		if token != "" {
 			query += "&pageToken=" + url.QueryEscape(token)
 		}
-		res, err := d.get(ctx, d.models+"?"+query)
+		res, err := d.get(ctx, d.modelsURL+"?"+query)
 		if err != nil {
 			return nil, d.fail.Wrap(err)
 		}
@@ -335,7 +292,6 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 var (
-	_ ai.Driver       = (*Driver)(nil)
-	_ ai.ModelLister  = (*Driver)(nil)
-	_ ai.TokenCounter = (*Driver)(nil)
+	_ ai.Driver      = (*driver)(nil)
+	_ ai.ModelLister = (*driver)(nil)
 )

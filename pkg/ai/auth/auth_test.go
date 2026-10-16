@@ -10,130 +10,8 @@ import (
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
 )
-
-func vendor(t *testing.T, id string) catalog.Vendor {
-	t.Helper()
-	v, ok := catalog.Find(id)
-	if !ok {
-		t.Fatalf("no catalog vendor %q", id)
-	}
-	return v
-}
-
-func TestKeyTakesTheFirstVariableThatIsSet(t *testing.T) {
-	v := vendor(t, "google")
-	if len(v.KeyEnv) < 2 {
-		t.Fatalf("this test needs a vendor with two credential variables; %s has %v", v.ID, v.KeyEnv)
-	}
-
-	t.Setenv(v.KeyEnv[0], "")
-	t.Setenv(v.KeyEnv[1], "  second  ")
-	key, from := Key(v)
-	if key != "second" || from != v.KeyEnv[1] {
-		t.Errorf("Key = %q from %q, want the second variable, trimmed", key, from)
-	}
-
-	t.Setenv(v.KeyEnv[0], "first")
-	key, from = Key(v)
-	if key != "first" || from != v.KeyEnv[0] {
-		t.Errorf("Key = %q from %q, want the preferred variable to win", key, from)
-	}
-
-	for _, name := range v.KeyEnv {
-		t.Setenv(name, "")
-	}
-	if key, from = Key(v); key != "" || from != "" {
-		t.Errorf("Key = %q from %q, want nothing", key, from)
-	}
-}
-
-func TestBaseURLAppliesTheOverrideAndItsSuffix(t *testing.T) {
-	tests := map[string]struct {
-		vendorID string
-		given    string
-		want     string
-	}{
-		"unset falls back to the vendor's own host": {
-			"deepseek", "", "https://api.deepseek.com"},
-		"an override replaces it": {
-			"deepseek", "https://proxy.test/v1", "https://proxy.test/v1"},
-		"a trailing slash is not part of the URL": {
-			"deepseek", "https://proxy.test/v1/", "https://proxy.test/v1"},
-		// The suffix is added to the bare URL people copy out of a console.
-		"a suffix is added when it is missing": {
-			"azure-openai", "https://my-resource.openai.azure.com", "https://my-resource.openai.azure.com/openai/v1"},
-		"and not added twice": {
-			"azure-openai", "https://my-resource.openai.azure.com/openai/v1", "https://my-resource.openai.azure.com/openai/v1"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			v := vendor(t, tc.vendorID)
-			t.Setenv(v.BaseURLEnv, tc.given)
-			if got := BaseURL(v); got != tc.want {
-				t.Errorf("BaseURL = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestGoogleCanBeRedirected is the fix for the one key-based vendor whose host
-// could not be pointed anywhere else — at a gateway, a proxy, or a recorded
-// endpoint in a test.
-func TestGoogleCanBeRedirected(t *testing.T) {
-	v := vendor(t, "google")
-	if v.BaseURLEnv == "" {
-		t.Fatal("google states no BaseURLEnv, so its host cannot be redirected")
-	}
-	t.Setenv(v.BaseURLEnv, "https://gemini-proxy.test")
-	if got := BaseURL(v); got != "https://gemini-proxy.test" {
-		t.Errorf("BaseURL = %q, want the override", got)
-	}
-}
-
-// TestDeploymentIsTheTablesBusiness: which variables a vendor's deployment
-// needs, and what shape they make, is a fact about the row. This package only
-// supplies the lookup.
-func TestDeploymentIsTheTablesBusiness(t *testing.T) {
-	t.Run("a vendor with no deployment has none", func(t *testing.T) {
-		got, err := Deployment(vendor(t, "deepseek"))
-		if err != nil || got != nil {
-			t.Errorf("Deployment = %v, %v, want nothing", got, err)
-		}
-	})
-
-	t.Run("the missing setting is named", func(t *testing.T) {
-		t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", "")
-		t.Setenv("CLOUD_ML_REGION", "")
-		_, err := Deployment(vendor(t, "anthropic-vertex"))
-		var missing *MissingKeyError
-		if !errors.As(err, &missing) {
-			t.Fatalf("err = %v, want a MissingKeyError", err)
-		}
-		if !slices.Contains(missing.EnvVars, "ANTHROPIC_VERTEX_PROJECT_ID") {
-			t.Errorf("err = %v, want it to name the variable to set", err)
-		}
-	})
-
-	t.Run("what is set becomes the driver's own shape", func(t *testing.T) {
-		t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", " my-project ")
-		t.Setenv("CLOUD_ML_REGION", "europe-west1")
-		got, err := Deployment(vendor(t, "anthropic-vertex"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg, ok := got.(ai.VertexConfig)
-		if !ok {
-			t.Fatalf("Deployment = %#v, want an ai.VertexConfig", got)
-		}
-		if cfg.Project != "my-project" || cfg.Region != "europe-west1" {
-			t.Errorf("deployment = %+v, want the variables, trimmed", cfg)
-		}
-	})
-}
 
 func TestConfigResolvesCredentialAndEndpoint(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "sk-deepseek")
@@ -158,9 +36,9 @@ func TestConfigSaysWhichVariableIsMissing(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	_, err := Config("deepseek/deepseek-v4-pro")
-	var missing *MissingKeyError
+	var missing *catalog.MissingEnvError
 	if !errors.As(err, &missing) {
-		t.Fatalf("err = %v, want a MissingKeyError", err)
+		t.Fatalf("err = %v, want a MissingEnvError", err)
 	}
 	if !strings.Contains(err.Error(), "DEEPSEEK_API_KEY") {
 		t.Errorf("err = %v, want it to name the variable", err)
@@ -177,8 +55,7 @@ func TestConfigRefusesAnUnknownReference(t *testing.T) {
 // two-kinds-of-vendor split: there is no key to read, so the only question is
 // whether somebody has signed in.
 func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
-	store := &memStore{}
-	defer withDefaultStore(t, store)()
+	store := withDefaultStore(t)
 
 	_, err := Config("copilot/gpt-4o")
 	var notSignedIn *NotSignedInError
@@ -190,7 +67,7 @@ func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
 	}
 
 	if err := store.Save(Credential{
-		Vendor: "copilot", Access: "gho_1", Endpoint: "https://api.enterprise.githubcopilot.com",
+		Vendor: "copilot", Access: "gho_1", BaseURL: "https://api.enterprise.githubcopilot.com",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -212,8 +89,7 @@ func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
 }
 
 func TestAvailableReportsWhatCanActuallyBeReached(t *testing.T) {
-	store := &memStore{}
-	defer withDefaultStore(t, store)()
+	store := withDefaultStore(t)
 
 	// Start from nothing: whatever is in the developer's environment must not
 	// decide the answer.
@@ -280,16 +156,16 @@ func TestAvailableReportsWhatCanActuallyBeReached(t *testing.T) {
 	}
 }
 
-func TestProviderCarriesTheCredentialAndTheProtocol(t *testing.T) {
+func TestEndpointCarriesTheCredentialAndTheProtocol(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "sk-deepseek")
 	t.Setenv("DEEPSEEK_BASE_URL", "")
 
-	p, err := Provider("deepseek")
+	p, err := Endpoint("deepseek")
 	if err != nil {
-		t.Fatalf("Provider: %v", err)
+		t.Fatalf("Endpoint: %v", err)
 	}
 	if p.ID() != "deepseek" || p.API() == "" {
-		t.Errorf("provider = %s/%s, want the vendor's identity and protocol", p.ID(), p.API())
+		t.Errorf("endpoint = %s/%s, want the vendor's identity and protocol", p.ID(), p.API())
 	}
 	// The catalog lists no models, so every ID arrives resolved through the
 	// resolver the vendor installs.
@@ -302,13 +178,18 @@ func TestProviderCarriesTheCredentialAndTheProtocol(t *testing.T) {
 	}
 }
 
-func TestProviderRefusesWhatItCannotReach(t *testing.T) {
+func TestEndpointRefusesWhatItCannotReach(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "")
-	if _, err := Provider("deepseek"); err == nil {
-		t.Error("built a provider with no credential")
+	if _, err := Endpoint("deepseek"); err == nil {
+		t.Error("built an endpoint with no credential")
 	}
-	var unknown *UnknownVendorError
-	if _, err := Provider("nobody"); !errors.As(err, &unknown) {
+	t.Setenv("AZURE_OPENAI_API_KEY", "k")
+	t.Setenv("AZURE_OPENAI_ENDPOINT", "")
+	if _, err := Endpoint("azure-openai"); err == nil {
+		t.Error("built an endpoint with no host")
+	}
+	var unknown *catalog.UnknownVendorError
+	if _, err := Endpoint("nobody"); !errors.As(err, &unknown) {
 		t.Errorf("err = %v, want an UnknownVendorError", err)
 	}
 }
@@ -342,10 +223,10 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 	t.Cleanup(func() { delete(flows, copilotStub) })
 
 	store := &memStore{}
-	var shown oauth.Prompt
+	var shown Prompt
 	got, err := Login(t.Context(), copilotStub, LoginOptions{
 		Store: store,
-		Interaction: func(ctx context.Context, p oauth.Prompt) error {
+		Interaction: func(ctx context.Context, p Prompt) error {
 			shown = p
 			return nil
 		},
@@ -362,8 +243,8 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 	if got.Access != "gho_stub" {
 		t.Errorf("Access = %q, want the GitHub token", got.Access)
 	}
-	if got.Endpoint != "https://api.enterprise.githubcopilot.test" {
-		t.Errorf("Endpoint = %q, want the one the exchange revealed", got.Endpoint)
+	if got.BaseURL != "https://api.enterprise.githubcopilot.test" {
+		t.Errorf("BaseURL = %q, want the one the exchange revealed", got.BaseURL)
 	}
 	stored, found, err := store.Load(copilotStub)
 	if err != nil || !found {
@@ -374,6 +255,9 @@ func TestLoginStoresWhatTheGrantProduced(t *testing.T) {
 	}
 	if editorHeaders.Get("Editor-Version") == "" || editorHeaders.Get("Copilot-Integration-Id") == "" {
 		t.Errorf("the exchange was sent %v, want the editor headers the vendor row carries", editorHeaders)
+	}
+	if editorHeaders.Get("X-GitHub-Api-Version") != "" {
+		t.Error("the exchange was sent the Copilot API's version, which api.github.com reads as its own")
 	}
 
 	// And signing out forgets it.
@@ -391,7 +275,7 @@ func TestLoginRefusesAVendorThatTakesAKey(t *testing.T) {
 		t.Errorf("err = %v, want it to say to set the key variable instead", err)
 	}
 
-	var unknown *UnknownVendorError
+	var unknown *catalog.UnknownVendorError
 	if _, err := Login(t.Context(), "nobody", LoginOptions{Store: &memStore{}}); !errors.As(err, &unknown) {
 		t.Errorf("err = %v, want an UnknownVendorError", err)
 	}

@@ -31,7 +31,7 @@ scope is optional.
 ## Adding a vendor
 
 Most vendors do not need code. If the endpoint speaks a protocol already
-implemented here — OpenAI Chat Completions covers 18 of the 27 vendors in the
+implemented here — OpenAI Chat Completions covers 18 of the 28 vendors in the
 catalog — then adding it is a row in `pkg/ai/catalog`: a base URL, the
 environment variable it documents, its reasoning dialect and its models.
 
@@ -47,27 +47,24 @@ type Driver interface {
 ```
 
 Everything a caller also needs — aggregating deltas into a `Response`, applying
-defaults, repairing history, validating, retrying — belongs to `Client` and is
-written once for every protocol. Model listing and token counting are optional
-interfaces, discovered by type assertion; a driver that omits one is never an
-error.
+defaults, repairing history, validating — belongs to `Client` and is written
+once for every protocol. Model listing is an optional interface, discovered by
+type assertion; a driver that omits it is never an error.
 
 Register from `init` so a blank import is enough to make the protocol
 reachable.
 
 A setting only your protocol has is not a new field on `Request`. If your
 protocol is in the OpenAI family, `SamplingParams` already reaches it. A
-construction setting goes in a typed `ai.ProtocolConfig` value, the way
-`ai.VertexConfig` does: a one-line marker method keeps the field from being a
-bare `any`. A value of the *wrong driver's* type, or one sent to a protocol
-that defines none, is an invalid request caught when that driver reads it. It
-is never ignored silently.
+construction setting the protocol cannot run without is a typed field on
+`ai.Config`, the way `Config.Vertex` is: the drivers that need it require it,
+and the others ignore it.
 
 ## Tests
 
 Two layers, and a change usually needs one of each.
 
-`test/` is one black-box package. It imports the SDK the way an application
+`integration/` is one black-box package. It imports the SDK the way an application
 does and asserts on two things: the bytes that reached the endpoint, and the
 value that came back. Every endpoint is a stub HTTP server, so it needs no
 network and no credential.
@@ -79,12 +76,12 @@ needs a network either.
 
 ```sh
 make test          # go test -race ./...
-go test ./test/    # the cross-protocol suite alone
+go test ./integration/  # the cross-protocol suite alone
 ```
 
-A new protocol needs its own entries in the cross-protocol tables in `test/` —
+A new protocol needs its own entries in the cross-protocol tables in `integration/` —
 the ones that pin what each protocol sends for the same request — because that
-is what keeps five drivers agreeing on one meaning. It also needs its own
+is what keeps six drivers agreeing on one meaning. It also needs its own
 package tests for the parts no other protocol exercises.
 
 A new vendor needs no code, and `pkg/ai/catalog` will tell you if the row is

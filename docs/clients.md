@@ -19,11 +19,11 @@ you already are, and each step adds one nameable thing:
           │                   and a failure here if a key is required and
           │                   missing, rather than a 401 three calls later
           │
-          │  ai.NewDriver      the protocol implementation
+          │  <driver>.New      the protocol implementation
           ▼
-      ai.Driver               found in the registry by Model.API, which is
-          │                   what the blank import fills in; holds the HTTP
-          │                   transport and the vendor's auth headers
+      ai.Driver               ai.New finds it in the registry by Model.API,
+          │                   which is what the blank import fills in; holds
+          │                   the HTTP transport and the vendor's auth headers
           │
           │  ai.NewClientWithDriver
           ▼
@@ -48,9 +48,9 @@ func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	return ai.New(cfg, opts...)
 }
 
-// ai.New = ai.NewDriver + ai.NewClientWithDriver
+// ai.New = the registered driver + ai.NewClientWithDriver
 func New(cfg Config, opts ...Option) (*Client, error) {
-	d, err := NewDriver(cfg)
+	d, err := newDriver(cfg) // the factory a blank import registered for cfg.Model.API
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ client, err := auth.Client("openai/gpt-4.1")
 cfg, err := auth.Config("openai/gpt-4.1")
 client, err := ai.New(cfg)
 
-driver, err := ai.NewDriver(cfg)
+driver, err := responses.New(cfg) // the driver package for cfg.Model.API
 client := ai.NewClientWithDriver(driver, cfg.Model)
 ```
 
@@ -78,7 +78,7 @@ chain you need to stop**:
 | `auth.Client(ref)` | A command-line tool | The reference. The credential comes from the environment. |
 | `auth.Config(ref)` | Same, but the endpoint or the `http.Client` has to change | The reference, then your edits to the `Config` |
 | `ai.New(cfg)` | A server. Nothing ambient may be read. | The `Model` and the credential |
-| `ai.NewDriver(cfg)` | The driver has to pass through your hands — middleware | The same, and the last step yourself |
+| `<driver>.New(cfg)` | The driver has to pass through your hands — middleware | The same, the driver package, and the last step yourself |
 | `ai.NewClientWithDriver(driver, model)` | You already hold a driver, including a stub in tests | The driver and the `Model` |
 
 Every path needs the driver for its protocol registered, which a blank import
@@ -102,9 +102,9 @@ needs a key and none of its variables are set, this fails here rather than
 sending an empty credential and surfacing it later as a confusing 401.
 
 For the vendors that authenticate a person rather than a service — GitHub
-Copilot, ChatGPT/Codex — it runs the browser sign-in and stores the result
-`0600` under the user's config directory. That store is the only file this
-library writes.
+Copilot, ChatGPT/Codex — it uses the credential `auth.Login` stored, `0600`
+under the user's config directory, and fails with `*auth.NotSignedInError`
+when there is none. That store is the only file this library writes.
 
 ## Stopping at `auth.Config`
 
@@ -144,18 +144,19 @@ and `Reasoning` on the model from your own data. `Reasoning` names only the
 efforts a model offers; the SDK derives each one's wire value from the
 protocol, and `Model.WireEfforts` says which efforts it can tell apart.
 
-## Stopping at `ai.NewDriver`
+## Stopping at the driver
 
 Execution policy — cost metering, caching, logging — decorates a driver, so it
-needs the driver as a value:
+needs the driver as a value. Each driver package's `New` builds one from the
+same `ai.Config`:
 
 ```go
-driver, err := ai.NewDriver(cfg)
+driver, err := responses.New(cfg)
 client := ai.NewClientWithDriver(metered{driver}, cfg.Model)
 ```
 
-A decorator embeds the `Driver` and overrides `Stream`; forward `Models` and
-`CountTokens` too, or the client stops offering them. Every driver disables its
+A decorator embeds the `Driver` and overrides `Stream`; forward `Models` too,
+or the client stops offering it. Every driver disables its
 vendor SDK's own retries, so a call is tried once.
 
 ## Stopping at `ai.NewClientWithDriver`
@@ -172,24 +173,24 @@ client := ai.NewClientWithDriver(scripted{deltas: deltas}, ai.Model{
 Because `Driver` is two methods, the stub for a given case is a few lines. See
 [CONTRIBUTING.md](../CONTRIBUTING.md#testing-your-own-code) for one.
 
-## A provider is not on this chain
+## An endpoint is not on this chain
 
-Everything above builds a client for **one model**. A `Provider` is the layer
+Everything above builds a client for **one model**. An `Endpoint` is the layer
 beside it: one configured host and the **list** of models on it, which is what
 a model picker needs.
 
 ```go
-p, err := auth.Provider("ollama")
+e, err := auth.Endpoint("ollama")
 
-models := p.Models()          // synchronous, never blocks, never fails
-err = p.Refresh(ctx)          // the only call that reaches the network
+models := e.Models()          // synchronous, never blocks, never fails
+err = e.Refresh(ctx)          // the only call that reaches the network
 
-client, err := p.Client("llama4")
+client, err := e.Client("llama4")
 ```
 
 Reading the list and fetching it are separate verbs on purpose: a picker
 renders immediately from the catalog, and a host that is down cannot hang it.
-For a host the catalog does not know about, use `provider.New(provider.Config{…})`.
+For a host the catalog does not know about, use `endpoint.New(endpoint.Config{…})`.
 
 ## Defaults and overrides
 

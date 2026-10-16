@@ -8,21 +8,21 @@ import (
 	"sync"
 )
 
-// FileStore keeps credentials in one JSON file, readable only by its owner.
+// fileStore keeps credentials in one JSON file, readable only by its owner.
 //
 // What it holds cannot be recovered without signing in again, so the file is
 // created 0600 and replaced by writing a temporary file and renaming it: a torn
 // write would lose every vendor's credential, not just the one being saved.
-type FileStore struct {
+type fileStore struct {
 	path string
 	mu   sync.Mutex
 }
 
-var fileStores sync.Map // absolute path -> *FileStore; shares writes and refreshes
+var fileStores sync.Map // absolute path -> *fileStore; shares writes and refreshes
 
-// NewFileStore returns a store backed by path. An empty path means
+// newFileStore returns a store backed by path. An empty path means
 // genai-io/credentials.json under XDG_CONFIG_HOME, or ~/.config.
-func NewFileStore(path string) (*FileStore, error) {
+func newFileStore(path string) (*fileStore, error) {
 	if path == "" {
 		var err error
 		if path, err = defaultStorePath(); err != nil {
@@ -33,11 +33,11 @@ func NewFileStore(path string) (*FileStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, _ := fileStores.LoadOrStore(path, &FileStore{path: path})
-	return store.(*FileStore), nil
+	store, _ := fileStores.LoadOrStore(path, &fileStore{path: path})
+	return store.(*fileStore), nil
 }
 
-// defaultStorePath is where FileStore writes when given no path: under
+// defaultStorePath is where fileStore writes when given no path: under
 // XDG_CONFIG_HOME if it is set, otherwise ~/.config.
 func defaultStorePath() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
@@ -52,7 +52,7 @@ func defaultStorePath() (string, error) {
 }
 
 // Load returns the credential held for a vendor.
-func (s *FileStore) Load(vendor string) (Credential, bool, error) {
+func (s *fileStore) Load(vendor string) (Credential, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all, err := s.read()
@@ -64,7 +64,7 @@ func (s *FileStore) Load(vendor string) (Credential, bool, error) {
 }
 
 // Save keeps a credential, replacing any held for the same vendor.
-func (s *FileStore) Save(c Credential) error {
+func (s *fileStore) Save(c Credential) error {
 	if c.Vendor == "" {
 		return errNoVendor
 	}
@@ -79,7 +79,7 @@ func (s *FileStore) Save(c Credential) error {
 }
 
 // Delete forgets a vendor's credential and rewrites the file.
-func (s *FileStore) Delete(vendor string) error {
+func (s *fileStore) Delete(vendor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all, err := s.read()
@@ -93,7 +93,7 @@ func (s *FileStore) Delete(vendor string) error {
 	return s.write(all)
 }
 
-func (s *FileStore) read() (map[string]Credential, error) {
+func (s *fileStore) read() (map[string]Credential, error) {
 	raw, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
 		return map[string]Credential{}, nil
@@ -114,7 +114,7 @@ func (s *FileStore) read() (map[string]Credential, error) {
 	return all, nil
 }
 
-func (s *FileStore) write(all map[string]Credential) error {
+func (s *fileStore) write(all map[string]Credential) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("auth: creating %s: %w", filepath.Dir(s.path), err)
 	}

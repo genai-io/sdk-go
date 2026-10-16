@@ -2,7 +2,6 @@ package ai
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -11,18 +10,18 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
-// Schema constrains an answer to a JSON shape.
+// Schema describes a tool: its name, what it is for, and the JSON arguments it
+// takes.
 type Schema struct {
-	// Name identifies the shape. Some protocols require one, and it is what
-	// appears in an error when the answer does not match.
+	// Name is the string the model calls the tool by.
 	Name string `json:"name,omitempty"`
 
-	// Description tells the model what the shape is for. Providers pass it to
+	// Description tells the model what the tool is for. Providers pass it to
 	// the model, so it is prompt text, not documentation.
 	Description string `json:"description,omitempty"`
 
-	// Definition is the JSON Schema itself, typically a map[string]any. It is
-	// the same shape a Tool takes for its parameters.
+	// Definition is the JSON Schema of the arguments, typically a
+	// map[string]any.
 	Definition any `json:"definition,omitempty"`
 
 	// Strict asks for exact conformance where the protocol distinguishes it
@@ -32,35 +31,24 @@ type Schema struct {
 	Strict bool `json:"strict,omitempty"`
 }
 
-// SchemaOf builds a Schema from a Go type, ready for WithSchema. The schema is
-// named after T; description is prompt text the model reads, and may be empty
-// when the type name already says what the shape is for.
+// ToolSchema derives a tool's schema from its Go argument type.
 //
-//	type Order struct {
-//		Name     string `json:"name" description:"full name, family name last"`
-//		Priority string `json:"priority" enum:"low|medium|high"`
-//		Quantity int    `json:"quantity" description:"how many" minimum:"1" maximum:"99"`
+//	type SearchArgs struct {
+//		Query string `json:"query" description:"what to look for, in plain words"`
+//		Limit int    `json:"limit,omitempty" description:"how many passages" maximum:"10"`
 //	}
-func SchemaOf[T any](description string) *Schema {
-	return &Schema{
-		Name:        reflect.TypeFor[T]().Name(),
-		Description: description,
-		Definition:  jsonschema.For[T](),
-		Strict:      true,
-	}
-}
-
-// CompleteAs asks for an answer shaped like T and decodes it into one.
 //
-//	company, err := ai.CompleteAs[Company](ctx, client, messages)
-func CompleteAs[T any](ctx context.Context, c *Client, messages []Message, opts ...Option) (T, error) {
-	withDerived := append([]Option{WithSchema(SchemaOf[T](""))}, opts...)
-	var out T
-	resp, err := c.Complete(ctx, messages, withDerived...)
-	if err != nil {
-		return out, err
+//	search := ai.ToolSchema[SearchArgs]("search", "Search the docs and return matching passages.")
+func ToolSchema[T any](name, description string) Schema {
+	t := reflect.TypeFor[T]()
+	if t.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
 	}
-	return out, resp.Unmarshal(&out)
+	if name == "" {
+		panic(fmt.Sprintf("ai: the tool taking %s has no name; "+
+			"that is the string the model calls", t))
+	}
+	return Schema{Name: name, Description: description, Definition: jsonschema.ForType(t)}
 }
 
 // DefinitionMap returns an independent JSON-object representation of the
@@ -109,26 +97,4 @@ func (s Schema) Validate(input string) error {
 		return fmt.Errorf("arguments for %s: %w", name, err)
 	}
 	return nil
-}
-
-// WireName is the identifier to send for a protocol that requires a schema to
-// be named. It is the schema's own Name, or "response" when it states none.
-func (s Schema) WireName() string {
-	if s.Name == "" {
-		return "response"
-	}
-	return s.Name
-}
-
-func cloneSchema(schema *Schema) *Schema {
-	if schema == nil {
-		return nil
-	}
-	out := *schema
-	// A map is the one definition shape a caller can still be holding and edit
-	// after handing it over; anything else is copied by the assignment above.
-	if def, ok := schema.Definition.(map[string]any); ok {
-		out.Definition = maps.Clone(def)
-	}
-	return &out
 }

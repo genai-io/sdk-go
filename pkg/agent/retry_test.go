@@ -16,7 +16,7 @@ func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 	a := newAgent(t, aitest.New(
 		aitest.Fails(&ai.Error{Kind: ai.KindOverloaded, Message: "overloaded"}),
 		aitest.Says("second time lucky"),
-	), agent.WithRetry(3, 0))
+	), agent.WithRetry(2, 0))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -26,13 +26,13 @@ func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 	assertSequence(t, events, []string{
 		"TurnStart",
 		"MessageAdded(user)",
-		"MessageStart(attempt=1)",
-		"MessageEnd(err)", // carries the error, and no message follows
-		"MessageStart(attempt=2)",
-		"MessageUpdate",
-		"MessageUpdate",
-		"MessageUpdate",
-		"MessageEnd",
+		"InferenceStart(attempt=1)",
+		"InferenceEnd(err)", // carries the error, and no message follows
+		"InferenceStart(attempt=2)",
+		"InferenceUpdate",
+		"InferenceUpdate",
+		"InferenceUpdate",
+		"InferenceEnd",
 		"MessageAdded(assistant)",
 		"TurnEnd",
 	})
@@ -40,15 +40,15 @@ func TestARetryAppendsNothingBetweenAttempts(t *testing.T) {
 	// Between the failed attempt and the retry, nothing entered the
 	// conversation. That is what tells a consumer to discard what it drew.
 	firstEnd := slices.IndexFunc(events, func(e agent.Event) bool {
-		v, ok := e.(agent.MessageEnd)
+		v, ok := e.(agent.InferenceEnd)
 		return ok && v.Err != nil
 	})
 	secondStart := slices.IndexFunc(events, func(e agent.Event) bool {
-		v, ok := e.(agent.MessageStart)
+		v, ok := e.(agent.InferenceStart)
 		return ok && v.Attempt == 2
 	})
 	for _, e := range events[firstEnd+1 : secondStart] {
-		if v, ok := e.(agent.MessageEnd); ok && v.Err == nil {
+		if v, ok := e.(agent.InferenceEnd); ok && v.Err == nil {
 			t.Fatal("a message was appended between a failed attempt and its retry")
 		}
 	}
@@ -100,7 +100,7 @@ func TestAFailedCallStillReportsItsCost(t *testing.T) {
 func TestAStalledStreamIsRetried(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Hangs(), aitest.Says("answered at last")),
 		agent.WithStreamTimeout(20*time.Millisecond, 20*time.Millisecond),
-		agent.WithRetry(2, 0))
+		agent.WithRetry(1, 0))
 
 	events, err := collect(t, a, ai.UserMessage("go"))
 	if err != nil {
@@ -112,7 +112,7 @@ func TestAStalledStreamIsRetried(t *testing.T) {
 	}
 	var attempts []int
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok {
+		if v, ok := e.(agent.InferenceStart); ok {
 			attempts = append(attempts, v.Attempt)
 		}
 	}
@@ -147,7 +147,7 @@ func TestARateLimitIsWaitedOutForAsLongAsItAsked(t *testing.T) {
 			Kind: ai.KindRateLimit, Message: "slow down", RetryAfter: askedFor,
 		}),
 		aitest.Says("thank you for waiting"),
-	), agent.WithRetry(2, 0))
+	), agent.WithRetry(1, 0))
 
 	start := time.Now()
 	if _, err := outcome(t, a, ai.UserMessage("hi")); err != nil {

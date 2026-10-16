@@ -15,14 +15,8 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/anthropic"
 )
 
-// otherConfig stands in for another protocol's construction settings, which
-// this driver must refuse rather than ignore.
-type otherConfig struct{}
-
-func (otherConfig) ProtocolConfig() {}
-
-// Both failures happen before any credential is resolved, so they are what a
-// caller enumerating providers actually hits.
+// A missing project is caught before any credential is resolved, so it is what
+// a caller enumerating providers actually hits.
 func TestNewRefusesWhatItCannotDeploy(t *testing.T) {
 	model := ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}
 
@@ -33,16 +27,6 @@ func TestNewRefusesWhatItCannotDeploy(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "auth.Config") {
 			t.Errorf("message = %q, want it to name the function that fills the project in", err)
-		}
-	})
-
-	t.Run("another protocol's settings", func(t *testing.T) {
-		_, err := New(ai.Config{Model: model, ProtocolConfig: otherConfig{}})
-		if err == nil {
-			t.Fatal("a foreign ProtocolConfig was accepted")
-		}
-		if !strings.Contains(err.Error(), "VertexConfig") {
-			t.Errorf("message = %q, want it to name the type this driver expects", err)
 		}
 	})
 }
@@ -59,12 +43,12 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	defer s.Close()
 
 	cfg := ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}}
-	d, err := anthropic.NewWithOptions(cfg, ai.APIAnthropicVertex)
+	d, err := anthropic.NewDeployment(cfg, ai.APIAnthropicVertex)
 	if err != nil {
-		t.Fatalf("NewWithOptions: %v", err)
+		t.Fatalf("NewDeployment: %v", err)
 	}
-	if d.Name() != Name {
-		t.Errorf("Name = %q, want %q", d.Name(), Name)
+	if d.Name() != name {
+		t.Errorf("Name = %q, want %q", d.Name(), name)
 	}
 
 	var streamErr error
@@ -77,8 +61,8 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	if !errors.As(streamErr, &e) {
 		t.Fatalf("error is %T (%v), want *ai.Error", streamErr, streamErr)
 	}
-	if e.Driver != Name {
-		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, Name)
+	if e.Driver != name {
+		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, name)
 	}
 }
 
@@ -100,9 +84,9 @@ func TestTheCallersEndpointOutranksTheDeploymentsOwn(t *testing.T) {
 	deployment := option.WithBaseURL("https://global-aiplatform.googleapis.com/")
 
 	cfg := ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}}
-	d, err := anthropic.NewWithOptions(cfg, ai.APIAnthropicVertex, deployment)
+	d, err := anthropic.NewDeployment(cfg, ai.APIAnthropicVertex, deployment)
 	if err != nil {
-		t.Fatalf("NewWithOptions: %v", err)
+		t.Fatalf("NewDeployment: %v", err)
 	}
 	for range d.Stream(context.Background(), &ai.Request{Messages: []ai.Message{ai.UserMessage("hi")}}) {
 	}

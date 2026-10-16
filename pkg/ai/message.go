@@ -286,8 +286,8 @@ type ToolResult struct {
 	ToolName string `json:"tool_name,omitempty"`
 	// Content is what the tool returned: text, and images where the protocol
 	// carries them — a screenshot, a rendered chart. TextContent says the
-	// text-only answer most tools give; Model.Validate refuses an image on the
-	// protocol that would drop it.
+	// text-only answer most tools give; a call is refused before the network
+	// when it puts an image on the protocol that would drop it.
 	Content Content `json:"content"`
 	// IsError marks a tool that failed. Say so rather than failing the turn: a
 	// model shown an error can correct its arguments and try again.

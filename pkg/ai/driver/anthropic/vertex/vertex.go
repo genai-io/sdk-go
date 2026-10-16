@@ -4,6 +4,7 @@
 package vertex
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -14,18 +15,20 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/anthropic"
 )
 
-// Name is the driver's identifier.
-const Name = string(ai.APIAnthropicVertex)
+// name is the driver's identifier.
+const name = string(ai.APIAnthropicVertex)
 
 func init() { ai.RegisterAPI(ai.APIAnthropicVertex, New) }
 
 // New builds a driver from a Config. The GCP project and region come from
-// Config.ProtocolConfig as an ai.VertexConfig; package ai/auth fills one in from the
-// environment.
+// Config.Vertex; package ai/auth fills it in from the environment.
 func New(cfg ai.Config) (ai.Driver, error) {
-	deployment, err := ai.VertexDeployment(cfg, Name)
-	if err != nil {
-		return nil, err
+	if cfg.Vertex == nil || cfg.Vertex.Project == "" {
+		return nil, &ai.Error{
+			Driver:  name,
+			Kind:    ai.KindAuth,
+			Message: "no Google Cloud project: set Config.Vertex, or use auth.Config to read it from the environment",
+		}
 	}
 
 	// WithGoogleAuth resolves Application Default Credentials and installs the
@@ -34,8 +37,8 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	// problem, not a request one.
 	//
 	// The context is the process's own: the driver-factory seam carries none. A
-	// caller who needs one mints the credential and uses anthropic.NewWithOptions.
-	auth, err := googleAuth(context.Background(), deployment.Region, deployment.Project)
+	// caller who needs one mints the credential and uses anthropic.NewDeployment.
+	auth, err := googleAuth(context.Background(), cmp.Or(cfg.Vertex.Region, ai.VertexDefaultRegion), cfg.Vertex.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +47,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	// it. Its http.Client is the one part that cannot be layered — the Google
 	// token rides that transport — so a Config.HTTPClient is dropped instead.
 	cfg.HTTPClient = nil
-	return anthropic.NewWithOptions(cfg, ai.APIAnthropicVertex, auth)
+	return anthropic.NewDeployment(cfg, ai.APIAnthropicVertex, auth)
 }
 
 // googleAuth is split out so the failure has a classified error rather than a
@@ -56,7 +59,7 @@ func googleAuth(ctx context.Context, region, project string) (opt option.Request
 		// providers.
 		if r := recover(); r != nil {
 			err = &ai.Error{
-				Driver:  Name,
+				Driver:  name,
 				Kind:    ai.KindAuth,
 				Message: fmt.Sprintf("Google Application Default Credentials are unavailable: %v", r),
 			}

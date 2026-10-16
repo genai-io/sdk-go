@@ -82,7 +82,7 @@ func (s *stub) seen() (http.Header, string, string) {
 	return s.header, s.path, s.query
 }
 
-func driverFor(t *testing.T, cfg ai.Config) *Driver {
+func driverFor(t *testing.T, cfg ai.Config) *driver {
 	t.Helper()
 	if cfg.Model.ID == "" {
 		cfg.Model.ID = "gemini-2.5-flash"
@@ -92,7 +92,7 @@ func driverFor(t *testing.T, cfg ai.Config) *Driver {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return d.(*Driver)
+	return d.(*driver)
 }
 
 func collect(t *testing.T, ctx context.Context, d ai.Driver) ([]ai.Delta, error) {
@@ -379,8 +379,8 @@ func TestAFailedCallKeepsWhatTheEndpointSaid(t *testing.T) {
 	if e.Code != "RESOURCE_EXHAUSTED" {
 		t.Errorf("code = %q, want the status the envelope carried", e.Code)
 	}
-	if e.Driver != Name {
-		t.Errorf("driver = %q, want %q", e.Driver, Name)
+	if e.Driver != string(ai.APIGoogleGenAI) {
+		t.Errorf("driver = %q, want %q", e.Driver, ai.APIGoogleGenAI)
 	}
 }
 
@@ -451,5 +451,25 @@ func TestTheEventReaderHandlesTheFramingThatArrives(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("event %d = %.40q…, want %.40q…", i, got[i], want[i])
 		}
+	}
+}
+
+// A corrupt image is refused before the network, and the refusal names the
+// protocol the caller reached — Vertex, not the Gemini API.
+func TestACorruptImageNamesTheDeploymentItWasSentTo(t *testing.T) {
+	d, err := NewDeployment(ai.Config{Model: ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex}},
+		ai.APIGoogleVertex, "http://unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &ai.Request{Messages: []ai.Message{ai.UserMessage("what is this?",
+		ai.Image{MediaType: "image/png", Data: "not base64!"})}}
+	var streamErr error
+	for _, err := range d.Stream(context.Background(), req) {
+		streamErr = err
+	}
+	var e *ai.Error
+	if !errors.As(streamErr, &e) || e.Driver != string(ai.APIGoogleVertex) {
+		t.Errorf("error = %v, want one from %q", streamErr, ai.APIGoogleVertex)
 	}
 }

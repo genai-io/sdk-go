@@ -7,25 +7,21 @@ import (
 	"os/exec"
 	"runtime"
 	"time"
-
-	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
 
-// ConsoleInteraction prints the instruction to stderr and tries to open a
+// consoleInteraction prints the instruction to stderr and tries to open a
 // browser.
-func ConsoleInteraction() oauth.Interaction {
-	return func(ctx context.Context, p oauth.Prompt) error {
-		if p.UserCode != "" {
-			fmt.Fprintf(os.Stderr, "\nOpen %s and enter the code:  %s\n", p.URL, p.UserCode)
-		} else {
-			fmt.Fprintf(os.Stderr, "\nOpen this page to sign in:\n  %s\n", p.URL)
-		}
-		if !p.ExpiresAt.IsZero() {
-			fmt.Fprintf(os.Stderr, "This expires in %s.\n", time.Until(p.ExpiresAt).Round(time.Minute))
-		}
-		openBrowser(p.URL)
-		return nil
+func consoleInteraction(ctx context.Context, p Prompt) error {
+	if p.UserCode != "" {
+		fmt.Fprintf(os.Stderr, "\nOpen %s and enter the code:  %s\n", p.URL, p.UserCode)
+	} else {
+		fmt.Fprintf(os.Stderr, "\nOpen this page to sign in:\n  %s\n", p.URL)
 	}
+	if !p.ExpiresAt.IsZero() {
+		fmt.Fprintf(os.Stderr, "This expires in %s.\n", time.Until(p.ExpiresAt).Round(time.Minute))
+	}
+	openBrowser(p.URL)
+	return nil
 }
 
 // openBrowser is best-effort and deliberately ignores its outcome: there is

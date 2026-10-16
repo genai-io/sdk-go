@@ -68,7 +68,7 @@ func (p Pricing) Cost(u Usage) Cost {
 	// A long-lifetime cache write is billed at twice the input rate, where a
 	// short one costs the CacheWrite rate. Splitting them here is what keeps a
 	// long-cache turn from being understated.
-	long := min(max(u.CacheWrite1h, 0), u.CacheWrite)
+	long := min(max(u.CacheWriteLong, 0), u.CacheWrite)
 	short := u.CacheWrite - long
 
 	c := Cost{

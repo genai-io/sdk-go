@@ -14,7 +14,6 @@ import (
 //
 //	Driver        required — translate a Request, send it, stream Deltas back
 //	ModelLister   optional — the endpoint can list the models it serves
-//	TokenCounter  optional — the endpoint can size a prompt without running it
 
 // Driver is one wire protocol, as a black box.
 type Driver interface {
@@ -31,16 +30,6 @@ type Driver interface {
 // models it serves. Client.Models reports KindUnsupported without it.
 type ModelLister interface {
 	Models(ctx context.Context) ([]Model, error)
-}
-
-// TokenCounter is the optional capability of an endpoint that will size a
-// prompt without generating from it. Anthropic and Google publish one; the
-// OpenAI-family protocols do not, so their drivers omit this and callers get
-// EstimateTokens instead.
-type TokenCounter interface {
-	// CountTokens reports the request's exact size, as the provider's own
-	// tokenizer sees it. req is borrowed on the same terms as Stream's.
-	CountTokens(ctx context.Context, req *Request) (int, error)
 }
 
 // Delta is the protocol-driver output. Block is one ordered content update:
@@ -93,10 +82,25 @@ type Config struct {
 	// Headers are added to every request — a gateway token, a tenant tag.
 	Headers map[string]string
 
-	// ProtocolConfig carries construction settings only one protocol needs, as
-	// that driver's value — VertexConfig for a model served through Vertex AI.
-	ProtocolConfig ProtocolConfig
+	// Vertex is the deployment of a model served through Vertex AI. The
+	// anthropic/vertex and google/vertex drivers require it; the others ignore
+	// it.
+	Vertex *VertexConfig
 }
+
+// VertexConfig is the deployment a Vertex-served model lives in.
+type VertexConfig struct {
+	// Project is the GCP project ID serving the model.
+	Project string
+	// Region is the serving region. "global" is the usual choice and is what
+	// an empty value resolves to.
+	Region string
+}
+
+// VertexDefaultRegion is where a model is served when the deployment names no
+// region. Google recommends the global endpoint for availability; a specific
+// region is for data residency.
+const VertexDefaultRegion = "global"
 
 // MergedHeaders returns the headers to send: the model's, then the Config's
 // over them, so a Config header of the same name wins.
@@ -110,9 +114,9 @@ func (c Config) MergedHeaders() map[string]string {
 	return out
 }
 
-// URL returns the base URL to use: the Config override if set, otherwise the
-// model's, otherwise "" for the driver's default.
-func (c Config) URL() string {
+// MergedBaseURL returns the base URL to use: the Config override if set,
+// otherwise the model's, otherwise "" for the driver's default.
+func (c Config) MergedBaseURL() string {
 	if c.BaseURL != "" {
 		return c.BaseURL
 	}
@@ -136,7 +140,7 @@ var registry struct {
 
 // RegisterAPI registers the driver factory for a wire protocol. Driver
 // packages call it from init, so a blank import is enough to make a protocol
-// reachable through New and NewDriver. Registering the same API twice panics:
+// reachable through New. Registering the same API twice panics:
 // two factories for one protocol means one of them is silently dead.
 func RegisterAPI(api API, f Factory) {
 	if f == nil {
@@ -160,8 +164,11 @@ func RegisteredAPIs() []API {
 	return slices.Sorted(maps.Keys(registry.m))
 }
 
-// NewDriver builds the driver for cfg.Model's protocol.
-func NewDriver(cfg Config) (Driver, error) {
+// newDriver builds the driver for cfg.Model's protocol.
+func newDriver(cfg Config) (Driver, error) {
+	if cfg.Model.ID == "" {
+		return nil, fmt.Errorf("ai: model ID is required")
+	}
 	if cfg.Model.API == "" {
 		return nil, fmt.Errorf("ai: model %q has no API set", cfg.Model.ID)
 	}
@@ -176,12 +183,9 @@ func NewDriver(cfg Config) (Driver, error) {
 	return f(cfg)
 }
 
-// New builds the driver for cfg.Model's protocol and wraps it in a Client. It
-// is NewDriver plus NewClientWithDriver, and it is the constructor most callers
-// want: reach for NewDriver and NewClientWithDriver only when the driver has to pass
-// through your hands on the way.
+// New builds the driver for cfg.Model's protocol and wraps it in a Client.
 func New(cfg Config, opts ...Option) (*Client, error) {
-	d, err := NewDriver(cfg)
+	d, err := newDriver(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -197,23 +201,4 @@ func unregistered(api API, registered []API) error {
 			"every protocol's dependencies", api, driverPath, driverPath)
 	}
 	return fmt.Errorf("ai: no driver registered for API %q (registered: %v)", api, registered)
-}
-
-// ProtocolConfig is one driver's protocol-specific construction settings.
-type ProtocolConfig interface {
-	// ProtocolConfig marks this type as one driver's construction settings. A
-	// no-op.
-	ProtocolConfig()
-}
-
-// RejectProtocolConfig returns an invalid-request error for a protocol with no
-// native construction options.
-func RejectProtocolConfig(config Config, driver string) error {
-	if config.ProtocolConfig == nil {
-		return nil
-	}
-	return &Error{
-		Driver: driver, Kind: KindInvalidRequest,
-		Message: "ai: driver " + driver + " does not define native configuration",
-	}
 }

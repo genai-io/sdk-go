@@ -31,12 +31,12 @@ func TestCostPricesEachPartOfTheCall(t *testing.T) {
 			// The two lifetimes are billed differently and arrive as one total
 			// plus the long slice, so the split has to happen here.
 			pricing: card,
-			usage:   Usage{CacheWrite: 100_000, CacheWrite1h: 40_000},
+			usage:   Usage{CacheWrite: 100_000, CacheWriteLong: 40_000},
 			want:    Cost{CacheWrite: (60_000*3.75 + 40_000*3*2) / 1e6},
 		},
 		"a long slice larger than the whole is clamped": {
 			pricing: card,
-			usage:   Usage{CacheWrite: 10_000, CacheWrite1h: 99_000},
+			usage:   Usage{CacheWrite: 10_000, CacheWriteLong: 99_000},
 			want:    Cost{CacheWrite: 10_000 * 3 * 2 / 1e6},
 		},
 	} {

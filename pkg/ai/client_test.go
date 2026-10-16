@@ -264,9 +264,9 @@ func TestAFailedStreamKeepsWhatItProduced(t *testing.T) {
 // A driver that closes its iterator having produced nothing is a bug in the
 // driver, and saying so beats handing back what looks like an empty answer.
 func TestAStreamThatEndsWithoutAResponseIsReported(t *testing.T) {
-	resp, err := Collect(func(yield func(Event, error) bool) {})
+	resp, err := collect(func(yield func(Event, error) bool) {})
 	if resp != nil || !IsKind(err, KindNetwork) {
-		t.Fatalf("Collect = %v, %v; want a network failure and no response", resp, err)
+		t.Fatalf("collect = %v, %v; want a network failure and no response", resp, err)
 	}
 }
 
@@ -351,22 +351,5 @@ func TestModelStateThatCannotBeReplayedIsDroppedNotRefused(t *testing.T) {
 				t.Errorf("the conversation came out as %d messages, want the three that went in", len(sent))
 			}
 		})
-	}
-}
-
-// A model wraps its JSON in prose often enough that the first object or array
-// in the text has to be found, braces inside strings included.
-func TestExtractJSONFindsTheValueInProse(t *testing.T) {
-	for in, want := range map[string]string{
-		`{"a":1}`:                     `{"a":1}`,
-		"```json\n{\"a\":1}\n```":     `{"a":1}`,
-		`Here it is: {"a":"}"} done.`: `{"a":"}"}`,
-		`[1,2] and {"b":2}`:           `[1,2]`,
-		`see [note] {"a":1}`:          "",
-		`{"a":1`:                      "",
-	} {
-		if got, _ := extractJSON(in); got != want {
-			t.Errorf("extractJSON(%q) = %q, want %q", in, got, want)
-		}
 	}
 }

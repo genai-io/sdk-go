@@ -11,7 +11,6 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,7 +25,6 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -281,13 +279,12 @@ func TestToolsRoundTrip(t *testing.T) {
 	if !strings.Contains(string(wire), "what to look for") {
 		t.Errorf("tool schema did not reach the wire: %s", wire)
 	}
-	if err := tool.Schema.Validate(calls[0].Input); err != nil {
+	if err := tool.Validate(calls[0].Input); err != nil {
 		t.Fatalf("the model's own arguments failed their schema: %v", err)
 	}
-	// And the tool answers its own call, decoding into the type it came from.
-	out, err := tool.Run(context.Background(), calls[0].Input)
-	if err != nil || !strings.Contains(out, "go") {
-		t.Errorf("Run = %q, %v", out, err)
+	var args SearchArgs
+	if err := calls[0].UnmarshalArgs(&args); err != nil || args.Query != "go" {
+		t.Errorf("UnmarshalArgs = %+v, %v", args, err)
 	}
 
 	// Replaying the call with its result is what the next turn sends.
@@ -356,7 +353,7 @@ func TestUnsupportedRequestsFailBeforeTheNetwork(t *testing.T) {
 
 	_, err := client.Complete(context.Background(),
 		[]ai.Message{ai.UserMessage("what is this?", ai.Image{MediaType: "image/png", Data: "AAAA"})})
-	if !ai.IsUnsupported(err) {
+	if !ai.IsKind(err, ai.KindUnsupported) {
 		t.Fatalf("err = %v, want an unsupported-request failure", err)
 	}
 	if !strings.Contains(err.Error(), "text-only") {
@@ -394,26 +391,6 @@ func TestCatalogResolvesAReference(t *testing.T) {
 		if !registered[v.API] {
 			t.Errorf("vendor %s speaks %q, which no linked driver implements", v.ID, v.API)
 		}
-	}
-}
-
-// Sizing a prompt before sending it is what makes it possible to compact
-// first, and the answer says whether it can be trusted.
-func TestPromptsCanBeSizedBeforeSending(t *testing.T) {
-	e := sse(t, false, [2]string{"", `{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},` +
-		`"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}`})
-	client := open(t, e.server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat, ContextWindow: 1000})
-
-	messages := []ai.Message{ai.UserMessage(strings.Repeat("word ", 200))}
-	count, err := client.CountTokens(context.Background(), messages)
-	if err != nil {
-		t.Fatalf("CountTokens: %v", err)
-	}
-	if count.Tokens == 0 {
-		t.Error("a prompt with a thousand characters cannot be zero tokens")
-	}
-	if count.Exact {
-		t.Error("Chat Completions publishes no counting endpoint; the answer must say it is an estimate")
 	}
 }
 
@@ -546,45 +523,6 @@ func toolResultContent(b ai.Block) string {
 	return b.ToolResult.Text()
 }
 
-// Structured output is one call and one mention of the type. The schema that
-// goes out and the value that comes back are derived from the same T, which is
-// what SchemaOf and Parse spelled separately cannot guarantee.
-func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
-	// The jsonschema tag is the field's description. It is prompt text: the
-	// model reads it, so it has to reach the wire.
-	type Person struct {
-		Name string `json:"name" description:"full legal name, family name last"`
-		Age  int    `json:"age" description:"age in whole years" minimum:"0"`
-	}
-
-	// Chat Completions streams, so the answer arrives as SSE like any other.
-	e := sse(t, false,
-		[2]string{"", `{"id":"1","model":"m","choices":[{"index":0,` +
-			`"delta":{"content":"{\"name\":\"Ada\",\"age\":36}"},"finish_reason":"stop"}]}`})
-
-	client := open(t, e.server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
-	person, err := ai.CompleteAs[Person](context.Background(), client,
-		[]ai.Message{ai.UserMessage("who wrote the first algorithm?")})
-	if err != nil {
-		t.Fatalf("CompleteAs: %v", err)
-	}
-	if person.Name != "Ada" || person.Age != 36 {
-		t.Errorf("person = %+v, want the decoded answer", person)
-	}
-
-	// The schema reached the endpoint, named after the Go type, carrying the
-	// field descriptions the model is meant to read.
-	sent, _ := json.Marshal(e.body["response_format"])
-	for _, want := range []string{
-		"Person", "json_schema", "age",
-		"full legal name, family name last", "age in whole years",
-	} {
-		if !strings.Contains(string(sent), want) {
-			t.Errorf("response_format = %s\nwant it to contain %q", sent, want)
-		}
-	}
-}
-
 // Go ignores an unrecognised struct tag without a word. For this package's
 // keys that means a field silently loses the one thing it was annotated with —
 // the description the model was supposed to read, or the enum that was
@@ -605,9 +543,9 @@ func TestAMistypedSchemaTagIsNotSilent(t *testing.T) {
 		derive func()
 		want   string
 	}{
-		"another library's key": {func() { _ = ai.SchemaOf[OtherLibrary]("") }, "jsonschema"},
-		"a pluralised keyword":  {func() { _ = ai.SchemaOf[Pluralised]("") }, "did you mean enum"},
-		"a misspelled keyword":  {func() { _ = ai.SchemaOf[Misspelled]("") }, "did you mean description"},
+		"another library's key": {func() { _ = ai.ToolSchema[OtherLibrary]("t", "") }, "jsonschema"},
+		"a pluralised keyword":  {func() { _ = ai.ToolSchema[Pluralised]("t", "") }, "did you mean enum"},
+		"a misspelled keyword":  {func() { _ = ai.ToolSchema[Misspelled]("t", "") }, "did you mean description"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
@@ -628,7 +566,7 @@ func TestAMistypedSchemaTagIsNotSilent(t *testing.T) {
 	type Unrelated struct {
 		Q string `json:"q" db:"query" validate:"required" description:"what to look for"`
 	}
-	got := ai.SchemaOf[Unrelated]("").DefinitionMap()
+	got := ai.ToolSchema[Unrelated]("t", "").DefinitionMap()
 	props := got["properties"].(map[string]any)["q"].(map[string]any)
 	if props["description"] != "what to look for" {
 		t.Errorf("q = %v, want the description alongside the unrelated tags", props)
@@ -655,7 +593,7 @@ func TestDerivedSchemasAreWhatProvidersAccept(t *testing.T) {
 		Skip     string    `json:"-"`
 	}
 
-	schema := ai.SchemaOf[Case]("").DefinitionMap()
+	schema := ai.ToolSchema[Case]("t", "").DefinitionMap()
 	properties, _ := schema["properties"].(map[string]any)
 
 	names := map[string]bool{}
@@ -770,7 +708,7 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := tool.Schema.Validate(tc.input)
+			err := tool.Validate(tc.input)
 			if err == nil {
 				t.Fatalf("%s was accepted", tc.input)
 			}
@@ -780,116 +718,8 @@ func TestArgumentCheckingSaysWhatToFix(t *testing.T) {
 		})
 	}
 
-	if err := tool.Schema.Validate(`{"query":"go","priority":"low","limit":3}`); err != nil {
+	if err := tool.Validate(`{"query":"go","priority":"low","limit":3}`); err != nil {
 		t.Errorf("a correct call was rejected: %v", err)
-	}
-}
-
-// With more than one tool the model says which it meant by name only, so the
-// join between that name and the Go type its arguments decode into is the one
-// a hand-written switch leaves unguarded. Handle takes the type from the
-// function that receives it, and RunTools dispatches on the name — so the two
-// cannot disagree.
-func TestRunToolsDispatchesByNameToTheRightType(t *testing.T) {
-	tools := []ai.Tool{areaTool(nil), censusTool(),
-		{Schema: ai.Schema{Name: "unhandled", Description: "offered without a handler"}}}
-
-	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
-		{ID: "1", Name: "census", Input: `{"year":2010}`},
-		{ID: "2", Name: "area", Input: `{"city":"Delhi"}`},
-		{ID: "3", Name: "area", Input: `{"city":"Mumbai"}`},
-		{ID: "4", Name: "weather", Input: `{}`},
-		{ID: "5", Name: "unhandled", Input: `{"city":"Delhi"}`},
-	})
-
-	if len(results) != 5 {
-		t.Fatalf("got %d results, want one per call", len(results))
-	}
-	for i, want := range []struct {
-		content string
-		isError bool
-	}{
-		{"census 2010", false},                       // decoded as YearArgs, not CityArgs
-		{"area of Delhi", false},                     // decoded as CityArgs
-		{"city must be one of Tokyo or Delhi", true}, // checked before it ran
-		{`no tool named "weather"`, true},            // and says what does exist
-		{"without anything to run it", true},         // a definition offered without a handler
-	} {
-		if results[i].IsError != want.isError {
-			t.Errorf("result %d IsError = %v, want %v (%q)", i, results[i].IsError, want.isError, results[i].Text())
-		}
-		if !strings.Contains(results[i].Text(), want.content) {
-			t.Errorf("result %d = %q\nwant it to contain %q", i, results[i].Text(), want.content)
-		}
-		// Every result must be paired, or the next request is rejected.
-		if results[i].ToolCallID == "" {
-			t.Errorf("result %d has no ToolCallID", i)
-		}
-	}
-
-	// The unknown-tool message names the tools that do exist, so a model that
-	// invented one can pick a real one instead of guessing again.
-	if !strings.Contains(results[3].Text(), "area, census and unhandled") {
-		t.Errorf("result 3 = %q, want it to list the available tools", results[3].Text())
-	}
-}
-
-// Run is the loop every application would otherwise write. It ends when the
-// model stops asking, hands back the whole conversation so the next question
-// continues from it, and answers a bad call rather than failing the turn.
-func TestRunHoldsTheWholeConversation(t *testing.T) {
-	turn := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		turn++
-		w.Header().Set("Content-Type", "text/event-stream")
-		switch turn {
-		case 1: // one good call and one the schema refuses
-			_, _ = fmt.Fprint(w, `data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[`+
-				`{"index":0,"id":"a","type":"function","function":{"name":"area","arguments":"{\"city\":\"Delhi\"}"}},`+
-				`{"index":1,"id":"b","type":"function","function":{"name":"area","arguments":"{\"city\":\"Mumbai\"}"}}`+
-				`]},"finish_reason":"tool_calls"}]}`+"\n\n")
-		default:
-			_, _ = fmt.Fprint(w, `data: {"id":"2","choices":[{"index":0,`+
-				`"delta":{"content":"Delhi is 1484 km²."},"finish_reason":"stop"}]}`+"\n\n")
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	var ran []string
-	ranBy := &ran
-
-	client := open(t, server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
-	response, history, err := client.Run(context.Background(),
-		[]ai.Message{ai.UserMessage("how big is Delhi?")}, []ai.Tool{areaTool(ranBy)})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if got := response.Text(); got != "Delhi is 1484 km²." {
-		t.Errorf("Text() = %q, want the model's final answer", got)
-	}
-	if len(ran) != 1 || ran[0] != "Delhi" {
-		t.Errorf("the handler ran for %v; the out-of-enum call must not reach it", ran)
-	}
-
-	// user → assistant(calls) → tool results → assistant(answer)
-	if len(history) != 4 {
-		t.Fatalf("history has %d messages, want the whole conversation", len(history))
-	}
-	results := history[2].ToolResults()
-	if len(results) != 2 {
-		t.Fatalf("got %d tool results, want one per call", len(results))
-	}
-	if results[0].IsError || !results[1].IsError {
-		t.Errorf("results = %+v, want the second marked as the failure", results)
-	}
-	if !strings.Contains(results[1].Text(), "city must be one of") {
-		t.Errorf("the refused call came back as %q", results[1].Text())
-	}
-
-	// The history is a continuation: asking again starts from it.
-	if history[3].Role != ai.RoleAssistant || history[3].Text() != response.Text() {
-		t.Errorf("the last message is %+v, want the model's answer", history[3])
 	}
 }
 
@@ -901,113 +731,10 @@ type (
 		Priority string `json:"priority" enum:"low|medium|high"`
 		Limit    int    `json:"limit" description:"how many results" minimum:"1" maximum:"50"`
 	}
-	AreaArgs struct {
-		City string `json:"city" enum:"Tokyo|Delhi"`
-	}
-	CensusArgs struct {
-		Year int `json:"year" minimum:"2000" maximum:"2020"`
-	}
 )
 
-func searchTool() ai.Tool {
-	return ai.ToolFunc("search", "search the knowledge base",
-		func(_ context.Context, a SearchArgs) (string, error) {
-			return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
-		})
-}
-
-func areaTool(seen *[]string) ai.Tool {
-	return ai.ToolFunc("area", "area of a city",
-		func(_ context.Context, a AreaArgs) (string, error) {
-			if seen != nil {
-				*seen = append(*seen, a.City)
-			}
-			return "area of " + a.City, nil
-		})
-}
-
-func censusTool() ai.Tool {
-	return ai.ToolFunc("census", "population in a year",
-		func(_ context.Context, a CensusArgs) (string, error) {
-			return fmt.Sprintf("census %d", a.Year), nil
-		})
-}
-
-// A tool's dependencies are whatever its function closes over: they reach
-// every call, they are never described to the model, and two calls in one turn
-// get their own arguments rather than one shared value.
-func TestAToolsDependenciesComeFromItsClosure(t *testing.T) {
-	prefix := "dep"
-	tools := []ai.Tool{ai.ToolFunc("recorder", "records a note",
-		func(_ context.Context, a WriterArgs) (string, error) {
-			return prefix + ":" + a.Note, nil
-		})}
-
-	results := ai.RunTools(context.Background(), tools, []ai.ToolCall{
-		{ID: "1", Name: "recorder", Input: `{"note":"first"}`},
-		{ID: "2", Name: "recorder", Input: `{"note":"second"}`},
-	})
-
-	// The closed-over dependency reached both calls...
-	for i, want := range []string{"dep:first", "dep:second"} {
-		if results[i].Text() != want {
-			t.Errorf("result %d = %q, want %q", i, results[i].Text(), want)
-		}
-	}
-	// ...and neither call saw the other's arguments.
-	if results[0].Text() == results[1].Text() {
-		t.Error("the two calls shared a value")
-	}
-	// The dependency is not on the type, so it cannot leak into the schema.
-	if out, _ := json.Marshal(tools[0]); strings.Contains(string(out), "dep") {
-		t.Errorf("the dependency reached the model: %s", out)
-	}
-}
-
-type WriterArgs struct {
-	Note string `json:"note" description:"anything"`
-}
-
-// Run is a field, so a tool whose shape is not known until run time needs no
-// Go type at all — and a Tool still marshals to exactly what the model is
-// told, with nothing executable in it.
-func TestAToolCanBeBuiltWithoutAGoType(t *testing.T) {
-	tool := ai.Tool{
-		Schema: ai.Schema{
-			Name:        "echo",
-			Description: "repeats what it is given",
-			Definition: map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{"text": map[string]any{"type": "string"}},
-				"required":             []any{"text"},
-				"additionalProperties": false,
-			},
-		},
-		Run: func(_ context.Context, arguments string) (string, error) {
-			return "echoed " + arguments, nil
-		},
-	}
-
-	results := ai.RunTools(context.Background(), []ai.Tool{tool}, []ai.ToolCall{
-		{ID: "1", Name: "echo", Input: `{"text":"hi"}`},
-		{ID: "2", Name: "echo", Input: `{"text":"hi","nope":1}`},
-	})
-	if results[0].IsError || results[0].Text() != `echoed {"text":"hi"}` {
-		t.Errorf("result 0 = %+v", results[0])
-	}
-	// The hand-written schema is enforced the same way a derived one is.
-	if !results[1].IsError || !strings.Contains(results[1].Text(), "unknown property: nope") {
-		t.Errorf("result 1 = %+v, want the schema to have refused it", results[1])
-	}
-
-	// A Tool marshals to what the model is told, and nothing more.
-	wire, err := json.Marshal(tool)
-	if err != nil {
-		t.Fatalf("a Tool must stay marshalable: %v", err)
-	}
-	if strings.Contains(string(wire), "Run") {
-		t.Errorf("Tool marshalled as %s; nothing executable belongs in it", wire)
-	}
+func searchTool() ai.Schema {
+	return ai.ToolSchema[SearchArgs]("search", "search the knowledge base")
 }
 
 // Tool choice is one field on the wire with four states, and it is one value
@@ -1103,74 +830,6 @@ func TestEveryProtocolSaysTheSameFourThingsAboutToolChoice(t *testing.T) {
 	}
 }
 
-// ToolFunc is documented as shorthand, and both READMEs print the ai.Tool
-// literal it folds down to. That claim is only worth printing if it is true,
-// so it is checked here: the two forms must marshal identically and behave
-// identically, including on the arguments a model actually sends wrong.
-func TestToolFuncFoldsToAnOrdinaryTool(t *testing.T) {
-	run := func(_ context.Context, a SearchArgs) (string, error) {
-		return fmt.Sprintf("%d results for %q at %s priority", a.Limit, a.Query, a.Priority), nil
-	}
-
-	shorthand := ai.ToolFunc("search", "search the knowledge base", run)
-
-	written := ai.Tool{
-		Schema: ai.Schema{
-			Name:        "search",
-			Description: "search the knowledge base",
-			Definition:  jsonschema.For[SearchArgs](),
-		},
-		Run: func(ctx context.Context, arguments string) (string, error) {
-			var a SearchArgs
-			if raw := bytes.TrimSpace([]byte(arguments)); len(raw) > 0 {
-				decoder := json.NewDecoder(bytes.NewReader(raw))
-				decoder.DisallowUnknownFields()
-				if err := decoder.Decode(&a); err != nil {
-					return "", fmt.Errorf("arguments for search: %w", err)
-				}
-			}
-			return run(ctx, a)
-		},
-	}
-
-	// What the model is told is the same JSON, byte for byte.
-	fromShorthand, err := json.Marshal(shorthand)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	fromWritten, err := json.Marshal(written)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !bytes.Equal(fromShorthand, fromWritten) {
-		t.Errorf("definitions differ\n shorthand %s\n written   %s", fromShorthand, fromWritten)
-	}
-
-	// And so is what happens when it calls. The empty cases are not padding:
-	// every protocol here sends an empty object for a tool that takes no
-	// arguments, and a json.Decoder answers that with EOF rather than a zero
-	// value — which is the line a hand-written expansion forgets.
-	for _, arguments := range []string{
-		`{"query":"go","priority":"low","limit":3}`,
-		`{"query":"go","priority":"low","limit":3,"sort":"asc"}`, // unknown field
-		`{"query":`, // truncated
-		`{}`,
-		``,
-		`   `,
-	} {
-		t.Run(fmt.Sprintf("%q", arguments), func(t *testing.T) {
-			gotOut, gotErr := shorthand.Run(context.Background(), arguments)
-			wantOut, wantErr := written.Run(context.Background(), arguments)
-			if gotOut != wantOut {
-				t.Errorf("output = %q, want %q", gotOut, wantOut)
-			}
-			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
-				t.Errorf("err = %v, want %v", gotErr, wantErr)
-			}
-		})
-	}
-}
-
 // The one thing that has to hold: what the model is told it may send, and
 // what the arguments decode into, are the same declaration. Naming T once is
 // what makes them so — a schema built from one type and a decode into another
@@ -1178,7 +837,7 @@ func TestToolFuncFoldsToAnOrdinaryTool(t *testing.T) {
 func TestASchemaAndItsArgumentsAreOneDeclaration(t *testing.T) {
 	tool := searchTool()
 
-	schema := tool.Schema.DefinitionMap()
+	schema := tool.DefinitionMap()
 	properties := schema["properties"].(map[string]any)
 	fields := reflect.VisibleFields(reflect.TypeOf(SearchArgs{}))
 	if len(properties) != len(fields) {
@@ -1193,7 +852,7 @@ func TestASchemaAndItsArgumentsAreOneDeclaration(t *testing.T) {
 
 	// So a call the schema accepts is one the arguments can hold, and one it
 	// refuses never reaches the function.
-	if err := tool.Schema.Validate(`{"query":"go","priority":"low","limit":3}`); err != nil {
+	if err := tool.Validate(`{"query":"go","priority":"low","limit":3}`); err != nil {
 		t.Errorf("a correct call was rejected: %v", err)
 	}
 }
@@ -1207,11 +866,11 @@ func TestAToolIsRefusedBeforeItCanBeOffered(t *testing.T) {
 		want  string
 	}{
 		"no name": {
-			func() { ai.ToolFunc("", "d", func(context.Context, SearchArgs) (string, error) { return "", nil }) },
+			func() { ai.ToolSchema[SearchArgs]("", "d") },
 			"has no name",
 		},
 		"arguments that are not a struct": {
-			func() { ai.ToolFunc("s", "d", func(context.Context, string) (string, error) { return "", nil }) },
+			func() { ai.ToolSchema[string]("s", "d") },
 			"must be a struct",
 		},
 	} {
@@ -1228,29 +887,6 @@ func TestAToolIsRefusedBeforeItCanBeOffered(t *testing.T) {
 			tc.build()
 		})
 	}
-}
-
-// A tool is called whatever you call it, which need have nothing to do with
-// the Go type its arguments arrive in — nothing is derived, so nothing is
-// guessed.
-func TestAToolIsCalledWhateverYouCallIt(t *testing.T) {
-	tool := ai.ToolFunc("fetch_document", "fetch one document by ID",
-		func(_ context.Context, a FetchDocumentArgs) (string, error) {
-			return "doc " + a.ID, nil
-		})
-	if tool.Schema.Name != "fetch_document" {
-		t.Errorf("Name = %q, want the name it was given", tool.Schema.Name)
-	}
-
-	results := ai.RunTools(context.Background(), []ai.Tool{tool},
-		[]ai.ToolCall{{ID: "1", Name: "fetch_document", Input: `{"id":"x"}`}})
-	if results[0].IsError || results[0].Text() != "doc x" {
-		t.Errorf("result = %+v", results[0])
-	}
-}
-
-type FetchDocumentArgs struct {
-	ID string `json:"id" description:"the document to fetch"`
 }
 
 // A tool that looked at something answers with a picture. Three protocols carry

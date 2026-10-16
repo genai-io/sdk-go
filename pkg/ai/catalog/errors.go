@@ -5,27 +5,25 @@ import (
 	"strings"
 )
 
-// UnknownModelError reports a model reference that names no vendor. The
-// catalog lists vendors, not models, so a reference is "vendor/model".
-type UnknownModelError struct{ Ref string }
+// UnknownVendorError reports a vendor ID the catalog does not carry.
+type UnknownVendorError struct{ Vendor string }
 
-func (e *UnknownModelError) Error() string {
-	return fmt.Sprintf("catalog: %q names no vendor; write it as \"vendor/%s\"", e.Ref, e.Ref)
+func (e *UnknownVendorError) Error() string {
+	return fmt.Sprintf("catalog: no vendor %q", e.Vendor)
 }
 
-// MissingDeploymentError reports a deployment-scoped setting a vendor cannot
-// run without — a Vertex project, say. It is not a missing credential: the
-// variables it names say where a model runs, not who is calling. It carries
-// them rather than a finished sentence, so auth reports it in its own words.
-type MissingDeploymentError struct {
-	// EnvVars are the variables that would have supplied the setting.
+// MissingEnvError reports a variable a vendor cannot run without — its key,
+// its host or its deployment — none of which is set.
+type MissingEnvError struct {
+	Vendor string
+	// EnvVars are the variables that would have supplied it; any one will do.
 	EnvVars []string
-	// Note is anything the caller has to know beyond setting them.
+	// Note is the vendor's own, for what setting them does not cover.
 	Note string
 }
 
-func (e *MissingDeploymentError) Error() string {
-	msg := "catalog: this vendor needs a deployment; set " + strings.Join(e.EnvVars, " or ")
+func (e *MissingEnvError) Error() string {
+	msg := fmt.Sprintf("catalog: %s is not configured; set %s", e.Vendor, strings.Join(e.EnvVars, " or "))
 	if e.Note != "" {
 		msg += " (" + e.Note + ")"
 	}

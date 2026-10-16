@@ -11,14 +11,8 @@ type Result struct {
 	// Content is the only field the model is told.
 	Content ai.Content
 
-	// Details is for your interface and never reaches the model. The
-	// structured form of the answer: the rows behind a count, the paths behind
-	// a total, the diff behind an edit.
-	//
-	// It is not part of the conversation, so a saved session does not keep it.
-	//
-	// Not a type parameter, because that would land on Tool and an agent's
-	// tools are a heterogeneous list. Producer and consumer agree out of band.
+	// Details is for your interface and never reaches the model or the
+	// conversation: the rows behind a count, the diff behind an edit.
 	Details any
 
 	// Terminate votes to end the turn after this batch, with StopTerminated.
@@ -62,7 +56,7 @@ func ResultText(r Result, err error) string {
 }
 
 // Tool is one thing an agent can do: what the model is told, and what answers
-// a call. The same two halves as ai.Tool, as an interface.
+// a call.
 type Tool interface {
 	Schema() ai.Schema
 	// Run executes one call. An error is how a tool fails: the loop turns it
@@ -104,10 +98,7 @@ func Sequential(t Tool) Tool { return sequential{t} }
 
 type sequential struct{ Tool }
 
-// isSequential reports whether a tool was marked. A type assertion on purpose:
-// a capability method would not survive an embedding decorator either, so the
-// rule on Sequential is the honest fix, not machinery that looks like it lifts
-// the rule.
+// isSequential reports whether t is marked by Sequential.
 func isSequential(t Tool) bool {
 	_, ok := t.(sequential)
 	return ok

@@ -13,8 +13,7 @@ loop around it.
 
 - **One API, six protocols** — the same types whichever provider serves the request.
 - **Streaming** — text, thinking, tool calls and images on one start/delta/end lifecycle.
-- **Tool calling** — schema derived from your argument struct, arguments checked before your code runs.
-- **Structured outputs** — `CompleteAs[T]` derives the schema, constrains generation and decodes.
+- **Tool calling** — the schema derived from your argument struct, and the call decoded back into it.
 - **Typed errors** — auth, rate limit, context exceeded and unsupported, not substrings to match.
 - **A vendor catalog** — 28 vendors: how to reach each one and speak its protocol, as data. Which models exist, their limits, prices, modalities and reasoning efforts are the application's to supply; the SDK spells each effort the way the protocol wants.
 - **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
@@ -25,7 +24,7 @@ loop around it.
 - **Everything as events** — ten types on one sequence, and the conversation is the fold of two of them.
 - **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
-- **Sessions** — save an agent's conversation, and load it back.
+- **Plain-data conversations** — what the agent holds is a `[]ai.Message`; save it however you save things.
 - **MCP** — an MCP server's tools arrive as the agent's own, ready for `WithTools`.
 
 [Installation](#installation) · [中文文档](README.zh-CN.md)
@@ -34,7 +33,6 @@ loop around it.
 [Quickstart](#quickstart) ·
 [Streaming](#streaming) ·
 [Tool use](#tool-use) ·
-[Structured outputs](#structured-outputs) ·
 [Request options](#request-options) ·
 [Messages](#messages-and-content) ·
 [Errors](#errors-and-execution-policy) ·
@@ -45,7 +43,7 @@ loop around it.
 [The loop](#the-loop) ·
 [Events](#everything-is-an-event) ·
 [Hooks](#hooks) ·
-[Sessions](#sessions)
+[Saving a conversation](#saving-a-conversation)
 
 ## Installation
 
@@ -98,9 +96,10 @@ protocol; import only the ones you use, or `pkg/ai/driver/all` when the model
 is chosen at run time.
 
 This is the short end of one chain: `auth.Client` is `auth.Config` plus
-`ai.New`, which is `ai.NewDriver` plus `ai.NewClientWithDriver`. Stop earlier when
-you need to — a server that must not read ambient credentials stops at
-`ai.New`, middleware stops at `ai.NewDriver`. See
+`ai.New`, which builds the registered driver and wraps it in a client. Stop
+earlier when you need to — a server that must not read ambient credentials
+stops at `ai.New`, middleware builds the driver itself and hands it to
+`ai.NewClientWithDriver`. See
 [Constructing a client](docs/clients.md).
 
 #### Switching providers
@@ -115,8 +114,8 @@ client, err := auth.Client(ref)
 
 `catalog.All()` lists every vendor, without a network call; the models a vendor serves come from its live listing or from your own data.
 
-Runnable examples are in [`examples/`](examples) — one per vendor, plus
-[`tools/`](examples/tools) and [`structured/`](examples/structured).
+Runnable examples are in [`examples/`](examples) — one per vendor, plus four
+agents.
 
 ### Streaming
 
@@ -159,8 +158,9 @@ cancels the request.
 
 ### Tool use
 
-A tool is a name, a description, and a function. The struct is exactly what the
-model may send.
+A tool is a `Schema`: a name, a description, and the JSON its arguments take.
+`ToolSchema` derives one from a struct, which is exactly what the model may
+send.
 
 ```go
 type SearchArgs struct {
@@ -168,58 +168,15 @@ type SearchArgs struct {
 	Limit int    `json:"limit,omitempty" description:"how many passages to return" maximum:"10"`
 }
 
-search := ai.ToolFunc("search", "Search the documentation and return matching passages.",
-	func(ctx context.Context, a SearchArgs) (string, error) {
-		return docs.Search(ctx, a.Query, a.Limit) // dependencies are closed over
-	})
+search := ai.ToolSchema[SearchArgs]("search", "Search the documentation and return matching passages.")
 
-response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)}, []ai.Tool{search, fetch})
-```
-
-<details>
-<summary><code>ToolFunc</code> is shorthand. This is what it folds down to.</summary>
-
-A tool is two halves: `Schema` is everything the model is told, `Run` is what
-answers a call. `ToolFunc` derives the first from the Go type the second takes.
-
-```go
-search := ai.Tool{
-	Schema: ai.Schema{
-		Name:        "search",
-		Description: "Search the documentation and return matching passages.",
-		Definition:  jsonschema.For[SearchArgs](),
-	},
-	Run: func(ctx context.Context, arguments string) (string, error) {
-		var a SearchArgs
-		if err := (ai.ToolCall{Name: "search", Input: arguments}).UnmarshalArgs(&a); err != nil {
-			return "", err
-		}
-		return docs.Search(ctx, a.Query, a.Limit)
-	},
+response, err := client.Complete(ctx, messages, ai.WithTools(search, fetch))
+for _, call := range response.ToolCalls() {
+	var a SearchArgs
+	err := search.Validate(call.Input) // the arguments against the schema
+	err = call.UnmarshalArgs(&a)       // then into the struct it came from
 }
 ```
-
-`ai.Tool` is the whole of what a tool is: the schema that goes on the wire, and
-one function that answers a call. `ToolFunc` derives the first from
-`SearchArgs` and decodes into it, and that is all it does — the two forms
-produce byte-identical definitions and behave identically, errors included.
-
-So the escape hatches are not features. A hand-written schema is an assignment,
-`search.Schema.Definition = handWritten`. A tool whose shape is not known until
-run time is this form with the schema from somewhere else. Neither needs
-anything the common case does not already use.
-
-`UnmarshalArgs` is what `ToolFunc` decodes with, and it is worth reaching for
-directly: an argument the schema does not have is an error rather than a silent
-drop — a model that invents one should be told, not obeyed halfway — and an
-empty document is read as an empty object, which is what every protocol here
-sends for a call to a tool that takes no arguments.
-
-</details>
-
-`Run` is the loop the model needs: it asks, you answer, it continues.
-`history` is the whole conversation, so a follow-up continues from it.
 
 `SearchArgs` is named once, so the schema sent to the model and the struct its
 arguments decode into cannot disagree:
@@ -236,10 +193,15 @@ arguments decode into cannot disagree:
 }
 ```
 
-Arguments are checked against it before your function runs, so a model's
-mistake comes back as something it can correct. An unknown tool name, bad
-arguments and a failing tool all reach the model as an `IsError` result rather
-than ending the conversation.
+A tag key is the JSON Schema keyword it sets — eleven of them — and every word
+is prompt text. Schemas are derived to be *accepted*, not merely valid, which
+is a stricter target than the specification. See
+[`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema).
+
+`UnmarshalArgs` treats an argument the schema does not have as an error rather
+than a silent drop — a model that invents one should be told, not obeyed
+halfway — and reads an empty document as an empty object, which is what every
+protocol here sends for a call to a tool that takes no arguments.
 
 Constraining the choice is one value with four states, the same four every
 protocol expresses:
@@ -250,28 +212,8 @@ ai.WithToolChoice(ai.ToolChoiceRequired)        // some tool, the model's choice
 ai.WithToolChoice(ai.ToolChoiceNamed("search")) // this one
 ```
 
-Write the turn loop yourself with `Complete` and `RunTools` when the turns are
-your business — to stream as it arrives, to stop on a condition, to bill each
-one.
-
-### Structured outputs
-
-```go
-type Person struct {
-	Name string `json:"name" description:"full legal name, family name last"`
-	Age  int    `json:"age" description:"age in whole years" minimum:"0"`
-}
-
-person, err := ai.CompleteAs[Person](ctx, client, messages)
-```
-
-The type is named once: `CompleteAs` derives the schema from it, constrains
-generation natively, and decodes the answer into it.
-
-A tag key is the JSON Schema keyword it sets — eleven of them — and every word
-is prompt text. Schemas are derived to be *accepted*, not merely valid, which
-is a stricter target than the specification. See
-[`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema).
+`pkg/ai` makes one call. Running the tools and calling again until the model
+stops asking is [the agent](#the-agent--pkgagent).
 
 ### Request options
 
@@ -314,8 +256,8 @@ history = append(history, response.Message()) // keeps every block, in order
 ```
 
 A tool result is content too: text, and images where the protocol carries them
-— a screenshot, a rendered chart. `Model.Validate` refuses one on the
-protocol that would drop it rather than letting the model answer about a
+— a screenshot, a rendered chart. A call that puts one on the protocol that
+would drop it is refused before it is sent, rather than letting the model answer about a
 picture it was never shown.
 
 Append `response.Message()`, not a message rebuilt from `response.Text()` —
@@ -332,7 +274,7 @@ switch {
 case ai.IsAuth(err):            // the credential is wrong or missing
 case ai.IsContextExceeded(err): // compact the conversation and retry
 case ai.IsRetryable(err):       time.Sleep(ai.RetryAfter(err))
-case ai.IsUnsupported(err):     // this model cannot do what was asked
+case ai.IsKind(err, ai.KindUnsupported): // this model cannot do what was asked
 }
 ```
 
@@ -358,7 +300,7 @@ client, err := ai.New(ai.Config{
 })
 ```
 
-`pkg/ai/auth` is the opt-in that does read it. `pkg/ai/provider` sits between a
+`pkg/ai/auth` is the opt-in that does read it. `pkg/ai/endpoint` sits between a
 catalog row and a client: one configured host and the models on it, where
 reading the list and fetching it are separate verbs.
 
@@ -432,15 +374,16 @@ cancellation, so recording the events and restoring `Messages()` retain it.
 
 ### Everything is an event
 
-Ten types on one sequence, and the set is closed — a consumer switching over it
-knows the list is all there is. Two things have a life worth following, and
-each reports the same way: it starts, it may report as it goes, it ends.
+Twelve types on one sequence, and the set is closed — a consumer switching over
+it knows the list is all there is. What takes time is a span, and each reports
+the same way: it starts, it may report as it goes, it ends.
 
 ```
-MessageAdded  MessagesReplaced            the conversation changing
-MessageStart  MessageUpdate  MessageEnd   the model producing a message
-ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-TurnStart                    TurnEnd      the turn around them
+MessageAdded     MessagesReplaced                the conversation changing
+InferenceStart   InferenceUpdate  InferenceEnd   one model call
+ToolStart        ToolUpdate       ToolEnd        one tool call
+CompactionStart                   CompactionEnd  the conversation being shortened
+TurnStart                         TurnEnd        the turn around them
 ```
 
 **The conversation is the fold of the first row.** Replay `MessageAdded` in
@@ -461,7 +404,7 @@ flowchart LR
     C -->|answered| D{{PostInfer}}
     D --> E["the message"] --> F{{PreTool}} --> G["tool runs"] --> H{{PostTool}}
     C -->|failed| X{{OnInferError}}
-    X -->|Retry| A
+    X -->|Recovery| A
 ```
 
 A permission system is a `PreTool` returning `Decision{Block: true}`. A batch of
@@ -475,27 +418,27 @@ Retry is off by default; `WithRetry` turns it on. What a replay cannot
 fix — a prompt over the window, a key out of quota — is `OnInferError`, which
 answers a failed call with a shorter conversation and another go at the step.
 
-### Sessions
+### Saving a conversation
 
-The agent never learns storage exists. A conversation is a `[]ai.Message`:
-load it, hand it over, save what the agent holds afterwards.
+The agent never learns storage exists. A conversation is a `[]ai.Message`,
+plain data that encodes as JSON: load it, hand it over, save what the agent
+holds afterwards.
 
 ```go
-history, _ := store.Load(ctx, id)        // session.ErrNotFound if new
-a.SetMessages(history)
+a.SetMessages(history)                   // whatever you saved last time
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
     render(e)
 }
-store.Save(ctx, id, a.Messages())        // the whole conversation
+save(id, a.Messages())                   // the whole conversation
 ```
 
 Compaction needs nothing more: the next save is the compacted conversation.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
-rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
+rules and tools, and [`examples/agent-chat`](examples/agent-chat),
 [`examples/agent-progress`](examples/agent-progress),
-[`examples/agent-session`](examples/agent-session) and
-[`examples/agent`](examples/agent) for programs that run.
+[`examples/agent`](examples/agent) and [`examples/mcp`](examples/mcp) for
+programs that run.
 
 ## Documentation
 
@@ -512,7 +455,7 @@ rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
 | | |
 | --- | --- |
 | [API reference](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/agent) | The agent, its events, its hooks and its tools |
-| [The Agent SDK](docs/agent.md) | Structure, the event contract, hooks, tools and sessions ([中文](docs/agent.zh-CN.md)) |
+| [The Agent SDK](docs/agent.md) | Structure, the event contract, hooks and tools ([中文](docs/agent.zh-CN.md)) |
 
 **The project**
 
@@ -520,7 +463,7 @@ rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
 | --- | --- |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
 | [Changelog](CHANGELOG.md) | What changed in each release |
-| [`examples/`](examples) | Runnable programs: one per vendor, plus tool calling, structured output and four agents |
+| [`examples/`](examples) | Runnable programs: one per vendor, plus four agents |
 
 ## Versioning
 

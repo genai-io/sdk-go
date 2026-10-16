@@ -132,7 +132,7 @@ func TestCacheTokensArriveSplitByWhatTheyCost(t *testing.T) {
 	if len(deltas) == 0 || deltas[0].Usage == nil {
 		t.Fatal("message_start carried no usage")
 	}
-	want := ai.Usage{Input: 12, CacheWrite: 900, CacheWrite1h: 600, CacheRead: 4000}
+	want := ai.Usage{Input: 12, CacheWrite: 900, CacheWriteLong: 600, CacheRead: 4000}
 	if got := *deltas[0].Usage; got != want {
 		t.Errorf("usage = %+v, want %+v", got, want)
 	}

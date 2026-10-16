@@ -9,7 +9,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
-func (d *Driver) buildParams(req *ai.Request) wire.ResponseNewParams {
+func (d *driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	params := wire.ResponseNewParams{
 		Model: d.model.ID,
 		Input: wire.ResponseNewParamsInputUnion{OfInputItemList: d.convertInput(req)},
@@ -27,7 +27,7 @@ func (d *Driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	// server-side; a reasoning model's working comes back encrypted instead,
 	// to be replayed with the rest.
 	params.Store = sdk.Bool(false)
-	if d.model.Reasons() {
+	if len(d.model.Reasoning) > 0 {
 		params.Include = []wire.ResponseIncludable{
 			wire.ResponseIncludableReasoningEncryptedContent,
 		}
@@ -44,18 +44,6 @@ func (d *Driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	if choice := toolChoice(req); choice != nil {
 		params.ToolChoice = *choice
 	}
-	if schema := req.Schema; schema != nil {
-		if def := schema.DefinitionMap(); def != nil {
-			params.Text.Format = wire.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &wire.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        schema.WireName(),
-					Description: sdk.String(schema.Description),
-					Schema:      def,
-					Strict:      sdk.Bool(schema.Strict),
-				},
-			}
-		}
-	}
 	// A long retention is the caller asking to pay more per write for a cache
 	// that survives between turns; an endpoint that rejects the field falls
 	// back to its default rather than failing.
@@ -65,12 +53,11 @@ func (d *Driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	if len(req.Tools) > 0 {
 		tools := make([]wire.ToolUnionParam, len(req.Tools))
 		for i, t := range req.Tools {
-			schema := t.Schema.DefinitionMap()
 			tools[i] = wire.ToolUnionParam{
 				OfFunction: &wire.FunctionToolParam{
-					Name:        t.Schema.Name,
-					Description: sdk.Opt(t.Schema.Description),
-					Parameters:  schema,
+					Name:        t.Name,
+					Description: sdk.Opt(t.Description),
+					Parameters:  t.DefinitionMap(),
 				},
 			}
 		}
@@ -100,7 +87,7 @@ func toolChoice(req *ai.Request) *wire.ResponseNewParamsToolChoiceUnion {
 	return nil
 }
 
-func (d *Driver) convertInput(req *ai.Request) wire.ResponseInputParam {
+func (d *driver) convertInput(req *ai.Request) wire.ResponseInputParam {
 	items := make(wire.ResponseInputParam, 0, len(req.Messages)+1)
 
 	for _, msg := range req.Messages {
@@ -190,7 +177,7 @@ func toolOutput(r *ai.ToolResult) wire.ResponseInputItemFunctionCallOutputOutput
 	}
 }
 
-func (d *Driver) messageParam(role wire.EasyInputMessageRole, content ai.Content) *wire.EasyInputMessageParam {
+func (d *driver) messageParam(role wire.EasyInputMessageRole, content ai.Content) *wire.EasyInputMessageParam {
 	param := &wire.EasyInputMessageParam{Role: role}
 	if !content.HasImages() {
 		param.Content = wire.EasyInputMessageContentUnionParam{OfString: sdk.Opt(content.Text())}

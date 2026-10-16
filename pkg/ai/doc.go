@@ -30,12 +30,6 @@
 //		fmt.Println(response.Text())
 //	}
 //
-// Every constructor takes a Config and is named for what it returns: New
-// hands back a *Client, NewDriver a Driver — the same shape every driver
-// package and provider.New use. NewClientWithDriver is the exception, and its name
-// says why: it starts from a Driver you already hold rather than resolving one
-// from a Config.
-//
 // The conversation is an ordinary []Message; everything else is an Option.
 // The same Option is a default when given to New and an override when given to
 // a call, and passing one is what marks a setting as explicit — so
@@ -53,38 +47,26 @@
 // it safe in a server holding several tenants' keys. Package auth is the
 // opt-in that does, and a command-line tool wants exactly that.
 //
-// Holding an ai/provider.Provider — a configured host with a live model list —
+// Holding an ai/endpoint.Endpoint — a configured host with a live model list —
 // its Client method is the same thing scoped to that host:
 //
 //	client, err := ep.Client("llama4")
 //
-// # Typed answers
-//
-// CompleteAs derives a JSON schema from a Go type, constrains generation to it
-// and decodes the answer, so the type is named once:
-//
-//	person, err := ai.CompleteAs[Person](ctx, client, messages)
-//
 // # Tools
 //
-// A tool is a name, a description and a function. The function says which
-// struct the model's arguments arrive in, and the schema the model is sent is
-// derived from that same struct, so the two cannot come to describe different
-// things. Dependencies are closed over. Run holds the conversation to the end:
+// A tool is a Schema: a name, a description and the JSON its arguments take.
+// ToolSchema derives one from a Go struct, and UnmarshalArgs decodes a call
+// back into that same struct, so the two cannot describe different things:
 //
 //	type SearchArgs struct {
 //		Query string `json:"query" description:"what to look for"`
 //	}
 //
-//	search := ai.ToolFunc("search", "Search the docs.",
-//		func(ctx context.Context, a SearchArgs) (string, error) {
-//			return docs.Search(ctx, a.Query)
-//		})
+//	search := ai.ToolSchema[SearchArgs]("search", "Search the docs.")
+//	response, err := client.Complete(ctx, messages, ai.WithTools(search))
 //
-//	response, history, err := client.Run(ctx, messages, []ai.Tool{search})
-//
-// Write the loop with Complete and RunTools instead when the turns are your
-// business — to stream, to stop on a condition, to bill each one.
+// Running the calls and looping until the model stops asking is package
+// agent's job.
 //
 // # Stream blocks
 //
@@ -118,25 +100,27 @@
 //
 //	request.go     one call: what is asked, under what settings, and how they layer
 //	message.go     a turn, and the ordered blocks it carries
-//	tool.go        a tool: defined from a Go type, offered, and run when called
-//	schema.go      asking a model to answer in a JSON shape
+//	schema.go      a tool: its name, purpose and arguments, derived from a Go
+//	               type, and checking a call against them
 //
-//	response.go    what one call produced, what it cost, and decoding it
-//	errors.go      the failure categories, and how a driver's error becomes one
+//	response.go    what one call produced, and what it cost
+//	errors.go      the failure categories a caller decides on
 //
 //	model.go       what a model is, including what it cannot do
 //	compat.go      where one endpoint differs from its protocol's owner
 //	pricing.go     a rate card, and the money one call cost
 //
 //	client.go      one call: prepared, run, and streamed back
-//	history.go     the repairs every protocol needs
+//	repair.go      the repairs every protocol needs, and the reasoning state
+//	               a model cannot replay
 //	validate.go    everything caught before the network
 //	tokens.go      how large a prompt is, and whether it fit
 //
 //	driver.go      the protocol seam: what a driver is, is given, and how one is found
 //
-// Deriving a schema from a Go type, and checking an answer against one, is
-// ai/jsonschema. A set of endpoints and their live model listings is ai/provider,
+// Deriving a schema from a Go type, and checking arguments against one, is
+// ai/jsonschema. Classifying a driver's failure into an Error is
+// ai/driver/internal/errs. A set of endpoints and their live model listings is ai/endpoint,
 // which sits above Client rather than inside it.
 //
 // Another modality — image generation, say — would be a sibling package rather

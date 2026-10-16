@@ -33,7 +33,7 @@ CLI 读 stdin,界面读按键,服务端读请求——这些形状这个包猜�
 
 ```mermaid
 flowchart TB
-    subgraph turn["turn —— 一次交换"]
+    subgraph turn["turn —— 一次 Run"]
         direction TB
         inf1["inference —— 一次模型调用"]
         tools["模型要的那批工具"]
@@ -44,7 +44,7 @@ flowchart TB
 
 | | |
 | --- | --- |
-| **turn** | 一次交换:有人说了句话,循环一直跑到模型不再要工具为止 |
+| **turn** | 一次 `Run`:它的输入进入对话,循环一直跑到模型不再要工具为止 |
 | **inference** | 一次模型调用;一个 turn 里有多少次,取决于工具要几轮 |
 
 **一个 turn 不等于一次模型调用。** 这里大部分词汇的分野都建立在这个区别上。
@@ -72,7 +72,7 @@ turn 有八种结束方式,**每个出口都必须说出是哪一种**。失败�
 | `max_steps` | 步数预算用完,模型还在干活 |
 | `terminated` | 这一批工具**全体**要求停 |
 | `error` | 模型调用重试到底仍失败,或某个 hook 拒绝 |
-| `canceled` | 交换进行中 context 断了,或者调了 `Interrupt` |
+| `canceled` | turn 进行中 context 断了,或者调了 `Interrupt` |
 
 ### 提前结束一个 turn
 
@@ -90,27 +90,20 @@ agent.WithContinuation(2, "你的回答被输出上限截断了。从你停下�
 
 ### 重试
 
-driver 自己不重试,**agent 默认也不重试**。`WithRetry(attempts, backoff)` 打开它,**已经吐过内容的流**也重放——循环丢弃这次尝试、另开一条消息——**卡住的流**也一样。等待先看端点给的 `Retry-After`,再退到自己的退避。
+driver 自己不重试,**agent 默认也不重试**。`WithRetry(retries, backoff)` 打开它:可重试的失败调用,在第一次之后**最多再重放 `retries` 次**,先等 `backoff`,之后每失败一次翻倍。**已经吐过内容的流**也重放——循环丢弃这次尝试、另开一次 inference——**卡住的流**也一样。等待先看端点给的 `Retry-After`,再退到自己的退避。
 
-`Interrupt()` 结束正在进行的交换,**但 agent 还活着**:这个 turn 以 `StopCanceled` 收尾,`Run` 返回,下一轮干净地开始。这就是用户按 ESC 想要的效果。
+`Interrupt()` 结束正在进行的 turn,**但 agent 还活着**:这个 turn 以 `StopCanceled` 收尾,`Run` 返回,下一轮干净地开始。这就是用户按 ESC 想要的效果。它**不等待**:range `Run` 结束时这一轮才算结束,range 它的那条 goroutine 看得到。
 
-它**返回一个 channel**,在那一轮真正结束、agent 重新空闲时关闭。读到按键的那条 goroutine 不是 range `Run` 的那条,看不到循环结束——这就是它知道的方式。
+已经在跑的工具会通过它的 context 被要求停下,然后**被等待**——因为它要经由这一轮汇报。一个不理会取消的工具,会把这一轮一直占到它自己返回为止。串行批次则在两个工具之间就停下,而不是把剩下的跑完,每个没跑成的调用都按"已取消"汇报。
 
-```go
-<-a.Interrupt()      // 这一轮结束了,agent 空闲
-a.SetMessages(fresh)
-```
-
-已经在跑的工具会通过它的 context 被要求停下,然后**被等待**——因为它要经由这次交换汇报。一个不理会取消的工具,会把那个 channel 一直占到它自己返回为止。串行批次则在两个工具之间就停下,而不是把剩下的跑完,每个没跑成的调用都按"已取消"汇报。
-
-交换之间没有东西可中断:channel 已经是关闭的。取消 `Run` 自己的 context 是另一回事,那会结束一切。
+两轮之间没有东西可中断,它什么也不做。取消 `Run` 自己的 context 是另一回事,那会结束一切。
 
 ### 重试答不了的失败
 
 有些失败重放解决不了。prompt 比窗口大、密钥的配额用完了——同样的调用再发一次,结果一模一样,这也正是 `ai.IsContextExceeded` 不属于 `ai.IsRetryable` 的原因。`OnInferError` 征询的就是这些:当错误不可重试、或者 `WithRetry` 的预算已经花完,**循环没答案了,于是问调用方要一个**。
 
 ```go
-OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Recovery, error) {
     if !ai.IsContextExceeded(c.Err) || c.Attempt > 2 {
         return nil, nil // nil 就是同意放弃,这一轮以那个失败收尾
     }
@@ -119,11 +112,11 @@ OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry
     if err != nil {
         return nil, nil
     }
-    return &agent.Retry{Messages: short}, nil
+    return &agent.Recovery{Messages: short}, nil
 },
 ```
 
-一个 `Retry` 要的是**同一步再来一次**;它的 `Messages` 非 nil 时先替换掉对话,并**当场**以 `MessagesReplaced` 播报。在事件流上,它就是重试本来的那个形状:失败那次的 `MessageEnd`、中间什么都没追加、又一个 `MessageStart`。已经会处理重试的消费者,不需要为它加一个分支。
+一个 `Recovery` 要的是**同一步再来一次**;它的 `Messages` 非 nil 时先替换掉对话,并**当场**以 `MessagesReplaced` 播报。在事件流上,它就是重试本来的那个形状:失败那次的 `InferenceEnd`、中间什么都没追加、又一个 `InferenceStart`。已经会处理重试的消费者,不需要为它加一个分支。
 
 **两份预算不相乘。** `WithRetry` 重放的是循环知道怎么重放的那次调用;而一次恢复交回来的是一个**已经变了**的调用,所以它不花那份预算,并且让那份预算**重新开始**。真正给恢复次数封顶的是调用方:`c.Attempt` 就是拿来数的那个数,而这里没有任何东西拦着一个每次都要求再来一次的 hook。只有调用方知道自己那次恢复要花多少、还能不能往前走——一个只剩一条消息可摘要的 summariser 就走不动了,它返回 nil 说出这件事。
 
@@ -144,22 +137,23 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 
 ## 事件
 
-agent 干的每件事都以 10 种类型之一出现。**有两样东西有值得跟踪的生命周期**——一条消息,一次工具调用——它们的报告方式完全一致:开始、中途可能报告、结束。
+agent 干的每件事都以 12 种类型之一出现。**花时间的事都报成一个 span**——一次模型调用、一次工具调用、一次压缩、包住它们的那一轮——报告方式完全一致:开始、中途可能报告、结束。
 
 ```
-MessageAdded  MessagesReplaced            对话本身发生变化
-MessageStart  MessageUpdate  MessageEnd   模型正在产生一条消息
-ToolStart     ToolUpdate     ToolEnd      一次工具调用,从提出到答复
-TurnStart                    TurnEnd      包住它们的那一轮
+MessageAdded     MessagesReplaced               对话本身发生变化
+InferenceStart   InferenceUpdate  InferenceEnd  一次模型调用
+ToolStart        ToolUpdate       ToolEnd       一次工具调用
+CompactionStart                   CompactionEnd 对话正在被缩短
+TurnStart                         TurnEnd       包住它们的那一轮
 ```
 
 这个集合是**封闭**的——`event()` 方法不可导出,别的包加不进来——所以消费者 switch 的时候可以确信上面这张表就是全部。
 
 **对话是第一行的折叠。** 把 `MessageAdded` 按顺序重放,得到的就是 agent 手里那份;遇到 `MessagesReplaced` 则从头开始折——在它之前播报过的一切,都是 agent 已经扔掉的。其余事件报告的都是过程。
 
-**每个属于某一轮的事件都带着轮次号,每个收尾事件都带着开启它的东西**——`MessageEnd` 带着它的 request,`ToolEnd` 带着名字和参数。消费者是从事件上**读出**发生了什么,而不是靠记住之前发生过什么再拼回来;这也是为什么记录一个事件是翻译,不是状态机。
+**每个属于某一轮的事件都带着轮次号,每个收尾事件都带着开启它的东西**——`InferenceEnd` 带着它的 `Inference`,`ToolEnd` 带着名字和参数。消费者是从事件上**读出**发生了什么,而不是靠记住之前发生过什么再拼回来;这也是为什么记录一个事件是翻译,不是状态机。
 
-一次交换,从外面看:
+一个 turn,从外面看:
 
 ```mermaid
 sequenceDiagram
@@ -171,29 +165,29 @@ sequenceDiagram
     App->>Agent: Run(ctx, "改了什么?")
     Agent-->>App: TurnStart
     Agent-->>App: MessageAdded (user)
-    Agent->>Model: MessageStart (attempt 1)
+    Agent->>Model: InferenceStart (attempt 1)
     Model-->>Agent: 片段
-    Agent-->>App: MessageUpdate ×N
-    Agent-->>App: MessageEnd
+    Agent-->>App: InferenceUpdate ×N
+    Agent-->>App: InferenceEnd
     Agent-->>App: MessageAdded (assistant,要一个工具)
     Agent-->>App: ToolStart
     Agent->>Tool: 执行
     Tool-->>Agent: 结果
     Agent-->>App: ToolEnd
     Agent-->>App: MessageAdded (工具结果)
-    Agent->>Model: MessageStart (attempt 1)
-    Agent-->>App: MessageUpdate ×N
-    Agent-->>App: MessageEnd
+    Agent->>Model: InferenceStart (attempt 1)
+    Agent-->>App: InferenceUpdate ×N
+    Agent-->>App: InferenceEnd
     Agent-->>App: MessageAdded (assistant,作答)
     Agent-->>App: TurnEnd
 ```
 
 ### 重试不需要自己的事件
 
-可重试的流失败时,这次尝试以带着错误的 `MessageEnd` 收尾,接着是 `Attempt` 加一的下一个 `MessageStart`。**两者之间没有 `MessageAdded`**——这个"没有"正是告诉消费者:你画出来的那些半截内容作废了。
+可重试的流失败时,这次尝试以带着错误的 `InferenceEnd` 收尾,接着是 `Attempt` 加一的下一个 `InferenceStart`。**两者之间没有 `MessageAdded`**——这个"没有"正是告诉消费者:你画出来的那些半截内容作废了。
 
 ```
-MessageStart(attempt=1) → MessageEnd(err) → MessageStart(attempt=2) → … → MessageEnd → MessageAdded
+InferenceStart(attempt=1) → InferenceEnd(err) → InferenceStart(attempt=2) → … → InferenceEnd → MessageAdded
 ```
 
 ### 什么都不会丢
@@ -214,7 +208,7 @@ flowchart LR
     B --> C[模型调用]
     C -->|答上来了| D{{PostInfer}}
     C -->|失败了| X{{OnInferError}}
-    X -->|Retry| A
+    X -->|Recovery| A
     D --> E[消息]
     E --> F{{PreTool}}
     F --> G[工具执行]
@@ -226,7 +220,7 @@ flowchart LR
 | `PreStep` | 对话本身,以及发出去要花多少 | 一份替换(nil 表示保持原样) |
 | `PreInfer` | 即将发出的那次调用 | 原地修改 |
 | `PostInfer` | 成功调用返回的 response | 原地修改 |
-| `OnInferError` | 失败的那次调用,以及为什么 | 一个 `*Retry`(nil 表示放弃) |
+| `OnInferError` | 失败的那次调用,以及为什么 | 一个 `*Recovery`(nil 表示放弃) |
 | `PreTool` | 这次调用、它的工具、对话 | 一个 `Decision` |
 | `PostTool` | 这次调用、它的工具、产出 | 一个 `*Result`(nil 表示保持原样) |
 
@@ -244,10 +238,10 @@ agent.WithHooks(agent.Hook{
 **组合规则**,因为两个互相不同意的门必须有个说法:
 
 - `PreInfer`、`PostInfer`、`PostTool`、`PreStep` 是链式的:每个看到的是前一个改完的结果。
-- 另外两个不是"改一个值"而是"答一个问题",它们按顺序征询,**第一个答案即终局**:`PreTool` 的第一次拒绝是终局——一个越加越弱的门不是门——`OnInferError` 的第一个 `Retry` 也是。
+- 另外两个不是"改一个值"而是"答一个问题",它们按顺序征询,**第一个答案即终局**:`PreTool` 的第一次拒绝是终局——一个越加越弱的门不是门——`OnInferError` 的第一个 `Recovery` 也是。
 - 每个 hook 都在循环那条 goroutine 上、一次一个,所以**都不需要自己加锁**。
-- **返回错误会以 `StopError` 结束这次交换,返回一个"拦下"的 `Decision` 不会。** 错误说的是这个 hook 没能完成自己的活,那是应用的失败,不是模型能绕过去的事;而拦下是一次拒绝,模型会以工具错误的形式被告知,还可以换个别的试。`PreTool` 那两个返回值的全部区别就在这里。
-- **hook 里的 panic 不会被兜住**,工具里的会。工具跑在这个包自己创建的 goroutine 上,别人接不住;hook 跑在 range `Run` 的那条 goroutine 上,写它的人自己就能接。交换会带着 panic 解栈,不报告任何结局,agent 回到空闲。
+- **返回错误会以 `StopError` 结束这一轮,返回一个"拦下"的 `Decision` 不会。** 错误说的是这个 hook 没能完成自己的活,那是应用的失败,不是模型能绕过去的事;而拦下是一次拒绝,模型会以工具错误的形式被告知,还可以换个别的试。`PreTool` 那两个返回值的全部区别就在这里。
+- **hook 里的 panic 不会被兜住**,工具里的会。工具跑在这个包自己创建的 goroutine 上,别人接不住;hook 跑在 range `Run` 的那条 goroutine 上,写它的人自己就能接。这一轮会带着 panic 解栈,不报告任何结局,agent 回到空闲。
 
 一个 agent 持有的是**多个** hook,不是一个:权限门和审计日志是两件事,不该被迫写成同一个函数。
 
@@ -265,7 +259,7 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 },
 ```
 
-`Client`、`System`、`Messages`、`Tools` 是 agent 贡献的那部分,这一次调用里归 hook 支配。**其余一切**——为这一步强制某个工具、为这一次答案指定 schema、给这一次调用设上限、某个协议独有的设置——都通过**追加 `Options`** 达成,它是最后叠上去的一层,盖在 client 自己的设置之上。
+`Client`、`System`、`Messages`、`Tools` 是 agent 贡献的那部分,这一次调用里归 hook 支配。**其余一切**——为这一步强制某个工具、给这一次调用设上限、某个协议独有的设置——都通过**追加 `Options`** 达成,它是最后叠上去的一层,盖在 client 自己的设置之上。
 
 用这个形状而不用 `ai.Request` 是有原因的:一个**半填的** request 说不清哪些字段是有意为之——对它上面每一个值类型,"没动过"和"特意设成零"是同一串字节,而这正是 `ai.Request.Temperature` 用指针要避开的歧义。追加一个 option 没有这个问题(在就是在,不在就是不在),而且分层本来就是 `pkg/ai` 组装一次调用的方式。
 
@@ -343,7 +337,7 @@ readFile := agent.ToolFunc("read_file", "读取工作区里的一个文件。",
 
 返回 error 就是工具失败的方式:循环会把它变成模型看得见、能自己纠正的工具错误,而不是让整个 turn 失败。
 
-**工具看到了什么,就能拿它回答。** `Result.Content` 是 `ai.Content`,所以一张截图、一张画好的图表可以和文字并排走,完整地到模型手里——在 Anthropic 和 OpenAI Responses 这两个协议上,它们的工具结果能带图片;另外两个会**拒绝这个请求**,而不是在半路把图悄悄丢掉。`ResultText` 是同一个答案的文字形式,给日志用。
+**工具看到了什么,就能拿它回答。** `Result.Content` 是 `ai.Content`,所以一张截图、一张画好的图表可以和文字并排走,完整地到模型手里——在 Anthropic 和 OpenAI Responses 协议上放在工具结果里,在 Chat Completions 上放在紧随其后的一条用户消息里;Gemini 会**拒绝这个请求**,而不是在半路把图悄悄丢掉。`ResultText` 是同一个答案的文字形式,给日志用。
 
 **跑得久的工具要边跑边给人看。** `agent.Report(ctx, partial)` 会作为 `ToolUpdate` 到达消费者——命令的输出边出边报、文件列表边走边报。它走 context 而不是参数,**这样没东西可报的工具一分钱都不付**。
 
@@ -379,45 +373,22 @@ a, err := agent.New(client, agent.WithTools(tools...))
 
 ## 会话
 
-agent 不知道存储的存在。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，用完把 agent 手里的那份存回去。
+agent 不知道存储的存在,本 SDK 也不带任何存储。一份对话就是一个能直接编成 JSON 的 `[]ai.Message`:读出来,交给 agent,用完把 agent 手里的那份存回去。
 
 ```go
-history, err := store.Load(ctx, id)   // 新会话返回 session.ErrNotFound
-a.SetMessages(history)
+a.SetMessages(history) // 上次存下的那份
 
 for e, err := range a.Run(ctx, msg) {
     render(e)
 }
-err = store.Save(ctx, id, a.Messages())
+save(id, a.Messages()) // 整份对话
 ```
 
-```go
-type Store interface {
-    Save(ctx context.Context, id string, msgs []ai.Message) error
-    Load(ctx context.Context, id string) ([]ai.Message, error)
-}
-```
+`Messages` 就是整份对话,所以压缩不需要任何额外处理:`SetMessages(summary)`,或者某个 `PreStep` 替换了它,下一次保存存的就是摘要。
 
-`Save` 用整份对话替换会话原来存的内容，所以压缩不需要任何额外处理：`SetMessages(summary)`，下一次保存存的就是摘要。`Load` 返回的正是上一次 `Save` 写进去的东西。
+什么时候存由你决定。通常是每次 `Run` 之后。如果不能接受崩溃时丢掉一长串工具调用,就在每个 `MessageAdded` 时追加那条消息、在每个 `MessagesReplaced` 时从头重写;这两个事件的折叠就是对话。
 
-什么时候存由你决定。通常是每次 `Run` 之后。如果不能接受崩溃时丢掉一长串工具调用，就在每个 `MessageAdded` 时存；用 `jsonl.Store` 的话，每条消息只多追加一行。
-
-`jsonl.Store` 把会话存成一份只追加的日志。store 是一个目录，会话是其中一个文件，每行一条记录：
-
-```
-sessions/                       jsonl.Open("sessions")
-  20261016-101500.jsonl         一个会话；文件名就是它的 id
-    {"type":"message","message":{…}}   ┐
-    {"type":"message","message":{…}}   │ 对话增长时逐条追加
-    {"type":"reset"}                   ← 压缩：对话从这里重新开始
-    {"type":"message","message":{…}}   ┘ 压缩后的对话，以及之后的消息
-```
-
-`Load` 按顺序重放这些行：遇到 message 就追加，遇到 reset 就清空。所以文件记的是发生过的一切，对话是重放到最后的结果。`Save` 只追加文件里还没有的部分——对话只是变长了，就追加新消息；对话被改写了，就追加一行 reset 和整份新对话。写到一半崩溃会留下没写完的最后一行，`Load` 忽略它，下一次 `Save` 把它截掉。
-
-`List` 按文件时间从新到旧列出会话。改名、复制、删除会话，就是对文件做操作。一个会话同一时刻只能有一个写入者：两个写入者往同一个文件追加，行会交错。
-
-一轮花了多少、怎么结束的，在 `MessageEnd` 和 `TurnEnd` 上。它们不是对话，所以会话不存；要计费或审计的应用，把它们和自己的其他记录放在一起。
+一轮花了多少、怎么结束的,在 `InferenceEnd` 和 `TurnEnd` 上。它们不是对话,所以存下的对话里没有;要计费或审计的应用,把它们和自己的其他记录放在一起。
 
 ### 给每一轮起名字
 
@@ -436,14 +407,11 @@ agent.WithMessageIDs(func() string { return uuid.NewString() })
 ```
 pkg/agent/
   agent.go     agent 是什么:状态、构造选项、能读能改的东西
-  run.go       一次交换:Run,以及它背后 reason/act 的循环
-  event.go     10 个事件
-  hook.go      4 个 hook,以及每条链怎么跑
+  run.go       一个 turn:Run,以及它背后 reason/act 的循环
+  event.go     12 个事件
+  hook.go      6 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   mcp/         MCP 服务器的工具,变成这个包自己的
-pkg/session/  保存与加载对话
-  store.go    Store 接口
-  jsonl/      一个会话一个文件、一行一条消息的 Store
 ```
 
 ## 它不做的事

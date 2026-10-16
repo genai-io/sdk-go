@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/provider"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 )
 
 // Vendor is one endpoint of models.
@@ -39,17 +39,11 @@ type Vendor struct {
 	// credential, most preferred first. Empty for endpoints needing none.
 	KeyEnv []string
 
-	// DeploymentEnv names the environment variables that carry a
-	// deployment-scoped setting rather than a credential — a Vertex project
-	// and region, for instance.
-	DeploymentEnv map[string]string
-
-	// Deployment turns those variables into the value this vendor's driver
-	// expects as ai.Config.ProtocolConfig, and says which one is missing when the
-	// endpoint cannot run without it — a fact about the row, not about auth. It
-	// is handed DeploymentEnv, so a row names each variable once. Nil for a
-	// vendor that needs no deployment.
-	Deployment func(vars map[string]string, env func(string) string) (ai.ProtocolConfig, error)
+	// VertexEnv names the variables that say where a Vertex AI deployment
+	// runs. They name a place, not a credential: Vertex authenticates with
+	// Google Application Default Credentials. Zero for a vendor not served
+	// through Vertex.
+	VertexEnv VertexEnv
 
 	// Compat is the protocol behavior copied onto every model that does not
 	// declare its own — one of ai.AnthropicCompat, ai.OpenAIChatCompat,
@@ -68,7 +62,6 @@ type Vendor struct {
 func (v Vendor) clone() Vendor {
 	out := v
 	out.KeyEnv = slices.Clone(v.KeyEnv)
-	out.DeploymentEnv = maps.Clone(v.DeploymentEnv)
 	out.Headers = maps.Clone(v.Headers)
 	// Compat needs no clone: every compat is a struct held in an interface, so
 	// the field copy above is already a copy of the value.
@@ -86,7 +79,9 @@ func (v Vendor) Model(id string) ai.Model { return v.Resolve(ai.Model{ID: id}) }
 func (v Vendor) Resolve(m ai.Model) ai.Model {
 	m = m.Clone()
 	m.Vendor = v.ID
-	m.API = provider.ListedAPI(v.API, m.API)
+	if m.API == "" {
+		m.API = v.API
+	}
 	if m.BaseURL == "" {
 		m.BaseURL = v.BaseURL
 	}
@@ -105,22 +100,72 @@ func (v Vendor) Resolve(m ai.Model) ai.Model {
 	return m
 }
 
-// ResolveBaseURL applies an override to a vendor's endpoint.
-func (v Vendor) ResolveBaseURL(override string) string {
-	override = strings.TrimSpace(override)
-	if override == "" {
-		return v.BaseURL
+// KeyFromEnv returns the first non-empty value among KeyEnv, read through
+// getenv — os.Getenv, or a lookup that also consults the caller's own secret
+// store. It is empty, with no error, for a vendor that takes no key.
+func (v Vendor) KeyFromEnv(getenv func(string) string) (string, error) {
+	for _, name := range v.KeyEnv {
+		if value := strings.TrimSpace(getenv(name)); value != "" {
+			return value, nil
+		}
 	}
-	override = strings.TrimRight(override, "/")
+	if len(v.KeyEnv) > 0 {
+		return "", &MissingEnvError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
+	}
+	return "", nil
+}
+
+// BaseURLFromEnv returns BaseURL, or the override BaseURLEnv names, read
+// through getenv, with BaseURLSuffix added where it is missing. It fails for a
+// vendor that RequiresBaseURL when the override is unset.
+func (v Vendor) BaseURLFromEnv(getenv func(string) string) (string, error) {
+	override := ""
+	if v.BaseURLEnv != "" {
+		override = strings.TrimRight(strings.TrimSpace(getenv(v.BaseURLEnv)), "/")
+	}
+	if override == "" {
+		if v.RequiresBaseURL {
+			return "", &MissingEnvError{Vendor: v.ID, EnvVars: []string{v.BaseURLEnv}, Note: v.Note}
+		}
+		return v.BaseURL, nil
+	}
 	if v.BaseURLSuffix != "" && !strings.HasSuffix(override, v.BaseURLSuffix) {
 		override += v.BaseURLSuffix
 	}
-	return override
+	return override, nil
 }
 
-// Provider builds a live provider for this vendor. Its models come from
-// cfg.Models and the endpoint's own listing.
-func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
+// VertexFromEnv reads the deployment VertexEnv names, through getenv, into
+// the value ai.Config.Vertex takes. It is nil for a vendor not served through
+// Vertex, and fails when the project is unset: it has no default worth
+// guessing.
+func (v Vendor) VertexFromEnv(getenv func(string) string) (*ai.VertexConfig, error) {
+	if v.VertexEnv == (VertexEnv{}) {
+		return nil, nil
+	}
+	project := strings.TrimSpace(getenv(v.VertexEnv.Project))
+	if project == "" {
+		return nil, &MissingEnvError{Vendor: v.ID, EnvVars: []string{v.VertexEnv.Project}, Note: v.Note}
+	}
+	region := ""
+	if v.VertexEnv.Region != "" {
+		region = strings.TrimSpace(getenv(v.VertexEnv.Region))
+	}
+	return &ai.VertexConfig{Project: project, Region: region}, nil
+}
+
+// VertexEnv names the variables holding a Vertex AI deployment.
+type VertexEnv struct {
+	// Project names the variable holding the Google Cloud project. Required.
+	Project string
+	// Region names the variable holding the region. Unset means the driver's
+	// default.
+	Region string
+}
+
+// Endpoint builds a live endpoint for this vendor. Its models come from
+// cfg.Models and the host's own listing.
+func (v Vendor) Endpoint(cfg endpoint.Config) *endpoint.Endpoint {
 	cfg.ID = v.ID
 	if cfg.Name == "" {
 		cfg.Name = v.DisplayName
@@ -137,5 +182,5 @@ func (v Vendor) Provider(cfg provider.Config) *provider.Provider {
 	if cfg.Resolve == nil {
 		cfg.Resolve = v.Resolve
 	}
-	return provider.New(cfg)
+	return endpoint.New(cfg)
 }

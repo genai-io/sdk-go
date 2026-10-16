@@ -1,4 +1,4 @@
-package provider
+package endpoint
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 )
 
 // listing serves an OpenAI-style model listing, which is what Refresh asks a
-// Chat provider for, and returns its base URL.
+// Chat endpoint for, and returns its base URL.
 func listing(t *testing.T, serve http.HandlerFunc) string {
 	t.Helper()
 	srv := httptest.NewServer(serve)
@@ -136,7 +136,7 @@ func TestModelResolvesAnUnlistedID(t *testing.T) {
 		t.Errorf("Reasoning = %v, want the resolver's ladder", got.Reasoning)
 	}
 	if got.Vendor != "acme" || got.API != ai.APIOpenAIChat {
-		t.Errorf("model = %s/%s, want the provider's identity and protocol", got.Vendor, got.API)
+		t.Errorf("model = %s/%s, want the endpoint's identity and protocol", got.Vendor, got.API)
 	}
 }
 
@@ -203,10 +203,10 @@ func TestRefreshFailureLeavesThePreviousListing(t *testing.T) {
 	}
 }
 
-// TestRefreshWithNothingToAsk covers the provider that has no protocol: there is nothing to ask, which is not a failure.
+// TestRefreshWithNothingToAsk covers the endpoint that has no protocol: there is nothing to ask, which is not a failure.
 func TestRefreshWithNothingToAsk(t *testing.T) {
 	if err := New(Config{ID: "acme"}).Refresh(t.Context()); err != nil {
-		t.Errorf("Refresh = %v, want nil for a provider with no protocol to ask", err)
+		t.Errorf("Refresh = %v, want nil for an endpoint with no protocol to ask", err)
 	}
 }
 
@@ -234,7 +234,7 @@ func TestModelsMergesTheListingOverTheBaseline(t *testing.T) {
 			models[0].ContextWindow, models[0].MaxOutput)
 	}
 	if models[1].ID != "acme-new" || models[1].API != ai.APIOpenAIChat {
-		t.Errorf("the host-only model came back as %s/%s, want it carrying the provider's protocol",
+		t.Errorf("the host-only model came back as %s/%s, want it carrying the endpoint's protocol",
 			models[1].ID, models[1].API)
 	}
 }
@@ -244,10 +244,10 @@ func TestModelsDoNotAliasTheConfig(t *testing.T) {
 	p := New(Config{ID: "acme", Models: baseline})
 
 	// The caller keeps its own builder: editing it after New must not reach
-	// inside the provider.
+	// inside the endpoint.
 	baseline[0].ID = "tampered"
 	if got := p.Models(); got[0].ID != "acme-pro" {
-		t.Errorf("ID = %q, want the provider's own snapshot", got[0].ID)
+		t.Errorf("ID = %q, want the endpoint's own snapshot", got[0].ID)
 	}
 	got := p.Models()
 	got[0].Input[0] = "tampered"
@@ -259,7 +259,7 @@ func TestModelsDoNotAliasTheConfig(t *testing.T) {
 func TestClientNeedsAProtocol(t *testing.T) {
 	_, err := New(Config{ID: "acme"}).Client("acme-pro")
 	if err == nil {
-		t.Fatal("expected a failure for a provider that states no protocol")
+		t.Fatal("expected a failure for an endpoint that states no protocol")
 	}
 	var aiErr *ai.Error
 	if !errors.As(err, &aiErr) || aiErr.Kind != ai.KindInvalidRequest {
@@ -267,20 +267,20 @@ func TestClientNeedsAProtocol(t *testing.T) {
 	}
 }
 
-func TestConfigForCarriesTheProviderSettings(t *testing.T) {
+func TestConfigForCarriesTheEndpointSettings(t *testing.T) {
 	p := New(Config{
 		ID: "acme", APIKey: "the-key", BaseURL: "https://acme.test",
 		Headers: map[string]string{"X-Acme": "1"},
 	})
 	cfg := p.ConfigFor(ai.Model{ID: "acme-pro"})
 	if cfg.APIKey != "the-key" || cfg.BaseURL != "https://acme.test" || cfg.Headers["X-Acme"] != "1" {
-		t.Errorf("ConfigFor = %+v, want the provider's credential, endpoint and headers", cfg)
+		t.Errorf("ConfigFor = %+v, want the endpoint's credential, endpoint and headers", cfg)
 	}
 	// The headers are a copy: a driver that edits them must not rewrite what
-	// every other model on this provider sends.
+	// every other model on this endpoint sends.
 	cfg.Headers["X-Acme"] = "tampered"
 	if again := p.ConfigFor(ai.Model{ID: "acme-pro"}); again.Headers["X-Acme"] != "1" {
-		t.Error("editing a built Config changed the provider's headers")
+		t.Error("editing a built Config changed the endpoint's headers")
 	}
 }
 
@@ -290,9 +290,9 @@ func TestFetchReplacesTheProtocolListing(t *testing.T) {
 	p := New(Config{
 		ID:  "acme",
 		API: ai.APIOpenAIChat,
-		Fetch: func(_ context.Context, got *Provider) ([]ai.Model, error) {
+		Fetch: func(_ context.Context, got *Endpoint) ([]ai.Model, error) {
 			if got.Name() == "" {
-				t.Error("Fetch was not handed its provider")
+				t.Error("Fetch was not handed its endpoint")
 			}
 			return []ai.Model{{ID: "listed-elsewhere"}}, nil
 		},

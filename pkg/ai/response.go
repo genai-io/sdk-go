@@ -1,11 +1,5 @@
 package ai
 
-import (
-	"encoding/json"
-	"fmt"
-	"strings"
-)
-
 // StopReason says why the model stopped generating.
 type StopReason string
 
@@ -35,10 +29,10 @@ type Usage struct {
 	CacheWrite int `json:"cache_write,omitempty"`
 	CacheRead  int `json:"cache_read,omitempty"`
 
-	// CacheWrite1h is the slice of CacheWrite written to a long-lifetime entry,
+	// CacheWriteLong is the slice of CacheWrite written to a long-lifetime entry,
 	// billed at twice the input rate rather than the cache-write one. It travels
 	// separately because the two cannot be told apart afterwards.
-	CacheWrite1h int `json:"cache_write_1h,omitempty"`
+	CacheWriteLong int `json:"cache_write_long,omitempty"`
 
 	// Reasoning is the tokens spent thinking, where the provider reports them
 	// apart from the answer. Cost prices Output, not this, so it is diagnostic.
@@ -58,9 +52,17 @@ func (u *Usage) Add(other Usage) {
 	u.Input += other.Input
 	u.Output += other.Output
 	u.CacheWrite += other.CacheWrite
-	u.CacheWrite1h += other.CacheWrite1h
+	u.CacheWriteLong += other.CacheWriteLong
 	u.CacheRead += other.CacheRead
 	u.Reasoning += other.Reasoning
+}
+
+// SplitPromptTokens separates a combined prompt count into its fresh and
+// cached halves.
+func SplitPromptTokens(promptTokens, cachedTokens int) (fresh, cached int) {
+	promptTokens = max(promptTokens, 0)
+	cached = min(max(cachedTokens, 0), promptTokens)
+	return promptTokens - cached, cached
 }
 
 // mergeUsage applies an update field by field, ignoring zeros. Protocols
@@ -77,8 +79,8 @@ func mergeUsage(dst *Usage, src Usage) {
 	if src.CacheWrite > 0 {
 		dst.CacheWrite = src.CacheWrite
 	}
-	if src.CacheWrite1h > 0 {
-		dst.CacheWrite1h = src.CacheWrite1h
+	if src.CacheWriteLong > 0 {
+		dst.CacheWriteLong = src.CacheWriteLong
 	}
 	if src.CacheRead > 0 {
 		dst.CacheRead = src.CacheRead
@@ -139,67 +141,4 @@ func (r *Response) Message() Message {
 		return Message{Role: RoleAssistant}
 	}
 	return Message{Role: RoleAssistant, Content: r.Content.Clone()}
-}
-
-// Decoding an answer into a Go value.
-
-// Unmarshal decodes the answer into v.
-func (r *Response) Unmarshal(v any) error {
-	if r == nil {
-		return fmt.Errorf("ai: no response to decode")
-	}
-	text := r.Text()
-	raw, ok := extractJSON(text)
-	if !ok {
-		return fmt.Errorf("ai: response contains no JSON value: %s", truncate(text, 200))
-	}
-	if err := json.Unmarshal([]byte(raw), v); err != nil {
-		return fmt.Errorf("ai: decoding response: %w", err)
-	}
-	return nil
-}
-
-// extractJSON finds the JSON value in a model's answer.
-func extractJSON(s string) (string, bool) {
-	trimmed := strings.TrimSpace(s)
-	if trimmed == "" {
-		return "", false
-	}
-	if json.Valid([]byte(trimmed)) {
-		return trimmed, true
-	}
-	if fenced, ok := stripFence(trimmed); ok && json.Valid([]byte(fenced)) {
-		return fenced, true
-	}
-	// The first object or array in the prose, if it decodes.
-	if start := strings.IndexAny(trimmed, "{["); start >= 0 {
-		var raw json.RawMessage
-		if json.NewDecoder(strings.NewReader(trimmed[start:])).Decode(&raw) == nil {
-			return string(raw), true
-		}
-	}
-	return "", false
-}
-
-// stripFence unwraps a ```json … ``` block.
-func stripFence(s string) (string, bool) {
-	if !strings.HasPrefix(s, "```") {
-		return "", false
-	}
-	rest := s[3:]
-	if i := strings.IndexByte(rest, '\n'); i >= 0 {
-		rest = rest[i+1:] // drop the language tag
-	}
-	end := strings.LastIndex(rest, "```")
-	if end < 0 {
-		return "", false
-	}
-	return strings.TrimSpace(rest[:end]), true
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

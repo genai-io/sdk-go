@@ -4,7 +4,7 @@
 //
 // # Where things live
 //
-//	anthropic.go  construction, Stream, Models and CountTokens
+//	anthropic.go  construction, Stream and Models
 //	request.go    an ai.Request translated into Messages params
 //	errors.go     this protocol's failures classified into ai.Error kinds
 //	vertex/       the same protocol served through Google Cloud Vertex AI,
@@ -14,21 +14,16 @@ package anthropic
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"io"
 	"iter"
 	"strings"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
 )
-
-// Name is the driver's identifier, matching the protocol it speaks.
-const Name = string(ai.APIAnthropicMessages)
 
 // defaultMaxTokens is what the protocol requires and the caller did not
 // supply. Anthropic rejects a request without max_tokens, so unlike the
@@ -37,8 +32,8 @@ const defaultMaxTokens = 8192
 
 func init() { ai.RegisterAPI(ai.APIAnthropicMessages, New) }
 
-// Driver talks to one Anthropic-protocol endpoint.
-type Driver struct {
+// driver talks to one Anthropic-protocol endpoint.
+type driver struct {
 	client sdk.Client
 	model  ai.Model
 	compat ai.AnthropicCompat
@@ -51,13 +46,10 @@ type Driver struct {
 // New builds a driver from a Config. It is registered as the factory for
 // ai.APIAnthropicMessages, so ai.New reaches it without an explicit call.
 func New(cfg ai.Config) (ai.Driver, error) {
-	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
-		return nil, err
-	}
-	return NewWithOptions(cfg, ai.APIAnthropicMessages)
+	return NewDeployment(cfg, ai.APIAnthropicMessages)
 }
 
-// NewWithOptions builds a driver for a deployment that reaches this protocol
+// NewDeployment builds a driver for a deployment that reaches this protocol
 // some other way. api is the protocol as the caller reaches it: Vertex speaks
 // this wire format from a different host under different credentials, and an
 // error or a model listing labelled with the direct API would send a caller to
@@ -70,11 +62,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 // ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL out of the process environment.
 // A Config is meant to be the whole truth about where a request goes and what
 // it presents, so none of them is ever read.
-func NewWithOptions(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.Driver, error) {
-	if cfg.Model.ID == "" {
-		return nil, fmt.Errorf("%s: model ID is required", api)
-	}
-
+func NewDeployment(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.Driver, error) {
 	opts = append([]option.RequestOption{
 		// The SDK's own host, which sdk.NewClient would otherwise supply.
 		option.WithEnvironmentProduction(),
@@ -82,7 +70,7 @@ func NewWithOptions(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai
 		// whole turn. An SDK retrying underneath would multiply it silently.
 		option.WithMaxRetries(0),
 	}, opts...)
-	if url := cfg.URL(); url != "" {
+	if url := cfg.MergedBaseURL(); url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
 	if cfg.APIKey != "" {
@@ -106,7 +94,7 @@ func NewWithOptions(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai
 	client.Messages = sdk.NewMessageService(opts...)
 	client.Models = sdk.NewModelService(opts...)
 
-	return &Driver{
+	return &driver{
 		client: client,
 		model:  cfg.Model,
 		compat: ai.CompatOf[ai.AnthropicCompat](cfg.Model),
@@ -117,10 +105,10 @@ func NewWithOptions(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai
 
 // Name identifies the driver: the protocol it speaks, from the deployment it
 // speaks it to.
-func (d *Driver) Name() string { return string(d.api) }
+func (d *driver) Name() string { return string(d.api) }
 
 // Stream runs one Messages call.
-func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		params, err := d.buildParams(req)
 		if err != nil {
@@ -150,8 +138,8 @@ func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 						CacheWrite: int(start.Message.Usage.CacheCreationInputTokens),
 						// The 1-hour slice is billed at twice the input rate,
 						// so it has to travel separately from the total.
-						CacheWrite1h: int(start.Message.Usage.CacheCreation.Ephemeral1hInputTokens),
-						CacheRead:    int(start.Message.Usage.CacheReadInputTokens),
+						CacheWriteLong: int(start.Message.Usage.CacheCreation.Ephemeral1hInputTokens),
+						CacheRead:      int(start.Message.Usage.CacheReadInputTokens),
 					},
 				}, nil) {
 					return
@@ -269,49 +257,11 @@ func mapStopReason(reason string) ai.StopReason {
 	}
 }
 
-// CountTokens asks the endpoint how large a prompt is, without generating
-// from it. Anthropic publishes this, so a caller never has to estimate.
-func (d *Driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) {
-	params, err := d.buildParams(req)
-	if err != nil {
-		return 0, err
-	}
-	count := sdk.MessageCountTokensParams{
-		Model:    params.Model,
-		Messages: params.Messages,
-		System: sdk.MessageCountTokensParamsSystemUnion{
-			OfTextBlockArray: params.System,
-		},
-		Tools: countTokenTools(params.Tools),
-	}
-	if !param.IsOmitted(params.Thinking) {
-		count.Thinking = params.Thinking
-	}
-	res, err := d.client.Messages.CountTokens(ctx, count)
-	if err != nil {
-		return 0, d.fail.Wrap(err)
-	}
-	return int(res.InputTokens), nil
-}
-
-// countTokenTools re-types the tool params for the counting endpoint, which
-// takes the same shapes under its own union.
-func countTokenTools(tools []sdk.ToolUnionParam) []sdk.MessageCountTokensToolUnionParam {
-	out := make([]sdk.MessageCountTokensToolUnionParam, 0, len(tools))
-	for _, t := range tools {
-		if t.OfTool == nil {
-			continue
-		}
-		out = append(out, sdk.MessageCountTokensToolUnionParam{OfTool: t.OfTool})
-	}
-	return out
-}
-
 // Models lists the models the endpoint serves. Anthropic's listing carries IDs
 // and display names only — no limits — so callers wanting context windows
-// should merge catalog data over the result (see provider.Provider, which
+// should merge catalog data over the result (see endpoint.Endpoint, which
 // does exactly that around a refresh).
-func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
+func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 	pager := d.client.Models.ListAutoPaging(ctx, sdk.ModelListParams{})
 	var out []ai.Model
 	for pager.Next() {
@@ -331,7 +281,6 @@ func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 var (
-	_ ai.Driver       = (*Driver)(nil)
-	_ ai.ModelLister  = (*Driver)(nil)
-	_ ai.TokenCounter = (*Driver)(nil)
+	_ ai.Driver      = (*driver)(nil)
+	_ ai.ModelLister = (*driver)(nil)
 )

@@ -38,7 +38,7 @@ func TestStoresBehaveAlike(t *testing.T) {
 			want := Credential{
 				Vendor: "copilot", Access: "gho_1", Refresh: "r1",
 				ExpiresAt: time.Now().Add(time.Hour).UTC().Truncate(time.Second),
-				Endpoint:  "https://api.enterprise.githubcopilot.com",
+				BaseURL:   "https://api.enterprise.githubcopilot.com",
 			}
 			if err := s.Save(want); err != nil {
 				t.Fatalf("Save: %v", err)
@@ -193,21 +193,10 @@ func TestResolveStorePrefersWhatItIsGiven(t *testing.T) {
 	if got != Store(given) {
 		t.Error("resolveStore ignored the store it was handed")
 	}
-
-	fallback := &memStore{}
-	defer withDefaultStore(t, fallback)()
-	got, err = resolveStore(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != Store(fallback) {
-		t.Error("resolveStore ignored DefaultStore, which is how a server opts out of writing to disk")
-	}
 }
 
 func TestFileStoresForOnePathShareRefreshAndWriteLocks(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	defer withDefaultStore(t, nil)()
 	first, err := resolveStore(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +212,7 @@ func TestFileStoresForOnePathShareRefreshAndWriteLocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	explicit, err := NewFileStore(path)
+	explicit, err := newFileStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,20 +223,23 @@ func TestFileStoresForOnePathShareRefreshAndWriteLocks(t *testing.T) {
 
 // newTestFileStore returns a store under the test's own directory, so nothing
 // here can read or write the developer's real credentials.
-func newTestFileStore(t *testing.T) *FileStore {
+func newTestFileStore(t *testing.T) *fileStore {
 	t.Helper()
-	s, err := NewFileStore(filepath.Join(t.TempDir(), "store", "credentials.json"))
+	s, err := newFileStore(filepath.Join(t.TempDir(), "store", "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s
 }
 
-// withDefaultStore swaps the package-level default and returns the undo. The
-// default is process-wide, so a test that changes it has to put it back.
-func withDefaultStore(t *testing.T, s Store) func() {
+// withDefaultStore points the default store at the test's own directory, so
+// nothing here can read or write the developer's real credentials.
+func withDefaultStore(t *testing.T) Store {
 	t.Helper()
-	previous := DefaultStore
-	DefaultStore = s
-	return func() { DefaultStore = previous }
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, err := resolveStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

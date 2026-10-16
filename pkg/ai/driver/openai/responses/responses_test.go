@@ -516,3 +516,47 @@ func TestCacheWritesAreReportedApartFromFreshInput(t *testing.T) {
 		t.Errorf("usage = %+v, want %+v", got, want)
 	}
 }
+
+// TestACodexBackendIsListedFromItsOwnCatalog pins the subscription listing:
+// the Codex CLI's query, slugs as IDs, a hidden model left out, and a refusal
+// classified rather than swallowed.
+func TestACodexBackendIsListedFromItsOwnCatalog(t *testing.T) {
+	status := http.StatusOK
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Path + "?" + r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"models":[
+			{"slug":"gpt-5.5-codex","display_name":"GPT-5.5 Codex","context_window":272000,
+			 "default_reasoning_level":"medium",
+			 "supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}]},
+			{"slug":"hidden","show_in_picker":false}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	lister := driverFor(t, ai.Config{BaseURL: srv.URL + "/backend-api/codex", Model: ai.Model{
+		ID: "-", API: ai.APIOpenAIResponses, Compat: ai.OpenAIResponsesCompat{CodexModelListing: true},
+	}}).(ai.ModelLister)
+
+	models, err := lister.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "/backend-api/codex/models?client_version="+codexClientVersion {
+		t.Errorf("asked %s, want the Codex catalog", query)
+	}
+	if len(models) != 1 || models[0].ID != "gpt-5.5-codex" || models[0].ContextWindow != 272000 {
+		t.Fatalf("models = %+v, want the one shown model", models)
+	}
+	if r := models[0].Reasoning; len(r) != 2 || !r[1].Default || r[0].Default {
+		t.Errorf("reasoning = %+v, want low and a default medium", r)
+	}
+
+	status = http.StatusUnauthorized
+	_, err = lister.Models(context.Background())
+	var aiErr *ai.Error
+	if !errors.As(err, &aiErr) || aiErr.Kind != ai.KindAuth {
+		t.Errorf("err = %v, want KindAuth", err)
+	}
+}

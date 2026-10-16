@@ -16,9 +16,9 @@ type Credential struct {
 	Refresh string `json:"refresh,omitempty"`
 	// ExpiresAt is when Access stops working. Zero means it does not.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	// Endpoint is the base URL the sign-in resolved to, for a vendor that
+	// BaseURL is the base URL the sign-in resolved to, for a vendor that
 	// tells you where to talk to it only after you have authenticated.
-	Endpoint string `json:"endpoint,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
 }
 
 // Expired reports whether the credential needs renewing.
@@ -53,16 +53,10 @@ type Store interface {
 	Delete(vendor string) error
 }
 
-// DefaultStore is where Login, Config, and Endpoint keep credentials when
-// they are not handed a store.
-var DefaultStore Store
-
+// resolveStore is s, or the default file store when s is nil.
 func resolveStore(s Store) (Store, error) {
 	if s != nil {
 		return s, nil
 	}
-	if DefaultStore != nil {
-		return DefaultStore, nil
-	}
-	return NewFileStore("")
+	return newFileStore("")
 }

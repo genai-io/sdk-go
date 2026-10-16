@@ -1,12 +1,13 @@
 package catalog
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/provider"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 )
 
 // protocols is what each wire protocol expects as its Compat, mirroring the
@@ -97,7 +98,7 @@ func checkVendorCredential(t *testing.T, v Vendor) {
 	t.Helper()
 	// A vendor with no credential variable is local, browser-signed-in, or on a
 	// cloud's own credentials. The row has to say which; nothing else can.
-	if len(v.KeyEnv) == 0 && v.Note == "" && v.Deployment == nil {
+	if len(v.KeyEnv) == 0 && v.Note == "" && v.VertexEnv == (VertexEnv{}) {
 		t.Error("no KeyEnv and no Note: a vendor that takes no API key has to say what it takes instead")
 	}
 	for _, name := range v.KeyEnv {
@@ -105,11 +106,10 @@ func checkVendorCredential(t *testing.T, v Vendor) {
 			t.Errorf("KeyEnv %q is not a plain environment variable name", name)
 		}
 	}
-	// The two halves of a deployment have to agree: DeploymentEnv is what a
-	// caller is told to set and Deployment is what reads it.
-	if (len(v.DeploymentEnv) > 0) != (v.Deployment != nil) {
-		t.Errorf("DeploymentEnv %v and Deployment %v disagree about whether this vendor needs one",
-			v.DeploymentEnv, v.Deployment != nil)
+	// A Vertex protocol cannot run without a project, and nothing else reads one.
+	vertex := v.API == ai.APIAnthropicVertex || v.API == ai.APIGoogleVertex
+	if vertex != (v.VertexEnv.Project != "") {
+		t.Errorf("VertexEnv %+v disagrees with API %s about whether this vendor runs on Vertex", v.VertexEnv, v.API)
 	}
 }
 
@@ -211,14 +211,14 @@ func TestDecoratedModelsDoNotAliasTheTable(t *testing.T) {
 	}
 }
 
-// TestAVendorProviderKeepsWhatTheCatalogKnows pins that a provider built from a
-// vendor hands back a model already carrying the vendor's protocol facts.
-func TestAVendorProviderKeepsWhatTheCatalogKnows(t *testing.T) {
+// TestAVendorEndpointKeepsWhatTheCatalogKnows pins that an endpoint built from
+// a vendor hands back a model already carrying the vendor's protocol facts.
+func TestAVendorEndpointKeepsWhatTheCatalogKnows(t *testing.T) {
 	v, ok := Find("deepseek")
 	if !ok {
 		t.Fatal("no deepseek vendor")
 	}
-	got, listed := v.Provider(provider.Config{}).Model("deepseek-v9")
+	got, listed := v.Endpoint(endpoint.Config{}).Model("deepseek-v9")
 	if listed {
 		t.Fatal("the model was reported as listed")
 	}
@@ -227,5 +227,98 @@ func TestAVendorProviderKeepsWhatTheCatalogKnows(t *testing.T) {
 	}
 	if ai.CompatOf[ai.OpenAIChatCompat](got).Thinking != ai.ThinkingEffortOrDisable {
 		t.Errorf("Compat = %#v, want the vendor's", got.Compat)
+	}
+}
+
+// TestAVendorReadsItsVariables covers the three lookups and the one error
+// they share, through a getenv that is not the process environment.
+func TestAVendorReadsItsVariables(t *testing.T) {
+	env := map[string]string{
+		"AZURE_OPENAI_ENDPOINT": "https://acme.openai.azure.com/",
+		"DEEPSEEK_API_KEY":      " sk-1 ",
+		"GOOGLE_CLOUD_PROJECT":  "proj",
+	}
+	getenv := func(name string) string { return env[name] }
+	find := func(id string) Vendor {
+		v, ok := Find(id)
+		if !ok {
+			t.Fatalf("no vendor %s", id)
+		}
+		return v
+	}
+	missing := func(err error, want string) {
+		t.Helper()
+		var m *MissingEnvError
+		if !errors.As(err, &m) || len(m.EnvVars) == 0 || m.EnvVars[0] != want {
+			t.Errorf("err = %v, want a MissingEnvError naming %s", err, want)
+		}
+	}
+
+	if key, err := find("deepseek").KeyFromEnv(getenv); key != "sk-1" || err != nil {
+		t.Errorf("deepseek key = %q, %v", key, err)
+	}
+	_, err := find("openai").KeyFromEnv(getenv)
+	missing(err, "OPENAI_API_KEY")
+	if key, err := find("ollama").KeyFromEnv(getenv); key != "" || err != nil {
+		t.Errorf("ollama key = %q, %v; want none and no error", key, err)
+	}
+
+	if url, err := find("azure-openai").BaseURLFromEnv(getenv); url != "https://acme.openai.azure.com/openai/v1" || err != nil {
+		t.Errorf("azure base URL = %q, %v", url, err)
+	}
+	_, err = find("bedrock-openai").BaseURLFromEnv(getenv)
+	missing(err, "AWS_BEDROCK_BASE_URL")
+	if url, _ := find("deepseek").BaseURLFromEnv(getenv); url != "https://api.deepseek.com" {
+		t.Errorf("deepseek base URL = %q, want the default", url)
+	}
+
+	if cfg, err := find("google-vertex").VertexFromEnv(getenv); err != nil || cfg.Project != "proj" {
+		t.Errorf("google-vertex = %+v, %v", cfg, err)
+	}
+	_, err = find("anthropic-vertex").VertexFromEnv(getenv)
+	missing(err, "ANTHROPIC_VERTEX_PROJECT_ID")
+	if cfg, err := find("deepseek").VertexFromEnv(getenv); cfg != nil || err != nil {
+		t.Errorf("deepseek vertex = %+v, %v; want none", cfg, err)
+	}
+}
+
+func TestBaseURLFromEnvAppliesTheOverrideAndItsSuffix(t *testing.T) {
+	tests := map[string]struct {
+		vendorID string
+		given    string
+		want     string
+	}{
+		"unset falls back to the vendor's own host": {
+			"deepseek", "", "https://api.deepseek.com"},
+		"an override replaces it": {
+			"deepseek", "https://proxy.test/v1", "https://proxy.test/v1"},
+		"a trailing slash is not part of the URL": {
+			"deepseek", "https://proxy.test/v1/", "https://proxy.test/v1"},
+		// The suffix is added to the bare URL people copy out of a console.
+		"a suffix is added when it is missing": {
+			"azure-openai", "https://my-resource.openai.azure.com", "https://my-resource.openai.azure.com/openai/v1"},
+		"and not added twice": {
+			"azure-openai", "https://my-resource.openai.azure.com/openai/v1", "https://my-resource.openai.azure.com/openai/v1"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			v, _ := Find(tc.vendorID)
+			got, err := v.BaseURLFromEnv(func(string) string { return tc.given })
+			if err != nil || got != tc.want {
+				t.Errorf("BaseURLFromEnv = %q, %v, want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestKeyFromEnvPrefersTheFirstVariable(t *testing.T) {
+	v, _ := Find("google")
+	env := map[string]string{v.KeyEnv[1]: "second"}
+	if key, _ := v.KeyFromEnv(func(n string) string { return env[n] }); key != "second" {
+		t.Errorf("key = %q, want the second variable when the first is unset", key)
+	}
+	env[v.KeyEnv[0]] = "first"
+	if key, _ := v.KeyFromEnv(func(n string) string { return env[n] }); key != "first" {
+		t.Errorf("key = %q, want the preferred variable to win", key)
 	}
 }

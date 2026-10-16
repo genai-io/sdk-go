@@ -21,7 +21,7 @@ catalog 里 28 家厂商，由 6 个协议服务：
 
 绝大多数厂商提供的是一个说别人协议的端点。DeepSeek、Moonshot、Ollama 说 OpenAI Chat Completions；MiniMax、小米 MiMo、火山引擎说 Anthropic Messages。真正区分它们的是一个 base URL、一个环境变量和一套 reasoning 方言——这三样全是数据。
 
-所以**一个厂商是 `catalog/vendors.go` 里的一行，不是一个包**。加一个 OpenAI 兼容的端点是往表里加一条记录；只有新的线格式才需要写 Go 代码。
+所以**一个厂商是 `catalog/table.go` 里的一行，不是一个包**。加一个 OpenAI 兼容的端点是往表里加一条记录；只有新的线格式才需要写 Go 代码。
 
 这条命题是否成立，有个可验证的判据：**没有任何 driver 里出现厂商名**。每个请求构造器分支依据的都是 `Compat` 字段和解析出来的 `ReasoningLevel`。
 
@@ -31,28 +31,28 @@ catalog 里 28 家厂商，由 6 个协议服务：
 
 ```
 catalog.Vendor      数据 - 不联网就能读的一行
-      | .Provider(cfg)
+      | .Endpoint(cfg)
       v
-provider.Provider   那一行配好了凭证，带一份会刷新的模型列表
+endpoint.Endpoint   那一行配好了凭证，带一份会刷新的模型列表
       | .Client(modelID)
       v
 ai.Client           一个模型
 ```
 
-每一级加一种知识，然后往下委托。`catalog` 不需要网络；`provider` 连一台主机；`Client` 跑一次调用。
+每一级加一种知识，然后往下委托。`catalog` 不需要网络；`endpoint` 连一台主机；`Client` 跑一次调用。
 
 **每一步都以它交还的东西命名**，所以不管你从哪一级进入，读法都一样：
 
 | 从 | 调用 | 拿到 |
 | --- | --- | --- |
-| `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
-| `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
+| `catalog.Vendor` | `.Endpoint(cfg)` | `*endpoint.Endpoint` |
+| `endpoint.Endpoint` | `.Client(modelID)` | `*ai.Client` |
 | `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
-| `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
+| `ai.Config` | driver 包的 `New(cfg)` | `ai.Driver` |
 | 一个引用字符串 | `auth.Client(ref)` | `*ai.Client` |
-| 一个厂商 ID | `auth.Provider(id)` | `*provider.Provider` |
+| 一个厂商 ID | `auth.Endpoint(id)` | `*endpoint.Endpoint` |
 
-**每一个包级构造函数都收 `Config`，并以它返回什么命名**——`ai.New` 给 `*Client`，`ai.NewDriver` 给 `Driver`，五个 driver 包和 `provider.New` 也是同一个形状。`ai.NewClientWithDriver(driver, model)` 是唯一的例外，而它的名字已经说明了原因：它从**你手里已有的 `Driver`** 出发。
+**每一个包级构造函数都收 `Config`，并以它返回什么命名**——`ai.New` 给 `*Client`，每个 driver 包的 `New` 给 `Driver`，`endpoint.New` 给 `*Endpoint`。`ai.NewClientWithDriver(driver, model)` 是唯一的例外，而它的名字已经说明了原因：它从**你手里已有的 `Driver`** 出发。
 
 两个包级入口，区别只有一个——**允不允许环境变量说话**：
 
@@ -63,13 +63,13 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 
 `pkg/ai` 不读任何环境变量、不读任何文件。这是它能安全地待在一台握着多个租户密钥的服务器里的原因。`pkg/ai/auth` 是那个明确选择去读的包，命令行工具要的正是它。这条分界是 **import 边界，不是约定**。
 
-**protocol 是第二根轴，不是链条的下一级。** 一个 Provider **拥有**一个 protocol，它不**是**一个 protocol。把两根轴画在一起，driver 的位置就清楚了——它挂在 model 上，不在链条上：
+**protocol 是第二根轴，不是链条的下一级。** 一个 endpoint **拥有**一个 protocol，它不**是**一个 protocol。把两根轴画在一起，driver 的位置就清楚了——它挂在 model 上，不在链条上：
 
 ```
   auth.Client("deepseek/deepseek-v4-pro")
         |
         v
-  catalog.Vendor ---> provider.Provider ---> ai.Client ---> ai.Driver ---> HTTPS
+  catalog.Vendor ---> endpoint.Endpoint ---> ai.Client ---> ai.Driver ---> HTTPS
    一行数据             主机 + 凭证             一个模型        一个协议
    不联网              + 会刷新的模型列表           |             ^
                                                   |             |
@@ -82,12 +82,12 @@ auth.Client("vendor/model")  // catalog 和环境变量提供
 基数是区分这两个词的关键：
 
 ```
-1 个 protocol  ->  多个 provider     18 家厂商说 OpenAI Chat Completions
-1 个 provider  ->  多个 model
+1 个 protocol  ->  多个 endpoint     18 家厂商说 OpenAI Chat Completions
+1 个 endpoint  ->  多个 model
 1 个 model     ->  1 个 client
 ```
 
-所以 **provider** 命名的是"一台你能连上的、配好的主机"，**protocol** 命名的是"它说的那套请求格式"。`Compat` 作用于后者——这就是为什么 `AnthropicCompat` 也能描述 MiniMax 和火山引擎：**它们说那个协议，但不是那个厂商**。
+所以 **endpoint** 命名的是"一台你能连上的、配好的主机"，**protocol** 命名的是"它说的那套请求格式"。`Compat` 作用于后者——这就是为什么 `AnthropicCompat` 也能描述 MiniMax 和火山引擎：**它们说那个协议，但不是那个厂商**。
 
 ## 28 家厂商，6 个协议，6 个 driver 包
 
@@ -168,7 +168,7 @@ reasoning 档位是第一类最清楚的例子。"该想多久"这个概念到�
 
 `prompt_cache_key` 是第二类。别的协议没有这个概念，所以它放进 `SamplingParams`，原样落进请求体。
 
-只有一个协议需要的构造设置放在 `Config.ProtocolConfig` 里，**有类型，不是 `any`**：`ai.ProtocolConfig` 是标记接口，所以一个本来就不该放进去的值是**编译期错误**。而放进去的是**另一个 driver 的**类型时，会在那个 driver 读取的那一刻被抓住——Go 没有 union type，那一半没法做成编译期检查。
+只有部分协议需要的那一个构造设置——Vertex 的 project 和 region——是一个有类型的字段 `Config.Vertex`。两个 Vertex driver 要求它，其余的忽略它。
 
 ## 协议方言
 
@@ -191,7 +191,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **不压缩。** 判断一段对话太长、总结它、丢掉最老的几轮，都是应用层拿着这个包没有的信息去做的决定。它做的是**修复**：`Repair` 只删协议本身会拒绝的东西——Ctrl-C 留下的没人应答的工具调用、经过 JavaScript 运行时的对话带来的非法 UTF-8。**修复不是策略。**
 
-**不改写你的请求去让它能跑通。** 一个没有 system 角色的模型、或者一个不能约束输出为 schema 的模型，会得到一个点名该模型的错误。把指令挪进 user 轮、或者用文字要求 JSON，是关于你产品的决定，不是关于线格式的。
+**不改写你的请求去让它能跑通。** 一个没有 system 角色的模型会得到一个点名该模型的错误。把指令挪进 user 轮是关于你产品的决定，不是关于线格式的。
 
 **不猜。** 一个上下文窗口未知的模型就是没有窗口，不会拿一个数字顶上——因为按猜出来的上限行事，两个方向上都会静默出错。
 
@@ -205,7 +205,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
         |  +---------------------- Client.prepare ------------------------+
         +--| newRequest         模型默认值 -> 客户端 -> 单次调用，按此顺序   |
         |  | validateStructure  一个 Block 必须满足的 tagged-union 不变式   |
-        |  | Repair      配对工具调用，替换非法 UTF-8                |
+        |  | Repair             配对工具调用，替换非法 UTF-8                |
         |  | validate           设置本身，然后是这个模型做不到的事           |
         |  +--------------------------------------------------------------+
         v
@@ -225,8 +225,6 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **框里的一切，对每个协议只发生一次。** 那就是 driver 待在后面的那条线：它翻译、它流式吐出，别的什么都不做。这也是为什么 `Client.Complete` 不是第二条代码路径——它抽干 `Stream`，所以一个请求到达端点的方式**有且只有一种**。
 
-`CountTokens` 量的是同一个 `*ai.Request`，所以一个 prompt 不可能"量的时候是一个样、发出去是另一个样"。
-
 ## 在到达网络之前失败
 
 请求发出前跑三层校验，顺序如下：
@@ -237,7 +235,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 目的是给出一句**调用方能据此行动的话**——"model deepseek-v4-pro does not accept image input"——而不是一个含糊的 provider 拒绝，或者更糟：一个静默降级的答案。往一个纯文本端点发图片，以前的结果是图片被丢掉、模型回答了一个它从没见过的东西。
 
-真的到了网络那一层才失败的，回来时是**分好类的**，所以"接下来怎么办"写在类型里：`IsAuth`、`IsContextExceeded`、`IsRetryable`、`IsUnsupported`。一轮失败会同时返回错误**和**一个 `*Response`，里面装着先到的东西——所以一个部分答案和它的花费不会跟错误一起丢掉。
+真的到了网络那一层才失败的，回来时是**分好类的**，所以"接下来怎么办"写在类型里：`IsAuth`、`IsContextExceeded`、`IsRetryable`，其余用 `IsKind`。每个 driver 都把失败交给同一个分类器 `driver/internal/errs`，所以同一个类别在每个协议上意思都一样。一轮失败会同时返回错误**和**一个 `*Response`，里面装着先到的东西——所以一个部分答案和它的花费不会跟错误一起丢掉。
 
 ## 哪些边界由编译器保证
 
@@ -258,18 +256,17 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
     +-- pkg/ai/driver/*   一个协议一个包。厂商 SDK 只被它拖进来，
     |                     别的地方都不碰。
     |
-    +-- pkg/ai/provider   一台配好的主机和它会刷新的模型列表
+    +-- pkg/ai/endpoint   一台配好的主机和它会刷新的模型列表
           |
           +-- pkg/ai/catalog    厂商表
                 |
-                +-- pkg/ai/auth    环境变量、文件、OAuth
+                +-- pkg/ai/auth    环境变量、凭证文件、OAuth
   ```
 
-  `catalog` **不依赖任何 driver 包**——它的整棵树只有 `pkg/ai` 加 `pkg/ai/provider`。这就是"只跟一家厂商说话的程序不必链接所有厂商 SDK"的保证，也是 `Compat` 类型必须待在 `pkg/ai` 而不是各自 driver 旁边的原因。
+  `catalog` **不依赖任何 driver 包**——它的整棵树只有 `pkg/ai` 加 `pkg/ai/endpoint`。这就是"只跟一家厂商说话的程序不必链接所有厂商 SDK"的保证，也是 `Compat` 类型必须待在 `pkg/ai` 而不是各自 driver 旁边的原因。
 
-- `driver/openai/internal/errs` 对 `driver/anthropic` 不可达，靠 `internal/`。
-- `pkg/ai`、`pkg/ai/jsonschema`、`pkg/ai/catalog`、`pkg/ai/provider` 的**模块依赖数是 0**——除标准库外什么都不依赖。厂商 SDK 只能通过你 blank import 的那个 driver 进入构建；`pkg/agent/mcp` 对 Model Context Protocol SDK 是同一笔交易：import 它才链进去，不 import 就不会。
-- `ProtocolConfig` 在编译期拒绝一个本来就不该是它的值。
+- `driver/openai/internal/oai` 对 `driver/anthropic` 不可达，`driver/internal/errs` 对 `driver/` 之外不可达，靠 `internal/`。
+- `pkg/ai`、`pkg/ai/jsonschema`、`pkg/ai/catalog`、`pkg/ai/endpoint` 的**模块依赖数是 0**——除标准库外什么都不依赖。厂商 SDK 只能通过你 blank import 的那个 driver 进入构建；`pkg/agent/mcp` 对 Model Context Protocol SDK 是同一笔交易：import 它才链进去，不 import 就不会。
 - `Driver` 只有两个方法，所以测试里的桩也只有两个方法。`pkg/ai/aitest` 就是那个桩，已经随包发出去，于是不必再写一遍。
 
 **只写在文档里的**（意味着只有 review 能拦住）：
@@ -291,7 +288,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **两层，而且这个划分是刻意的。**
 
-`test/` 是一个黑盒包。它像应用一样 import 这个 SDK，并且只断言两件事：**到达端点的字节，和回来的那个值。** 每个端点都是一个桩 HTTP 服务器，所以整套测试不需要网络、不需要凭证。伸进内部去看的测试，验证的是它被写出来时对着的那份实现；这些测试验证的是契约，所以一个在相同线上行为背后被重写的 driver，仍然能跑过。
+`integration/` 是一个黑盒包。它像应用一样 import 这个 SDK，并且只断言两件事：**到达端点的字节，和回来的那个值。** 每个端点都是一个桩 HTTP 服务器，所以整套测试不需要网络、不需要凭证。伸进内部去看的测试，验证的是它被写出来时对着的那份实现；这些测试验证的是契约，所以一个在相同线上行为背后被重写的 driver，仍然能跑过。
 
 在它旁边，每个包测自己的单元——流式生命周期、历史修复、错误分类、schema 派生、SSE 解析、工具调用分片累积、目录的不变量、凭证存储。**契约测试说的是五个协议彼此一致，单元测试说的是每一个在别人碰不到的那个 case 上是对的。**
 

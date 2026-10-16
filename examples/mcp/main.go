@@ -88,7 +88,7 @@ func run(ref, dir, url, question string) (err error) {
 		switch e := event.(type) {
 		case agent.ToolStart:
 			fmt.Printf("  \033[2m→ %s %s\033[0m\n", e.Name, e.Args)
-		case agent.MessageUpdate:
+		case agent.InferenceUpdate:
 			fmt.Print(e.Text())
 		case agent.TurnEnd:
 			fmt.Printf("\n\n\033[2m%s · %d in / %d out\033[0m\n",

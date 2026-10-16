@@ -111,7 +111,7 @@ func main() {
 
 func render(e agent.Event) {
 	switch v := e.(type) {
-	case agent.MessageUpdate:
+	case agent.InferenceUpdate:
 		fmt.Print(v.Text())
 	case agent.ToolStart:
 		fmt.Printf("\n\033[2m%s(%s)\033[0m\n", v.Name, strings.TrimSpace(v.Args))

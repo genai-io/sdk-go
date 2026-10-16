@@ -78,6 +78,12 @@ type OpenAIResponsesCompat struct {
 	// NoMaxOutputTokens marks a backend that rejects max_output_tokens, such
 	// as the ChatGPT/Codex subscription endpoint. The request is sent uncapped.
 	NoMaxOutputTokens bool `json:"no_max_output_tokens,omitempty"`
+
+	// CodexModelListing marks a backend that lists its models the way the
+	// Codex CLI reads them — under "models", keyed by slug, at
+	// /models?client_version= — as the ChatGPT/Codex subscription endpoint
+	// does. Its protocol's /models answers 401 there.
+	CodexModelListing bool `json:"codex_model_listing,omitempty"`
 }
 
 // GoogleCompat is the behavior a Google GenAI endpoint needs.

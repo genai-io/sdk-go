@@ -4,7 +4,7 @@
 model, run the tools it asks for, call it again, and report everything on the
 way as events.
 
-An agent advances **one exchange at a time**, reporting what it does as a
+An agent advances **one turn at a time**, reporting what it does as a
 sequence:
 
 ```go
@@ -18,12 +18,12 @@ for e, err := range a.Run(ctx, ai.UserMessage("what changed in main.go?")) {
 }
 ```
 
-The last event is `TurnEnd`, which carries how the exchange went and the
+The last event is `TurnEnd`, which carries how the turn went and the
 message the model produced — so a caller with nothing to render keeps that one
 and ignores the rest.
 
 Repeating it is a `for` loop, and the loop is the application's — how messages
-are batched into exchanges, what a failure means, when to stop:
+are batched into turns, what a failure means, when to stop:
 
 ```go
 for batch := range myMessages {
@@ -33,7 +33,7 @@ for batch := range myMessages {
 
 A CLI reads stdin, an interface reads keys, a server reads requests, and none
 of those is a shape this package can guess. `AddMessages` puts something into
-the exchange in flight — it arrives at the next step boundary, which is the
+the turn in flight — it arrives at the next step boundary, which is the
 only place changing what the model is about to see is safe. `Interrupt`, or
 breaking out of the range, ends it instead.
 
@@ -47,7 +47,7 @@ Both words are used precisely, because agent frameworks disagree about them:
 
 ```mermaid
 flowchart TB
-    subgraph turn["turn — one exchange"]
+    subgraph turn["turn — one Run"]
         direction TB
         inf1["inference — one model call"]
         tools["tools the model asked for"]
@@ -58,7 +58,7 @@ flowchart TB
 
 | | |
 | --- | --- |
-| **turn** | one exchange: someone said something, and the loop runs until the model stops asking for tools |
+| **turn** | one `Run`: its input enters the conversation, and the loop runs until the model stops asking for tools |
 | **inference** | one model call, of which a turn holds as many as the tools require |
 
 A turn is *not* a model call. That is the distinction most of the vocabulary
@@ -92,7 +92,7 @@ today — so one failure is reported once.
 | `max_steps` | the step budget ran out with the model still working |
 | `terminated` | every tool in a batch asked the loop to stop |
 | `error` | a model call failed past its retry budget, or a hook refused |
-| `canceled` | the context ended mid-exchange, or `Interrupt` was called |
+| `canceled` | the context ended mid-turn, or `Interrupt` was called |
 
 ### Ending one early
 
@@ -108,7 +108,7 @@ for.
 A model stopped by the output cap was interrupted, not finished, so the turn
 ends with `max_tokens` and half an answer. `WithContinuation(attempts, prompt)`
 puts the prompt into the conversation and takes another step in the same
-exchange instead:
+turn instead:
 
 ```go
 agent.WithContinuation(2, "Your answer was cut off by the output limit. "+
@@ -124,32 +124,26 @@ off.
 ### Retry
 
 No driver retries on its own, and the agent does not retry by default.
-`WithRetry(attempts, backoff)` turns it on, including for a stream that already
-yielded output — the loop discards the attempt and opens a new message — and
-for a stalled stream. The wait honours the endpoint's `Retry-After` before its
+`WithRetry(retries, backoff)` turns it on: a call that failed retryably is
+replayed up to `retries` more times after the first, waiting `backoff` and
+doubling it after each further failure. That includes a stream that already
+yielded output — the loop discards the attempt and opens a new inference — and
+a stalled stream. The wait honours the endpoint's `Retry-After` before its
 own backoff.
 
-`Interrupt()` ends the exchange in flight and leaves the agent alive: the turn
+`Interrupt()` ends the turn in flight and leaves the agent alive: the turn
 stops with `StopCanceled`, `Run` returns, and the next one starts clean. That
-is what a user pressing escape asks for.
-
-It returns a channel that closes once that exchange is actually over and the
-agent is idle again. The goroutine that read the keystroke is not the one
-ranging over `Run`, so it cannot see the range end; this is how it finds out.
-
-```go
-<-a.Interrupt()      // the turn is over, the agent is idle
-a.SetMessages(fresh)
-```
+is what a user pressing escape asks for. It does not wait: the turn is over
+when the range over `Run` ends, which the goroutine ranging over it sees.
 
 A tool already running is asked to stop through its context and then waited
-for, because it reports through the exchange — so a tool that ignores
-cancellation holds that channel open until it returns. A sequential batch stops
-between tools rather than running the rest, and each call that never ran is
-reported as cancelled.
+for, because it reports through the turn — so a tool that ignores cancellation
+holds the turn open until it returns. A sequential batch stops between tools
+rather than running the rest, and each call that never ran is reported as
+cancelled.
 
-Between exchanges there is nothing to interrupt: the channel is already closed.
-Cancelling `Run`'s own context is the other thing, and ends everything.
+Between turns there is nothing to interrupt, and it does nothing. Cancelling
+`Run`'s own context is the other thing, and ends everything.
 
 ### When a retry is not the answer
 
@@ -160,7 +154,7 @@ asked about exactly those: once the error was not retryable, or `WithRetry`'s
 budget is spent, the loop is out of answers and turns to the caller for one.
 
 ```go
-OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Recovery, error) {
     if !ai.IsContextExceeded(c.Err) || c.Attempt > 2 {
         return nil, nil // nil agrees to give up, and the turn ends on the failure
     }
@@ -169,14 +163,14 @@ OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry
     if err != nil {
         return nil, nil
     }
-    return &agent.Retry{Messages: short}, nil
+    return &agent.Recovery{Messages: short}, nil
 },
 ```
 
-A `Retry` asks for another attempt at the same step, and its `Messages` — when
-non-nil — replaces the conversation first, announced there and then as
+A `Recovery` asks for another attempt at the same step, and its `Messages` —
+when non-nil — replaces the conversation first, announced there and then as
 `MessagesReplaced`. On the stream it is the shape a retry already had: the
-failed attempt's `MessageEnd`, nothing appended, another `MessageStart`. A
+failed attempt's `InferenceEnd`, nothing appended, another `InferenceStart`. A
 consumer that handles one handles this.
 
 **The two budgets do not multiply.** `WithRetry` replays a call the loop knows
@@ -209,15 +203,16 @@ to an answer that arrived does not earn another go at getting one.
 
 ## Events
 
-Everything the agent does arrives as one of ten types. Two things have a life
-worth following — a message and a tool call — and each is reported the same
-way: it starts, it may report as it goes, it ends.
+Everything the agent does arrives as one of twelve types. What takes time is
+reported as a span — a model call, a tool call, a compaction, the turn around
+them — and each the same way: it starts, it may report as it goes, it ends.
 
 ```
-MessageAdded  MessagesReplaced            the conversation changing
-MessageStart  MessageUpdate  MessageEnd   the model producing a message
-ToolStart     ToolUpdate     ToolEnd      a tool call, asked to answered
-TurnStart                    TurnEnd      the exchange around them
+MessageAdded     MessagesReplaced               the conversation changing
+InferenceStart   InferenceUpdate  InferenceEnd  one model call
+ToolStart        ToolUpdate       ToolEnd       one tool call
+CompactionStart                   CompactionEnd the conversation being shortened
+TurnStart                         TurnEnd       the turn around them
 ```
 
 The set is closed — the `event()` method is unexported, so no other package can
@@ -229,12 +224,12 @@ over, because everything announced before one is what the agent threw away.
 Everything else reports work in progress.
 
 Every event that belongs to a turn carries its number, and every event that
-closes a span carries what opened it — `MessageEnd` its request, `ToolEnd` its
+closes a span carries what opened it — `InferenceEnd` its `Inference`, `ToolEnd` its
 name and arguments. A consumer reads what happened off the event rather than
 rebuilding it from what came before, which is why recording one is a
 translation and not a state machine.
 
-One exchange, from the outside:
+One turn, from the outside:
 
 ```mermaid
 sequenceDiagram
@@ -246,32 +241,32 @@ sequenceDiagram
     App->>Agent: Run(ctx, "what changed?")
     Agent-->>App: TurnStart
     Agent-->>App: MessageAdded (user)
-    Agent->>Model: MessageStart (attempt 1)
+    Agent->>Model: InferenceStart (attempt 1)
     Model-->>Agent: fragments
-    Agent-->>App: MessageUpdate ×N
-    Agent-->>App: MessageEnd
+    Agent-->>App: InferenceUpdate ×N
+    Agent-->>App: InferenceEnd
     Agent-->>App: MessageAdded (assistant, asks for a tool)
     Agent-->>App: ToolStart
     Agent->>Tool: run
     Tool-->>Agent: result
     Agent-->>App: ToolEnd
     Agent-->>App: MessageAdded (tool results)
-    Agent->>Model: MessageStart (attempt 1)
-    Agent-->>App: MessageUpdate ×N
-    Agent-->>App: MessageEnd
+    Agent->>Model: InferenceStart (attempt 1)
+    Agent-->>App: InferenceUpdate ×N
+    Agent-->>App: InferenceEnd
     Agent-->>App: MessageAdded (assistant, answers)
     Agent-->>App: TurnEnd
 ```
 
 ### A retry needs no event of its own
 
-When a stream fails retryably, the attempt ends with a `MessageEnd` carrying
-the error and another `MessageStart` follows with `Attempt` incremented. **No
+When a stream fails retryably, the attempt ends with an `InferenceEnd` carrying
+the error and another `InferenceStart` follows with `Attempt` incremented. **No
 `MessageAdded` comes between them** — and that absence is what tells a consumer
 the partial output it drew is void.
 
 ```
-MessageStart(attempt=1) → MessageEnd(err) → MessageStart(attempt=2) → … → MessageEnd → MessageAdded
+InferenceStart(attempt=1) → InferenceEnd(err) → InferenceStart(attempt=2) → … → InferenceEnd → MessageAdded
 ```
 
 ### Nothing is dropped
@@ -298,7 +293,7 @@ flowchart LR
     B --> C[model call]
     C -->|answered| D{{PostInfer}}
     C -->|failed| X{{OnInferError}}
-    X -->|Retry| A
+    X -->|Recovery| A
     D --> E[message]
     E --> F{{PreTool}}
     F --> G[tool runs]
@@ -310,7 +305,7 @@ flowchart LR
 | `PreStep` | the conversation, and what sending it would cost | a replacement (nil keeps it) |
 | `PreInfer` | the call, about to go | edits it in place |
 | `PostInfer` | the response, on a call that worked | edits it in place |
-| `OnInferError` | the call that failed, and why | a `*Retry` (nil gives up) |
+| `OnInferError` | the call that failed, and why | a `*Recovery` (nil gives up) |
 | `PreTool` | the call, its tool, the conversation | a `Decision` |
 | `PostTool` | the call, its tool, what it produced | a `*Result` (nil keeps it) |
 
@@ -332,17 +327,17 @@ agent.WithHooks(agent.Hook{
 - The two that answer a question rather than edit a value are asked in order
   and **the first answer is taken**: `PreTool`'s first refusal is final,
   because a gate that gets weaker as you add to it is not a gate, and so is
-  `OnInferError`'s first `Retry`.
+  `OnInferError`'s first `Recovery`.
 - Every hook runs on the loop's goroutine, one at a time, so none needs locking
   of its own.
-- **An error ends the exchange with `StopError`; a `Decision` that blocks does
+- **An error ends the turn with `StopError`; a `Decision` that blocks does
   not.** The error says the hook could not do its job, which is the
   application's failure and not something the model can work around. A block is
   a refusal the model is told about as a tool error and may try something else
   after. That is the whole difference between the two things `PreTool` returns.
 - **A hook that panics is not recovered**, unlike a tool. A tool runs on a
   goroutine this package created, where nobody else can catch it; a hook runs
-  on the goroutine ranging over `Run`, where whoever wrote it can. The exchange
+  on the goroutine ranging over `Run`, where whoever wrote it can. The turn
   unwinds with the panic, reports no outcome, and leaves the agent idle.
 
 An agent holds several hooks, not one: a permission gate and an audit log are
@@ -365,7 +360,7 @@ PreInfer: func(_ context.Context, inf *agent.Inference) error {
 
 `Client`, `System`, `Messages` and `Tools` are what the agent contributes, and
 the hook owns them for the call. Everything else a model call can carry — a forced tool
-for this step, a schema for this answer, a cap on these tokens, a protocol's
+for this step, a cap on these tokens, a protocol's
 own setting — is reached by appending to `Options`, which is layered on last,
 over the client's.
 
@@ -565,60 +560,31 @@ the same way with `Decision.Terminate`.
 
 ## Sessions
 
-The agent knows nothing about storage. A conversation is a `[]ai.Message`:
-load one, hand it to the agent, and save what the agent holds afterwards.
+The agent knows nothing about storage, and this SDK ships none. A conversation
+is a `[]ai.Message` that marshals as JSON: load one, hand it to the agent, and
+save what the agent holds afterwards.
 
 ```go
-history, err := store.Load(ctx, id)   // session.ErrNotFound for a new one
-a.SetMessages(history)
+a.SetMessages(history) // whatever you saved last time
 
 for e, err := range a.Run(ctx, msg) {
     render(e)
 }
-err = store.Save(ctx, id, a.Messages())
+save(id, a.Messages()) // the whole conversation
 ```
 
-```go
-type Store interface {
-    Save(ctx context.Context, id string, msgs []ai.Message) error
-    Load(ctx context.Context, id string) ([]ai.Message, error)
-}
-```
-
-`Save` replaces what the session held with the whole conversation, so
-compaction needs nothing of its own: `SetMessages(summary)`, and the next save
-is the summary. `Load` returns exactly what the last save wrote.
+`Messages` is the whole conversation, so compaction needs nothing of its own:
+`SetMessages(summary)`, or a `PreStep` that replaced it, and the next save is
+the summary.
 
 When to save is yours. After each `Run` is the usual answer. A program that
-must not lose a long run of tools to a crash saves on every `MessageAdded`;
-with `jsonl.Store` that costs one appended line per message.
+must not lose a long run of tools to a crash saves on every `MessageAdded` —
+appending the message — and on every `MessagesReplaced`, starting over; the
+fold of those two is the conversation.
 
-`jsonl.Store` keeps a session as an append-only log. The store is a directory,
-the session is one file in it, and each line is one record:
-
-```
-sessions/                       jsonl.Open("sessions")
-  20261016-101500.jsonl         one session; the file name is its id
-    {"type":"message","message":{…}}   ┐
-    {"type":"message","message":{…}}   │ appended as the conversation grew
-    {"type":"reset"}                   ← compaction: the conversation starts over
-    {"type":"message","message":{…}}   ┘ the compacted conversation, then what followed
-```
-
-`Load` replays the lines: a message appends, a reset empties the
-conversation. So the file is everything that happened, and the conversation
-is what the replay ends with. `Save` appends only what the file does not hold
-yet — new messages if the conversation grew, a reset and the whole
-conversation if it changed. A crash mid-write leaves an unterminated last
-line, which `Load` ignores and the next `Save` cuts off.
-
-`List` returns the sessions newest first, by file time. Renaming, copying and
-deleting a session are file operations. Give a session one writer at a time:
-two writers appending to one file interleave their lines.
-
-What a turn cost and how it ended are on `MessageEnd` and `TurnEnd`. They are
-not the conversation, so a session does not keep them; an application that
-bills or audits keeps them with the rest of its records.
+What a turn cost and how it ended are on `InferenceEnd` and `TurnEnd`. They are
+not the conversation, so a saved conversation does not hold them; an
+application that bills or audits keeps them with the rest of its records.
 
 ### Naming the turns
 
@@ -646,14 +612,11 @@ costs no tokens, so a conversation the model reads is the same either way.
 ```
 pkg/agent/
   agent.go     what an agent is: state, options, what you can read and set
-  run.go       an exchange: Run, and the reason-and-act loop behind it
-  event.go     the ten events
-  hook.go      the four hooks, and how each chain runs
+  run.go       a turn: Run, and the reason-and-act loop behind it
+  event.go     the twelve events
+  hook.go      the six hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   mcp/         an MCP server's tools, as this package's own
-pkg/session/  Save and Load a conversation
-  store.go    the Store interface
-  jsonl/      a Store as one file per session, one message per line
 ```
 
 ## What it does not do

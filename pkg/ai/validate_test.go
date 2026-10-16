@@ -61,13 +61,13 @@ func TestVertexIsHeldToTheAnthropicRules(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := Model{ID: "m", API: tc.api}.Validate(tc.messages, tc.opts...)
+			err := check(Model{ID: "m", API: tc.api}, tc.messages, tc.opts...)
 			switch {
 			case tc.wantErr == "" && err != nil:
-				t.Fatalf("Validate: %v, want it accepted", err)
+				t.Fatalf("validate: %v, want it accepted", err)
 			case tc.wantErr == "":
 			case err == nil:
-				t.Fatalf("Validate accepted the request; want %q", tc.wantErr)
+				t.Fatalf("validate accepted the request; want %q", tc.wantErr)
 			case !strings.Contains(err.Error(), tc.wantErr):
 				t.Errorf("err = %q\nwant it to contain %q", err, tc.wantErr)
 			}
@@ -79,7 +79,7 @@ func TestVertexIsHeldToTheAnthropicRules(t *testing.T) {
 // checks have to fire before the network rather than after the bill.
 func TestValidateCatchesWhatTheModelCannotDo(t *testing.T) {
 	image := Message{Role: RoleUser, Content: Content{ImageBlock(Image{MediaType: "image/png", Data: "x"})}}
-	tool := Tool{Schema: Schema{Name: "search", Description: "look things up"}}
+	tool := Schema{Name: "search", Description: "look things up"}
 
 	for name, tc := range map[string]struct {
 		model    Model
@@ -170,13 +170,13 @@ func TestValidateCatchesWhatTheModelCannotDo(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := tc.model.Validate(tc.messages, tc.opts...)
+			err := check(tc.model, tc.messages, tc.opts...)
 			switch {
 			case tc.wantErr == "" && err != nil:
-				t.Fatalf("Validate: %v, want it accepted", err)
+				t.Fatalf("validate: %v, want it accepted", err)
 			case tc.wantErr == "":
 			case err == nil:
-				t.Fatalf("Validate accepted the request; want %q", tc.wantErr)
+				t.Fatalf("validate accepted the request; want %q", tc.wantErr)
 			case !strings.Contains(err.Error(), tc.wantErr):
 				t.Errorf("err = %q\nwant it to contain %q", err, tc.wantErr)
 			}
@@ -291,7 +291,7 @@ func TestCallerContentIsStillRefused(t *testing.T) {
 		Content:    Content{TextBlock("here"), ImageBlock(Image{MediaType: "image/png", Data: "x"})},
 	})}}}
 
-	err := Model{ID: "m", API: APIGoogleGenAI}.Validate(msgs)
+	err := check(Model{ID: "m", API: APIGoogleGenAI}, msgs)
 	if err == nil || !strings.Contains(err.Error(), "only text in a tool result") {
 		t.Errorf("err = %v, want the image refused", err)
 	}
@@ -380,4 +380,9 @@ func TestAForeignSignatureComesOffAndTheThinkingStays(t *testing.T) {
 	if history[1].Content[0].Signature != "sig-from-anthropic" {
 		t.Error("strip wrote through to the caller's messages")
 	}
+}
+
+// check validates a call the way Client does before it reaches the network.
+func check(m Model, messages []Message, opts ...Option) error {
+	return m.validate(newRequest(m, messages, opts))
 }

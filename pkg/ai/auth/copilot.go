@@ -3,13 +3,13 @@ package auth
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
 	"golang.org/x/oauth2"
 )
@@ -37,16 +37,16 @@ var copilotDefaults = copilotEndpoints{
 	api:      "https://api.individual.githubcopilot.com",
 }
 
-func newCopilotFlow(e copilotEndpoints) Flow {
-	return Flow{
-		Method: "device code",
-		Login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
+func newCopilotFlow(e copilotEndpoints) flow {
+	return flow{
+		method: "device code",
+		login: func(ctx context.Context, client *http.Client, ui Interaction) (Credential, error) {
 			cfg := &oauth2.Config{
 				ClientID: copilotClientID,
 				Scopes:   []string{"read:user"},
 				Endpoint: oauth2.Endpoint{DeviceAuthURL: e.device, TokenURL: e.token, AuthStyle: oauth2.AuthStyleInParams},
 			}
-			token, err := oauth.Device(ctx, cfg, ui)
+			token, err := deviceGrant(ctx, cfg, ui)
 			if err != nil {
 				return Credential{}, err
 			}
@@ -62,9 +62,9 @@ func newCopilotFlow(e copilotEndpoints) Flow {
 			// The GitHub token does not expire, so it is what persists.
 			// Storing the short-lived Copilot token instead would mean signing
 			// in again every half hour.
-			return Credential{Access: token.AccessToken, Endpoint: api}, nil
+			return Credential{Access: token.AccessToken, BaseURL: api}, nil
 		},
-		Token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
+		token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
 			api, expires, token, err := copilotSessionToken(ctx, client, e, c.Access)
 			if err != nil {
 				return "", time.Time{}, c, err
@@ -73,8 +73,11 @@ func newCopilotFlow(e copilotEndpoints) Flow {
 			// after authentication, and an enterprise account's differs from
 			// an individual's. The short-lived token is not: it would be stale
 			// before the next run.
-			c.Endpoint = api
+			c.BaseURL = api
 			return token, expires, c, nil
+		},
+		identify: func(h http.Header, _, _ string) {
+			h.Set("X-Request-Id", newUUID())
 		},
 	}
 }
@@ -92,11 +95,14 @@ func copilotSessionToken(ctx context.Context, client *http.Client, e copilotEndp
 	req.Header.Set("Accept", "application/json")
 	// The same editor headers the vendor row carries: this exchange refuses a
 	// caller that does not identify itself as one, exactly as the API does.
+	// Except the API version: on api.github.com it selects a REST API
+	// version, and the Copilot API's date is not one.
 	if v, ok := catalog.Find(copilotVendor); ok {
 		for name, value := range v.Headers {
 			req.Header.Set(name, value)
 		}
 	}
+	req.Header.Del("X-GitHub-Api-Version")
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -127,4 +133,14 @@ func copilotSessionToken(ctx context.Context, client *http.Client, e copilotEndp
 		expires = time.Unix(out.ExpiresAt, 0)
 	}
 	return api, expires, out.Token, nil
+}
+
+// newUUID returns a random UUIDv4, the shape Copilot's X-Request-Id and the
+// ChatGPT backend's session_id take.
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

@@ -13,7 +13,7 @@ type Request struct {
 	System string
 
 	Messages []Message
-	Tools    []Tool
+	Tools    []Schema
 
 	// MaxTokens caps the output. Zero leaves the cap off the wire.
 	MaxTokens int
@@ -35,10 +35,6 @@ type Request struct {
 	// CacheRetention asks for a prompt-cache lifetime.
 	CacheRetention CacheRetention
 
-	// Schema constrains the answer to a JSON shape. Nil leaves the model free
-	// to answer in prose.
-	Schema *Schema
-
 	// SamplingParams are merged into the request body verbatim, over the named
 	// fields above and over the model's own SamplingParams, so a caller can
 	// reach a parameter this SDK does not model. Only the OpenAI-family
@@ -59,7 +55,7 @@ func WithSystem(system string) Option {
 
 // WithTools offers the model a set of tools. Calling it replaces any tools a
 // lower layer set; calling it with none removes them.
-func WithTools(tools ...Tool) Option {
+func WithTools(tools ...Schema) Option {
 	return func(r *Request) { r.Tools = slices.Clone(tools) }
 }
 
@@ -93,11 +89,6 @@ func WithStopSequences(stop ...string) Option {
 // WithCacheRetention asks the provider for a prompt-cache lifetime.
 func WithCacheRetention(c CacheRetention) Option {
 	return func(r *Request) { r.CacheRetention = c }
-}
-
-// WithSchema constrains the answer to a JSON shape.
-func WithSchema(s *Schema) Option {
-	return func(r *Request) { r.Schema = cloneSchema(s) }
 }
 
 // newRequest builds the request for one call: the model's own defaults first,
@@ -180,7 +171,7 @@ var efforts = []Effort{
 }
 
 // Valid reports whether e is one of the portable rungs above. A model may
-// still offer rungs of its own naming; Model.Offers is what answers that.
+// still offer rungs of its own naming; Model.Efforts lists them.
 func (e Effort) Valid() bool {
 	if e == EffortDefault {
 		return true

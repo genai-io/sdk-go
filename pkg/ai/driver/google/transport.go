@@ -15,9 +15,9 @@ import (
 // request/response mechanics — URL construction, headers, and reading a
 // server-sent-event stream — live here rather than in a vendor library.
 
-// methodURL builds the URL for a model method, e.g. ":countTokens".
-func (d *Driver) methodURL(method, query string) string {
-	u := fmt.Sprintf("%s/%s:%s", d.models, d.model.ID, method)
+// methodURL builds the URL for a model method, e.g. ":streamGenerateContent".
+func (d *driver) methodURL(method, query string) string {
+	u := fmt.Sprintf("%s/%s:%s", d.modelsURL, d.model.ID, method)
 	if query != "" {
 		u += "?" + query
 	}
@@ -25,7 +25,7 @@ func (d *Driver) methodURL(method, query string) string {
 }
 
 // post sends one call.
-func (d *Driver) post(ctx context.Context, url string, body any) (*http.Response, error) {
+func (d *driver) post(ctx context.Context, url string, body any) (*http.Response, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func (d *Driver) post(ctx context.Context, url string, body any) (*http.Response
 	return d.do(req)
 }
 
-func (d *Driver) get(ctx context.Context, url string) (*http.Response, error) {
+func (d *driver) get(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (d *Driver) get(ctx context.Context, url string) (*http.Response, error) {
 	return d.do(req)
 }
 
-func (d *Driver) do(req *http.Request) (*http.Response, error) {
+func (d *driver) do(req *http.Request) (*http.Response, error) {
 	// The key travels in a header rather than the query string the REST
 	// examples use: a URL ends up in proxy logs and error reports, and a
 	// credential should not go with it.

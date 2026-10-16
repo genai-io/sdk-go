@@ -2,7 +2,6 @@ package vertex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,12 +13,6 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
-
-// otherConfig stands in for another protocol's construction settings, which
-// this driver must refuse rather than ignore.
-type otherConfig struct{}
-
-func (otherConfig) ProtocolConfig() {}
 
 // Every failure here happens before a request, so it is what a caller
 // enumerating providers actually hits.
@@ -36,69 +29,46 @@ func TestNewRefusesWhatItCannotDeploy(t *testing.T) {
 		}
 	})
 
-	t.Run("another protocol's settings", func(t *testing.T) {
-		_, err := New(ai.Config{Model: model, ProtocolConfig: otherConfig{}})
-		if err == nil {
-			t.Fatal("a foreign ProtocolConfig was accepted")
-		}
-		if !strings.Contains(err.Error(), "VertexConfig") {
-			t.Errorf("message = %q, want it to name the type this driver expects", err)
-		}
-	})
-
 	t.Run("no credentials", func(t *testing.T) {
 		// Point every ADC source at nothing.
 		t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", filepath.Join(t.TempDir(), "missing.json"))
-		_, err := New(ai.Config{Model: model, ProtocolConfig: ai.VertexConfig{Project: "p"}})
+		_, err := New(ai.Config{Model: model, Vertex: &ai.VertexConfig{Project: "p"}})
 		if !ai.IsAuth(err) {
 			t.Fatalf("error = %v, want a credential failure", err)
 		}
 	})
 }
 
-// The project and location go in the path, the token in the header, and the
-// countTokens body is Vertex's flat shape rather than the Gemini API's wrapper.
+// The project and location go in the path, and the token in the header.
 func TestRequestsCarryTheDeploymentAndTheToken(t *testing.T) {
-	var got struct {
-		path, auth string
-		body       map[string]any
-	}
+	var got struct{ path, auth string }
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.path = r.URL.Path
 		got.auth = r.Header.Get("Authorization")
-		_ = json.NewDecoder(r.Body).Decode(&got.body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"totalTokens":7}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n")
 	}))
 	defer s.Close()
 	stubCredentials(t)
 
 	d, err := New(ai.Config{
-		Model:          ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL:        s.URL + "/",
-		ProtocolConfig: ai.VertexConfig{Project: "my-project", Region: "us-central1"},
+		Model:   ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
+		BaseURL: s.URL + "/",
+		Vertex:  &ai.VertexConfig{Project: "my-project", Region: "us-central1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := d.(ai.TokenCounter).CountTokens(context.Background(), &ai.Request{
-		System:   "be brief",
-		Messages: []ai.Message{{Role: ai.RoleUser, Content: ai.TextContent("hi")}},
-	})
-	if err != nil || n != 7 {
-		t.Fatalf("CountTokens = %d, %v", n, err)
+	for _, err := range d.Stream(context.Background(), &ai.Request{Messages: []ai.Message{ai.UserMessage("hi")}}) {
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
 	}
-	if want := "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-test:countTokens"; got.path != want {
+	if want := "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-test:streamGenerateContent"; got.path != want {
 		t.Errorf("path = %q, want %q", got.path, want)
 	}
 	if got.auth != "Bearer stub-token" {
 		t.Errorf("Authorization = %q, want the ADC token", got.auth)
-	}
-	if _, wrapped := got.body["generateContentRequest"]; wrapped {
-		t.Errorf("body = %v, want the flat shape Vertex takes", got.body)
-	}
-	if _, ok := got.body["systemInstruction"]; !ok {
-		t.Errorf("body = %v, want the system instruction counted", got.body)
 	}
 }
 
@@ -117,15 +87,15 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	stubCredentials(t)
 
 	d, err := New(ai.Config{
-		Model:          ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL:        s.URL,
-		ProtocolConfig: ai.VertexConfig{Project: "p"},
+		Model:   ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
+		BaseURL: s.URL,
+		Vertex:  &ai.VertexConfig{Project: "p"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Name() != Name {
-		t.Errorf("Name = %q, want %q", d.Name(), Name)
+	if d.Name() != name {
+		t.Errorf("Name = %q, want %q", d.Name(), name)
 	}
 	if _, lists := d.(ai.ModelLister); lists {
 		t.Error("the Vertex driver claims a model listing, which Vertex does not publish")
@@ -141,8 +111,8 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	if !errors.As(streamErr, &e) {
 		t.Fatalf("error is %T (%v), want *ai.Error", streamErr, streamErr)
 	}
-	if e.Driver != Name {
-		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, Name)
+	if e.Driver != name {
+		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, name)
 	}
 }
 

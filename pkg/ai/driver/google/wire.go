@@ -73,12 +73,10 @@ const (
 )
 
 type generationConfig struct {
-	MaxOutputTokens    int32           `json:"maxOutputTokens,omitempty"`
-	Temperature        *float32        `json:"temperature,omitempty"`
-	StopSequences      []string        `json:"stopSequences,omitempty"`
-	ThinkingConfig     *thinkingConfig `json:"thinkingConfig,omitempty"`
-	ResponseMIMEType   string          `json:"responseMimeType,omitempty"`
-	ResponseJSONSchema any             `json:"responseJsonSchema,omitempty"`
+	MaxOutputTokens int32           `json:"maxOutputTokens,omitempty"`
+	Temperature     *float32        `json:"temperature,omitempty"`
+	StopSequences   []string        `json:"stopSequences,omitempty"`
+	ThinkingConfig  *thinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
 type thinkingConfig struct {
@@ -117,27 +115,6 @@ type usageMetadata struct {
 	CachedContentTokenCount int32 `json:"cachedContentTokenCount,omitempty"`
 }
 
-// countTokensRequest is the Gemini API's wrapper around a count: the system
-// instruction and the tool declarations count against the window too, and the
-// wrapper is the only form that endpoint accepts them in. Vertex takes the
-// inner form flat.
-type countTokensRequest struct {
-	GenerateContentRequest *countTokensInner `json:"generateContentRequest,omitempty"`
-}
-
-type countTokensInner struct {
-	// Model is required inside the wrapper, in "models/{id}" form, and has no
-	// place in the flat form.
-	Model             string     `json:"model,omitempty"`
-	Contents          []*content `json:"contents,omitempty"`
-	SystemInstruction *content   `json:"systemInstruction,omitempty"`
-	Tools             []*tool    `json:"tools,omitempty"`
-}
-
-type countTokensResponse struct {
-	TotalTokens int32 `json:"totalTokens,omitempty"`
-}
-
 type modelList struct {
 	Models        []listedModel `json:"models,omitempty"`
 	NextPageToken string        `json:"nextPageToken,omitempty"`
@@ -151,13 +128,4 @@ type listedModel struct {
 	// SupportedGenerationMethods is the only thing telling a prompt-answering
 	// model from the embedding, TTS, image and live models the listing carries.
 	SupportedGenerationMethods []string `json:"supportedGenerationMethods,omitempty"`
-}
-
-// apiError is the parts of the Google API error envelope the driver reads:
-// {"error":{message,status}}. The numeric code repeats the HTTP status.
-type apiError struct {
-	Error struct {
-		Message string `json:"message,omitempty"`
-		Status  string `json:"status,omitempty"`
-	} `json:"error"`
 }

@@ -62,7 +62,7 @@ type driver struct {
 // New builds a driver from a Config. Registered as the factory for
 // ai.APIGoogleGenAI.
 func New(cfg ai.Config) (ai.Driver, error) {
-	base := cmp.Or(cfg.MergedBaseURL(), defaultBaseURL)
+	base := cmp.Or(cfg.EffectiveBaseURL(), defaultBaseURL)
 	return NewDeployment(cfg, ai.APIGoogleGenAI, strings.TrimSuffix(base, "/")+"/"+apiVersion+"/models")
 }
 
@@ -77,7 +77,7 @@ func NewDeployment(cfg ai.Config, api ai.API, modelsURL string) (ai.Driver, erro
 		fail:      errs.For(string(api), details),
 		modelsURL: modelsURL,
 		apiKey:    cfg.APIKey,
-		headers:   cfg.MergedHeaders(),
+		headers:   cfg.EffectiveHeaders(),
 		model:     cfg.Model,
 		compat:    ai.CompatOf[ai.GoogleCompat](cfg.Model),
 	}, nil

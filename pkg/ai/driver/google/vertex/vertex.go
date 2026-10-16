@@ -66,7 +66,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	cfg.HTTPClient = &authed
 	cfg.APIKey = "" // the credential is the token, and a key header beside it would be refused
 
-	base := strings.TrimSuffix(cfg.MergedBaseURL(), "/")
+	base := strings.TrimSuffix(cfg.EffectiveBaseURL(), "/")
 	if base == "" {
 		base = baseURL(region)
 	}

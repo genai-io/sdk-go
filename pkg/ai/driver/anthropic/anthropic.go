@@ -70,7 +70,7 @@ func NewDeployment(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.
 		// whole turn. An SDK retrying underneath would multiply it silently.
 		option.WithMaxRetries(0),
 	}, opts...)
-	if url := cfg.MergedBaseURL(); url != "" {
+	if url := cfg.EffectiveBaseURL(); url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
 	if cfg.APIKey != "" {
@@ -85,7 +85,7 @@ func NewDeployment(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	for k, v := range cfg.MergedHeaders() {
+	for k, v := range cfg.EffectiveHeaders() {
 		opts = append(opts, option.WithHeader(k, v))
 	}
 

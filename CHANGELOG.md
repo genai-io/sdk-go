@@ -42,7 +42,7 @@ Each such change is listed under **Changed** with what to write instead.
   internal. `Credential.Endpoint` is `Credential.BaseURL` (json `base_url`).
 - `anthropic.NewWithOptions` and `google.NewAt` are `NewDeployment`, and
   return an `ai.Driver`.
-- `ai.Config.URL()` is `MergedBaseURL()`.
+- `ai.Config.URL()` is `EffectiveBaseURL()`, and `MergedHeaders()` is `EffectiveHeaders()`.
 - `Usage.CacheWrite1h` is `CacheWriteLong` (json `cache_write_long`).
 - **Agent events are named for what they time.** `MessageStart`,
   `MessageUpdate` and `MessageEnd` are `InferenceStart`, `InferenceUpdate` and

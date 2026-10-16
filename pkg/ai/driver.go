@@ -102,9 +102,9 @@ type VertexConfig struct {
 // region is for data residency.
 const VertexDefaultRegion = "global"
 
-// MergedHeaders returns the headers to send: the model's, then the Config's
+// EffectiveHeaders returns the headers to send: the model's, then the Config's
 // over them, so a Config header of the same name wins.
-func (c Config) MergedHeaders() map[string]string {
+func (c Config) EffectiveHeaders() map[string]string {
 	if len(c.Model.Headers) == 0 && len(c.Headers) == 0 {
 		return nil
 	}
@@ -114,9 +114,9 @@ func (c Config) MergedHeaders() map[string]string {
 	return out
 }
 
-// MergedBaseURL returns the base URL to use: the Config override if set,
+// EffectiveBaseURL returns the base URL to use: the Config override if set,
 // otherwise the model's, otherwise "" for the driver's default.
-func (c Config) MergedBaseURL() string {
+func (c Config) EffectiveBaseURL() string {
 	if c.BaseURL != "" {
 		return c.BaseURL
 	}

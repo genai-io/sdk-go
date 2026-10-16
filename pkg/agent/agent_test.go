@@ -368,11 +368,16 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 		go func(f func()) {
 			defer wg.Done()
 			<-running
+			// Paced, not spun: four goroutines hammering the lock starve the
+			// turn, and AddMessages in a tight loop grows the conversation
+			// that every Messages copies.
+			tick := time.NewTicker(100 * time.Microsecond)
+			defer tick.Stop()
 			for {
 				select {
 				case <-stop:
 					return
-				default:
+				case <-tick.C:
 					f()
 				}
 			}

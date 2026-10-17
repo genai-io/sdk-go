@@ -370,7 +370,7 @@ flowchart LR
 agent 从头到尾不知道有存储这回事。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，随着它变化把 agent 手里的那份存回去。
 
 ```go
-w, _ := store.Write(ctx, id)             // 每个会话一个写入者
+w, _ := store.Writer(ctx, id)            // 每个会话一个写入者
 history, _ := store.Load(ctx, id)
 a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {

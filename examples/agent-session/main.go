@@ -5,7 +5,7 @@
 // agents. A conversation is a []ai.Message: load one, hand it to the agent,
 // and save what the agent holds whenever its conversation changes —
 //
-//	w, _ := store.Write(ctx, id)             // this process's writer
+//	w, _ := store.Writer(ctx, id)            // this process's writer
 //	history, _ := store.Load(ctx, id)
 //	a.SetMessages(history)
 //	for e, err := range a.Run(ctx, msg) {
@@ -92,7 +92,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 
 	// One writer per session: a second process on the same id gets
 	// session.ErrBusy here rather than interleaving its lines with ours.
-	w, err := store.Write(ctx, id)
+	w, err := store.Writer(ctx, id)
 	if err != nil {
 		return err
 	}

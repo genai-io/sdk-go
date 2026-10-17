@@ -377,7 +377,7 @@ agent 不知道存储的存在。一份对话就是一个 `[]ai.Message`：读�
 
 ```go
 store, err := session.Open("sessions")
-w, err := store.Write(ctx, id)        // 这个会话唯一的写入者；已被占用时返回 session.ErrBusy
+w, err := store.Writer(ctx, id)        // 这个会话唯一的写入者；已被占用时返回 session.ErrBusy
 defer w.Close()
 
 history, err := store.Load(ctx, id)
@@ -399,11 +399,11 @@ sessions/                       session.Open("sessions")
   20261016-101500.jsonl         一个会话；文件名就是它的 id
     {"type":"message","time":…,"message":{…}}   ┐ 对话增长时逐条追加
     {"type":"title","time":…,"data":{…}}        │ w.Append("title", v)：应用自己的记录
-    {"type":"reset","time":…}                   ← 压缩：对话从这里重新开始
+    {"type":"truncate","time":…}                ← 压缩：对话截到空
     {"type":"message","time":…,"message":{…}}   ┘ 压缩后的对话，以及之后的消息
 ```
 
-`Load` 按顺序重放这些行：message 追加，reset 清空，其余跳过。`Records` 按顺序返回每一行——应用从中折叠出自己的记录，`session.Conversation` 也从同样的记录折叠出对话。`Save` 只追加文件里还没有的部分——对话变长了就追加新消息，被改写了就追加一行 reset 和整份新对话；消息按 ID 比较，没有 ID 就整条比较；写完落盘。`Append` 写一条应用记录，落盘留给下一次 `Save` 或 `Close`。写到一半崩溃会留下没写完的最后一行，读的时候忽略它，下一个写入者把它截掉。
+`Load` 按顺序重放这些行：message 追加，truncate 把对话截到前 `keep` 条，其余跳过。`Records` 按顺序返回每一行——应用从中折叠出自己的记录，`session.Conversation` 也从同样的记录折叠出对话。`Save` 只追加和文件里不同的部分：最长未变前缀之后的消息；前缀之后有改动时，前面先加一行截到该前缀的 truncate。所以编辑、回退、清理工具输出都只花改动的那部分。消息整条比较；写完落盘。要在第 k 条分叉，先 `Fork` 会话，再往副本 `Save` 前 k 条。`Append` 写一条应用记录，落盘留给下一次 `Save` 或 `Close`。写到一半崩溃会留下没写完的最后一行，读的时候忽略它，下一个写入者把它截掉。
 
 `Write` 是一份租约：每个会话同一时刻只有一个写入者，跨进程也是，直到 `Close`。`List` 按文件时间从新到旧列出会话；`Fork` 把一个会话复制到新 id；`Delete` 删除没有写入者占着的会话。
 

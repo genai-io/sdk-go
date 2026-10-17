@@ -4,17 +4,17 @@
 // one Record per line:
 //
 //	{"type":"message","time":…,"message":{…}}   a message joined the conversation
-//	{"type":"reset","time":…}                   the conversation starts over here
+//	{"type":"truncate","time":…,"keep":3}       the conversation is cut to its first 3 messages
 //	{"type":"title","time":…,"data":{…}}        anything the application keeps
 //
-// The conversation is what the messages and resets replay to, and Load
+// The conversation is what the messages and truncations replay to, and Load
 // returns it. Records returns every record, in the order written, for
 // whatever else the application keeps beside the conversation.
 //
 // A session has one writer at a time, across processes too. Save it on every
 // change to the conversation:
 //
-//	w, err := store.Write(ctx, id)   // session.ErrBusy if another writer holds it
+//	w, err := store.Writer(ctx, id)  // session.ErrBusy if another writer holds it
 //	defer w.Close()
 //	history, err := store.Load(ctx, id)
 //	a.SetMessages(history)
@@ -25,10 +25,15 @@
 //		}
 //	}
 //
-// Save appends what is new: a conversation that grew costs a line per message,
-// one that changed in place — compaction, an edit — a reset and the whole
-// conversation. A process killed mid-write leaves an unterminated last line,
-// which reading ignores and the next writer cuts off.
+// Save appends what is new. A conversation that grew costs a line per new
+// message; one changed partway — an edit, a rewind, cleared tool output —
+// costs a truncate to the unchanged prefix and the messages after it; a
+// compaction is a truncate to nothing. To branch a session at message k, Fork
+// it and Save the first k messages to the copy.
+//
+// A process killed mid-write leaves an unterminated last line, which reading
+// ignores and the next writer cuts off. A reader that holds no writer may see
+// a Save half done: take the writer before Load to resume.
 package session
 
 import (
@@ -59,17 +64,19 @@ var (
 	ErrBusy = errors.New("session: in use by another writer")
 )
 
-// Record is one line of a session. Type "message" carries Message, "reset"
-// carries nothing, and any other type is the application's, carrying Data.
+// Record is one line of a session. Type "message" carries Message,
+// "truncate" carries Keep, and any other type is the application's, carrying
+// Data.
 type Record struct {
 	Type    string          `json:"type"`
 	Time    time.Time       `json:"time"`
 	Message *ai.Message     `json:"message,omitempty"`
+	Keep    int             `json:"keep,omitempty"` // how many messages a truncate keeps
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 // Conversation replays records into the conversation they end with: a
-// message appends, a reset empties, and any other record is passed over.
+// message appends, a truncate cuts, and any other record is passed over.
 func Conversation(records iter.Seq2[Record, error]) ([]ai.Message, error) {
 	var msgs []ai.Message
 	for r, err := range records {
@@ -79,8 +86,11 @@ func Conversation(records iter.Seq2[Record, error]) ([]ai.Message, error) {
 		switch r.Type {
 		case "message":
 			msgs = append(msgs, *r.Message)
-		case "reset":
-			msgs = nil
+		case "truncate":
+			if r.Keep > len(msgs) {
+				return nil, fmt.Errorf("session: truncate keeps %d of %d messages", r.Keep, len(msgs))
+			}
+			msgs = msgs[:r.Keep]
 		}
 	}
 	return msgs, nil
@@ -145,7 +155,7 @@ func read(f io.Reader, id string) iter.Seq2[Record, error] {
 				yield(Record{}, fmt.Errorf("session: %s line %d: %w", id, n, err))
 				return
 			}
-			if r.Type == "" || r.Type == "message" && r.Message == nil {
+			if r.Type == "" || r.Type == "message" && r.Message == nil || r.Keep < 0 {
 				yield(Record{}, fmt.Errorf("session: %s line %d: not a session record", id, n))
 				return
 			}
@@ -247,10 +257,10 @@ func writeSynced(path string, data []byte) error {
 	return errors.Join(err, f.Close())
 }
 
-// Write takes the session's writer, creating the session if it does not
+// Writer takes the session's writer, creating the session if it does not
 // exist. It is ErrBusy while another writer, in this process or another,
 // holds it. Close gives it back.
-func (s *Store) Write(ctx context.Context, id string) (*Writer, error) {
+func (s *Store) Writer(ctx context.Context, id string) (*Writer, error) {
 	path, err := s.path(ctx, id)
 	if err != nil {
 		return nil, err
@@ -297,25 +307,27 @@ type Writer struct {
 	err   error        // a failed write leaves the file unfit to append to
 }
 
-// Save appends what msgs adds to the conversation the session holds, or a
-// reset and all of msgs when it is not an extension of it, and flushes the
-// session to disk. Messages are compared whole, so an edited message is
-// saved even when it keeps its ID.
+// Save makes the session hold msgs, appending only what differs from what it
+// holds: the messages after the longest unchanged prefix, behind a truncate
+// to that prefix when anything after it changed. It flushes the session to
+// disk. Messages are compared whole, so an edit that keeps its ID is saved.
 func (w *Writer) Save(msgs []ai.Message) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	now := time.Now()
+	keep := 0
+	for keep < min(len(w.saved), len(msgs)) && same(w.saved[keep], msgs[keep]) {
+		keep++
+	}
 	var lines []Record
-	start := len(w.saved)
-	if len(msgs) < start || !slices.EqualFunc(w.saved, msgs[:start], same) {
-		lines = append(lines, Record{Type: "reset", Time: now})
-		start = 0
+	if keep < len(w.saved) {
+		lines = append(lines, Record{Type: "truncate", Time: now, Keep: keep})
 	}
-	if start == len(msgs) && lines == nil {
+	for i := range msgs[keep:] {
+		lines = append(lines, Record{Type: "message", Time: now, Message: &msgs[keep+i]})
+	}
+	if lines == nil {
 		return w.err
-	}
-	for i := range msgs[start:] {
-		lines = append(lines, Record{Type: "message", Time: now, Message: &msgs[start+i]})
 	}
 	if err := w.write(lines...); err != nil {
 		return err
@@ -324,7 +336,18 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	return w.sync()
 }
 
-func same(a, b ai.Message) bool { return reflect.DeepEqual(a, b) }
+// same reports whether two messages are the same message. Their encodings
+// decide when the values differ, since a message read back from disk can
+// differ from the one written only where JSON cannot tell — an empty slice
+// and a nil one.
+func same(a, b ai.Message) bool {
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
+}
 
 // clone copies msgs deep enough that an edit the caller makes in place still
 // differs from what was saved.
@@ -337,10 +360,10 @@ func clone(msgs []ai.Message) []ai.Message {
 }
 
 // Append adds an application record of type typ carrying data as JSON. The
-// types "message" and "reset" are the conversation's. It is on disk once a
+// types "message" and "truncate" are the conversation's. It is on disk once a
 // Save or Close follows.
 func (w *Writer) Append(typ string, data any) error {
-	if typ == "" || typ == "message" || typ == "reset" {
+	if typ == "" || typ == "message" || typ == "truncate" {
 		return fmt.Errorf("session: %q is not an application record type", typ)
 	}
 	raw, err := json.Marshal(data)

@@ -33,7 +33,7 @@ func open(t *testing.T) (*session.Store, string) {
 
 func write(t *testing.T, s *session.Store, id string) *session.Writer {
 	t.Helper()
-	w, err := s.Write(ctx, id)
+	w, err := s.Writer(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSaveAppendsWhatIsNewAndResetsWhatChanged(t *testing.T) {
 		}
 	}
 	got := types(t, s, "a")
-	want := []string{"message", "note", "message", "note", "note", "reset", "message", "note", "message", "note"}
+	want := []string{"message", "note", "message", "note", "note", "truncate", "message", "note", "message", "note"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("records = %v, want %v", got, want)
 	}
@@ -104,7 +104,7 @@ func TestSaveComparesMessagesWithoutIDs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := types(t, s, "a"); !slices.Equal(got, []string{"message", "message", "reset", "message"}) {
+	if got := types(t, s, "a"); !slices.Equal(got, []string{"message", "message", "truncate", "message"}) {
 		t.Fatalf("records = %v", got)
 	}
 }
@@ -135,11 +135,11 @@ func TestUnfinishedLineIsIgnoredAndCut(t *testing.T) {
 
 func TestBadLineIsAnError(t *testing.T) {
 	s, dir := open(t)
-	_ = os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte("{broken}\n{\"type\":\"reset\"}\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte("{broken}\n{\"type\":\"truncate\"}\n"), 0o600)
 	if _, err := s.Load(ctx, "a"); err == nil {
 		t.Fatal("Load read past a bad line")
 	}
-	if _, err := s.Write(ctx, "a"); err == nil {
+	if _, err := s.Writer(ctx, "a"); err == nil {
 		t.Fatal("Write opened a session it cannot read")
 	}
 }
@@ -147,7 +147,7 @@ func TestBadLineIsAnError(t *testing.T) {
 func TestOneWriterAtATime(t *testing.T) {
 	s, dir := open(t)
 	w := write(t, s, "a")
-	if _, err := s.Write(ctx, "a"); !errors.Is(err, session.ErrBusy) {
+	if _, err := s.Writer(ctx, "a"); !errors.Is(err, session.ErrBusy) {
 		t.Fatalf("second Write = %v, want ErrBusy", err)
 	}
 	if err := s.Delete(ctx, "a"); !errors.Is(err, session.ErrBusy) {
@@ -201,12 +201,12 @@ func TestDeleteForkList(t *testing.T) {
 func TestRefused(t *testing.T) {
 	s, _ := open(t)
 	for _, id := range []string{"", ".hidden", "a/b", `a\b`, ".."} {
-		if _, err := s.Write(ctx, id); err == nil {
+		if _, err := s.Writer(ctx, id); err == nil {
 			t.Errorf("Write(%q) accepted", id)
 		}
 	}
 	w := write(t, s, "a")
-	for _, typ := range []string{"", "message", "reset"} {
+	for _, typ := range []string{"", "message", "truncate"} {
 		if err := w.Append(typ, nil); err == nil {
 			t.Errorf("Append(%q) accepted", typ)
 		}
@@ -215,7 +215,7 @@ func TestRefused(t *testing.T) {
 
 func TestConversation(t *testing.T) {
 	a := msg("1", "a")
-	recs := []session.Record{{Type: "message", Message: &a}, {Type: "note"}, {Type: "reset"}, {Type: "message", Message: &a}, {Type: "message", Message: &a}}
+	recs := []session.Record{{Type: "message", Message: &a}, {Type: "note"}, {Type: "truncate"}, {Type: "message", Message: &a}, {Type: "message", Message: &a}}
 	got, err := session.Conversation(func(yield func(session.Record, error) bool) {
 		for _, r := range recs {
 			if !yield(r, nil) {
@@ -242,5 +242,71 @@ func TestSaveKeepsAnEditThatKeepsItsID(t *testing.T) {
 	loaded, err := s.Load(ctx, "a")
 	if err != nil || len(loaded) != 1 || loaded[0].Text() != "edited" {
 		t.Fatalf("Load = %v, %v; want the edit", ids(loaded), err)
+	}
+}
+
+func TestSaveWritesOnlyWhatChangedAfterTheUnchangedPrefix(t *testing.T) {
+	s, _ := open(t)
+	w := write(t, s, "a")
+	a, b, c, d := msg("1", "a"), msg("2", "b"), msg("3", "c"), msg("4", "d")
+	for _, conv := range [][]ai.Message{{a, b, c}, {a, b}, {a, d}} {
+		if err := w.Save(conv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var keeps []int
+	for r, err := range s.Records(ctx, "a") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Type == "truncate" {
+			keeps = append(keeps, r.Keep)
+		}
+	}
+	// A rewind to two messages, then an edit of the second: neither rewrites a.
+	if got := types(t, s, "a"); !slices.Equal(got, []string{"message", "message", "message", "truncate", "truncate", "message"}) {
+		t.Fatalf("records = %v", got)
+	}
+	if !slices.Equal(keeps, []int{2, 1}) {
+		t.Fatalf("truncates keep %v, want [2 1]", keeps)
+	}
+	loaded, err := s.Load(ctx, "a")
+	if err != nil || !slices.Equal(ids(loaded), ids([]ai.Message{a, d})) {
+		t.Fatalf("Load = %v, %v", ids(loaded), err)
+	}
+}
+
+func TestResumingRewritesNothing(t *testing.T) {
+	s, _ := open(t)
+	w := write(t, s, "a")
+	// An empty, non-nil slice reads back as nil; the two are the same message.
+	conv := []ai.Message{{ID: "1", Role: ai.RoleAssistant, Content: ai.Content{}}, msg("2", "b")}
+	if err := w.Save(conv); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	n := len(types(t, s, "a"))
+
+	w = write(t, s, "a")
+	if err := w.Save(conv); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(types(t, s, "a")); got != n {
+		t.Fatalf("resuming wrote %d records", got-n)
+	}
+}
+
+func TestATruncateBeyondTheConversationIsAnError(t *testing.T) {
+	a := msg("1", "a")
+	recs := []session.Record{{Type: "message", Message: &a}, {Type: "truncate", Keep: 2}}
+	seq := func(yield func(session.Record, error) bool) {
+		for _, r := range recs {
+			if !yield(r, nil) {
+				return
+			}
+		}
+	}
+	if _, err := session.Conversation(seq); err == nil {
+		t.Fatal("a truncate keeping more than there is read as a conversation")
 	}
 }

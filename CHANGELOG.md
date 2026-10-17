@@ -25,7 +25,7 @@ Each such change is listed under **Changed** with what to write instead.
   the conversation changes:
 
   ```go
-  w, err := store.Write(ctx, id)   // one writer per session; session.ErrBusy if taken
+  w, err := store.Writer(ctx, id)   // one writer per session; session.ErrBusy if taken
   defer w.Close()
   history, err := store.Load(ctx, id)
   a.SetMessages(history)
@@ -34,8 +34,9 @@ Each such change is listed under **Changed** with what to write instead.
   ```
 
   Compaction needs nothing extra: the next save holds the compacted
-  conversation. A save appends only what is new, and a rewritten conversation
-  is appended after a `reset` line. `w.Append(typ, v)` keeps an application's
+  conversation. A save appends only what differs: the messages after the
+  longest unchanged prefix, behind a `truncate` to that prefix when anything
+  after it changed — an edit or a rewind costs only what changed. `w.Append(typ, v)` keeps an application's
   own records in the same log, and `Records` with `session.Conversation` reads
   them back. `List` returns `session.Info{ID, ModTime}`; `Fork` and `Delete`
   copy and remove one. The application chooses the id.

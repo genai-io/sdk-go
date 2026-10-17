@@ -566,7 +566,7 @@ changes.
 
 ```go
 store, err := session.Open("sessions")
-w, err := store.Write(ctx, id)        // the session's one writer; session.ErrBusy if taken
+w, err := store.Writer(ctx, id)        // the session's one writer; session.ErrBusy if taken
 defer w.Close()
 
 history, err := store.Load(ctx, id)
@@ -591,17 +591,19 @@ sessions/                       session.Open("sessions")
   20261016-101500.jsonl         one session; the file name is its id
     {"type":"message","time":…,"message":{…}}   ┐ appended as the conversation grew
     {"type":"title","time":…,"data":{…}}        │ w.Append("title", v): the application's own
-    {"type":"reset","time":…}                   ← compaction: the conversation starts over
+    {"type":"truncate","time":…}                ← compaction: the conversation is cut to nothing
     {"type":"message","time":…,"message":{…}}   ┘ the compacted conversation, then what followed
 ```
 
-`Load` replays the lines: a message appends, a reset empties the
-conversation, anything else is passed over. `Records` returns every line in
+`Load` replays the lines: a message appends, a truncate cuts the
+conversation to its first `keep` messages, anything else is passed over. `Records` returns every line in
 order — what an application folds its own records from, and
 `session.Conversation` folds the conversation from the same records. `Save`
-appends only what the file does not hold yet — new messages if the
-conversation grew, a reset and the whole conversation if it changed — matching
-messages by ID, or whole when they have none, and flushes to disk. `Append`
+appends only what differs from what the file holds — the messages after the
+longest unchanged prefix, behind a truncate to that prefix when anything after
+it changed — so an edit, a rewind or cleared tool output costs only what
+changed. It compares messages whole and flushes to disk. To branch at message
+k, `Fork` the session and save its first k messages to the copy. `Append`
 writes an application record and leaves the flush to the next `Save` or
 `Close`. A crash mid-write leaves an unterminated last line, which reading
 ignores and the next writer cuts off.

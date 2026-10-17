@@ -448,7 +448,7 @@ The agent never learns storage exists. A conversation is a `[]ai.Message`:
 load it, hand it over, save what the agent holds as it changes.
 
 ```go
-w, _ := store.Write(ctx, id)             // one writer per session
+w, _ := store.Writer(ctx, id)            // one writer per session
 history, _ := store.Load(ctx, id)
 a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {

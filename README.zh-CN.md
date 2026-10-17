@@ -7,6 +7,8 @@
 
 一个大模型的 Go SDK，分两个包：在 Anthropic、OpenAI、Google 的六种协议之上提供**同一套带类型的 API**，以及一个跑在它外面那圈循环的 agent 运行时。
 
+它是一套组装 agent 的通用模块，可以拿来搭任何 agent，不专属于某一个应用。每个 agent 都需要的能力在这里只实现一份；应用只保留自己的策略和界面。什么该放进来，见 [What belongs here](CONTRIBUTING.md#what-belongs-here)。
+
 **`pkg/ai` —— 一次模型调用**
 
 - **一套 API，六种协议** —— 不管哪家服务，拿到的都是同样的类型。

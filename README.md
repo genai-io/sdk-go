@@ -9,6 +9,10 @@ A Go SDK for large language models, in two packages: one typed API over six
 protocols from Anthropic, OpenAI and Google, and an agent runtime that runs the
 loop around it.
 
+It is a set of building blocks for assembling agents — any agent, not one
+application. What every agent needs lives here, once; an application keeps
+only its own policy and UI. See [what belongs here](CONTRIBUTING.md#what-belongs-here).
+
 **`pkg/ai` — one model call**
 
 - **One API, six protocols** — the same types whichever provider serves the request.

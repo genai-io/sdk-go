@@ -1,5 +1,24 @@
 # Contributing
 
+## What belongs here
+
+sdk-go is a set of building blocks for assembling agents — any agent, not one
+application. [san](https://github.com/genai-io/san) is built on it; it does not
+define it.
+
+- **In:** what any agent builder would want — protocols, streaming, tool
+  calling, structured output, token counting, typed errors, the agent loop and
+  its hooks, sessions, compaction, MCP, credentials.
+- **Out:** one application's policy and UI — prompt text, permission rules,
+  rendering, product settings.
+- **Once:** nothing is implemented both here and in an application. When an
+  application grows a generic piece, it moves here and the application drops
+  its copy.
+- **Removing:** "no known caller" is not a reason to delete a capability.
+  Remove only what duplicates another part of the SDK, has an equivalent, or is
+  flexibility nobody asked for — and check san's callers before calling
+  anything unused.
+
 ## Development
 
 ```sh

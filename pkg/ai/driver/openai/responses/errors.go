@@ -10,18 +10,18 @@ import (
 
 // fail classifies a transport or HTTP failure. The in-band kind below is this
 // protocol's own, and arrives inside a 200.
-var fail = errs.For(Name, oai.Details)
+var fail = errs.For(name, oai.Details)
 
 // responseError converts an in-band API failure. These arrive inside a 200
 // response, so there is no status to classify from — the error code is the
 // only signal for whether another attempt could work.
-func (d *Driver) responseError(code, message string) error {
+func (d *driver) responseError(code, message string) error {
 	if message == "" {
 		message = "responses API failed"
 	}
-	err := &ai.Error{Driver: Name, Code: code, Message: message}
-	if kind, ok := ai.ClassifyMessage(message); ok {
-		err.Kind = kind
+	err := &ai.Error{Driver: name, Code: code, Message: message}
+	if errs.IsContextExceededMessage(message) {
+		err.Kind = ai.KindContextExceeded
 		return err
 	}
 	switch code {

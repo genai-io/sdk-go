@@ -13,7 +13,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/provider"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 )
 
 // The path an application actually walks to reach a vendor: an environment
@@ -142,7 +142,7 @@ func TestReachingEachVendor(t *testing.T) {
 			}))
 			defer server.Close()
 
-			cfg.BaseURL = server.URL
+			cfg.Model.BaseURL = server.URL
 			client, err := ai.New(cfg)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
@@ -226,8 +226,8 @@ func TestAVendorWithNoDefaultHostRequiresItsEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("auth.Config(%q): %v", tc.ref, err)
 			}
-			if cfg.BaseURL != tc.want {
-				t.Errorf("endpoint = %q, want %q", cfg.BaseURL, tc.want)
+			if cfg.Model.BaseURL != tc.want {
+				t.Errorf("endpoint = %q, want %q", cfg.Model.BaseURL, tc.want)
 			}
 		})
 	}
@@ -291,7 +291,7 @@ func TestOnePromptThreeWireShapes(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.New(ai.Config{Model: tc.model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: at(tc.model, server.URL), APIKey: "k"})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -361,7 +361,7 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: at(model, server.URL), APIKey: "k"})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -420,7 +420,7 @@ func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: at(model, server.URL), APIKey: "k"})
 			if err != nil {
 				t.Fatalf("NewClient: %v", err)
 			}
@@ -456,14 +456,8 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 		Reasoning: []ai.ReasoningLevel{{Effort: ai.EffortLow, Value: "low"}, {Effort: ultra, Value: "ultra"}},
 	}
 
-	if err := model.Validate(nil, ai.WithEffort(ultra)); err != nil {
-		t.Errorf("a rung the model declares must be sendable: %v", err)
-	}
-	if !model.Offers(ultra) {
-		t.Error("Offers must report a rung the ladder declares")
-	}
-
-	// ...and it reaches the wire as itself, not as something nearby.
+	// A rung the model declares is sendable, and it reaches the wire as
+	// itself, not as something nearby.
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -487,7 +481,8 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 	}
 
 	// A name that is neither portable nor declared is still a typo.
-	err = model.Validate(nil, ai.WithEffort("ulta"))
+	_, err = client.Complete(context.Background(),
+		[]ai.Message{ai.UserMessage("hi")}, ai.WithEffort("ulta"))
 	if err == nil {
 		t.Fatal("a rung that is neither portable nor declared must be rejected")
 	}
@@ -501,7 +496,7 @@ func TestAModelMayNameItsOwnReasoningRung(t *testing.T) {
 // fresh — so this is what proves it stayed redundant. A caller that appends to
 // a returned reasoning ladder must not be editing what the next caller reads.
 func TestReturnedModelsDoNotAliasWhatTheyCameFrom(t *testing.T) {
-	ep := provider.New(provider.Config{
+	ep := endpoint.New(endpoint.Config{
 		ID:  "acme",
 		API: ai.APIOpenAIChat,
 		Models: []ai.Model{{
@@ -543,4 +538,10 @@ func TestReturnedModelsDoNotAliasWhatTheyCameFrom(t *testing.T) {
 	if again.Headers["Editor-Version"] == "tampered" {
 		t.Error("editing a resolved model's headers changed the shared table")
 	}
+}
+
+// at is m served from url.
+func at(m ai.Model, url string) ai.Model {
+	m.BaseURL = url
+	return m
 }

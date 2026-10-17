@@ -82,13 +82,13 @@ func main() {
 	steps := 0
 	for e, err := range a.Run(ctx, ai.UserMessage(strings.Join(os.Args[1:], " "))) {
 		if err != nil {
-			// Only failures outside the exchange arrive here; how it went is
+			// Only failures outside the turn arrive here; how it went is
 			// on TurnEnd, below.
 			log.Fatalf("\n%v", err)
 		}
 		render(e)
 		switch v := e.(type) {
-		case agent.MessageStart:
+		case agent.InferenceStart:
 			if v.Attempt == 1 {
 				steps++
 			}
@@ -100,13 +100,13 @@ func main() {
 	fmt.Printf("\n\n— %s · %d steps · %d tokens\n",
 		last.StopReason, steps, last.Usage.Total())
 	if last.Err != nil {
-		fmt.Fprintf(os.Stderr, "the exchange failed: %v\n", last.Err)
+		fmt.Fprintf(os.Stderr, "the turn failed: %v\n", last.Err)
 	}
 }
 
 func render(e agent.Event) {
 	switch v := e.(type) {
-	case agent.MessageUpdate:
+	case agent.InferenceUpdate:
 		fmt.Print(v.Text())
 	case agent.ToolStart:
 		fmt.Printf("\n[%s] %s\n", v.Name, strings.TrimSpace(v.Args))

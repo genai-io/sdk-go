@@ -179,7 +179,7 @@ func TestAToolReportsWhileItWorks(t *testing.T) {
 	}
 }
 
-// A tool that reports where nobody is listening — outside an exchange, or in a
+// A tool that reports where nobody is listening — outside a turn, or in a
 // test — is not a tool that panics.
 func TestReportOutsideAToolDoesNothing(t *testing.T) {
 	agent.Report(context.Background(), agent.TextResult("into the void"))
@@ -307,7 +307,7 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 	)
 	a := newAgent(t, d, agent.WithTools(boom, fine))
 
-	var failed *agent.PanicError
+	var failed error
 	ended := map[string]bool{}
 	for e, err := range a.Run(context.Background(), ai.UserMessage("run both")) {
 		if err != nil {
@@ -316,8 +316,9 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 		if v, ok := e.(agent.ToolEnd); ok {
 			ended[v.Name] = true
 			if v.Name == "boom" {
-				if !errors.As(v.Err, &failed) {
-					t.Fatalf("boom ended with %v, want a *agent.PanicError", v.Err)
+				failed = v.Err
+				if failed == nil || !strings.Contains(failed.Error(), "panicked") {
+					t.Fatalf("boom ended with %v, want the panic", v.Err)
 				}
 			}
 		}
@@ -328,9 +329,6 @@ func TestAPanickingToolDoesNotTakeTheProcessWithIt(t *testing.T) {
 	}
 	if failed == nil {
 		t.Fatal("the panic was never reported")
-	}
-	if len(failed.Stack) == 0 {
-		t.Error("the stack was not kept; a recovered panic with no stack is undebuggable")
 	}
 	// The model is told one line, not a stack trace.
 	if got := agent.ResultText(agent.Result{}, failed); strings.Contains(got, "goroutine") {
@@ -410,7 +408,7 @@ func TestAToolReplacedDuringInferenceRunsItsOfferedImplementation(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := event.(agent.MessageStart); ok && !replaced {
+		if _, ok := event.(agent.InferenceStart); ok && !replaced {
 			a.SetTools(after)
 			replaced = true
 		}
@@ -418,7 +416,7 @@ func TestAToolReplacedDuringInferenceRunsItsOfferedImplementation(t *testing.T) 
 	if !slices.Equal(ran, []string{"old", "new"}) {
 		t.Errorf("ran %v, want the offered implementation for each inference", ran)
 	}
-	if sent := d.Sent(); sent[0].Tools[0].Schema.Description != "old implementation" || sent[1].Tools[0].Schema.Description != "new implementation" {
+	if sent := d.Sent(); sent[0].Tools[0].Description != "old implementation" || sent[1].Tools[0].Description != "new implementation" {
 		t.Error("SetTools did not take effect on the next inference")
 	}
 }
@@ -452,7 +450,7 @@ func TestPreInferBindsTheOfferedToolImplementation(t *testing.T) {
 				PreInfer: func(_ context.Context, inf *agent.Inference) error {
 					a.SetTools(after)
 					if tc.replace {
-						defs := []ai.Tool{{Schema: after.Schema()}}
+						defs := []ai.Schema{after.Schema()}
 						if tc.override {
 							inf.Tools = nil
 							inf.Options = append(inf.Options, ai.WithTools(defs...))
@@ -473,7 +471,7 @@ func TestPreInferBindsTheOfferedToolImplementation(t *testing.T) {
 			if tc.replace {
 				wantDescription = tc.description
 			}
-			if got := d.Sent()[0].Tools[0].Schema.Description; got != wantDescription {
+			if got := d.Sent()[0].Tools[0].Description; got != wantDescription {
 				t.Errorf("offered %q, want %q", got, wantDescription)
 			}
 		})
@@ -514,7 +512,7 @@ func TestPreInferHiddenToolsCannotRun(t *testing.T) {
 }
 
 // A report is droppable rather than something a tool can be held up by: it
-// goes if the exchange is listening and is dropped if it is not, without ever
+// goes if the turn is listening and is dropped if it is not, without ever
 // blocking the tool or panicking — a report that arrives late included.
 func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 	var late context.Context
@@ -544,10 +542,10 @@ func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 		}
 	}
 	if updates != 1 {
-		t.Errorf("the exchange reported %d partial results, want the 1 the tool sent", updates)
+		t.Errorf("the turn reported %d partial results, want the 1 the tool sent", updates)
 	}
 
-	// The exchange is over and its channel is nobody's now. Far more reports
+	// The turn is over and its channel is nobody's now. Far more reports
 	// than it could hold, from a goroutine that would deadlock if any blocked.
 	done := make(chan struct{})
 	go func() {
@@ -559,7 +557,7 @@ func TestAReportNobodyIsListeningForIsDropped(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("reporting into a finished exchange blocked the tool")
+		t.Fatal("reporting into a finished turn blocked the tool")
 	}
 }
 

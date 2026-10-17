@@ -10,7 +10,7 @@ import (
 )
 
 // A model stopped by the output cap was interrupted, not finished. Asked to,
-// the loop takes another step in the same exchange rather than handing back
+// the loop takes another step in the same turn rather than handing back
 // half an answer.
 func TestACutOffAnswerIsResumedWhenAsked(t *testing.T) {
 	d := aitest.New(aitest.Stops(ai.StopMaxTokens, "the first half"), aitest.Says("the second half"))
@@ -27,7 +27,7 @@ func TestACutOffAnswerIsResumedWhenAsked(t *testing.T) {
 		t.Errorf("Message = %q, want the resumed half", got)
 	}
 	if n := turns(t, a); n != 1 {
-		t.Errorf("it took %d exchanges, want 1 — resuming is a step, not a turn", n)
+		t.Errorf("it took %d turns, want 1 — resuming is a step, not a turn", n)
 	}
 
 	// The prompt is in the conversation, so a session records what was asked.
@@ -82,7 +82,7 @@ func TestResumingGivesUpAndStillSaysItWasCutOff(t *testing.T) {
 	}
 }
 
-// turns counts the exchanges an agent has held, by running one more and
+// turns counts the turns an agent has held, by running one more and
 // reading the number it reports.
 func turns(t *testing.T, a *agent.Agent) int {
 	t.Helper()

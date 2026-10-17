@@ -15,7 +15,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
-	"github.com/genai-io/sdk-go/pkg/ai/provider"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 )
 
 // stub is a Chat Completions endpoint that replays a scripted stream and
@@ -144,7 +144,7 @@ func TestToolCallFragmentsAccumulateByIndex(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		"[DONE]",
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestAFragmentCarryingAKnownIDJoinsThatCallWhateverItsIndex(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		"[DONE]",
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestANewIDAtAUsedIndexStartsAnotherCall(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		"[DONE]",
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestArgumentsResentWholeAtTheEndAreNotAppendedTwice(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		"[DONE]",
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestARefusalIsTextThatStopsAsARefusal(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 		"[DONE]",
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestReasoningTokensAreReportedBesideTheOutput(t *testing.T) {
 			`"completion_tokens_details":{"reasoning_tokens":40}}}`,
 		"[DONE]",
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestImagesAToolReturnedFollowInAUserMessage(t *testing.T) {
 			ai.ToolResult{ToolCallID: "call_b", Content: ai.TextContent("a.go")},
 		),
 	}}
-	for _, err := range driverFor(t, ai.Config{BaseURL: s.URL}).Stream(context.Background(), req) {
+	for _, err := range driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}).Stream(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
@@ -357,7 +357,7 @@ func TestToolCallsSurviveACutStream(t *testing.T) {
 		`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[`+
 			`{"index":0,"id":"call_a","function":{"name":"weather","arguments":"{\"city\":\"Oslo\"}"}}]}}]}`,
 	)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err == nil {
 		t.Fatal("a cut stream ended without an error")
 	}
@@ -381,7 +381,7 @@ func TestReasoningIsReadUnderEitherKey(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := sse(t, `{"id":"c1","model":"m","choices":[{"index":0,"delta":`+tc.delta+`}]}`, "[DONE]")
-			deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+			deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 			if err != nil {
 				t.Fatalf("stream: %v", err)
 			}
@@ -396,7 +396,7 @@ func TestReasoningIsReadUnderEitherKey(t *testing.T) {
 // reasons anyway. Gating on the rung threw that away.
 func TestReasoningIsKeptFromAModelThatDeclaresNoLadder(t *testing.T) {
 	s := sse(t, `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"reasoning":"thinking out loud"}}]}`, "[DONE]")
-	d := driverFor(t, ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "local-model"}})
+	d := driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL, ID: "local-model"}})
 	deltas, err := collect(t, context.Background(), d)
 	if err != nil {
 		t.Fatalf("stream: %v", err)
@@ -408,7 +408,7 @@ func TestReasoningIsKeptFromAModelThatDeclaresNoLadder(t *testing.T) {
 
 func TestDoneRemainsTerminalAfterTrailingEvents(t *testing.T) {
 	s := sse(t, `{"choices":[{"delta":{"content":"ok"}}]}`, "[DONE]", `{}`)
-	d := driverFor(t, ai.Config{BaseURL: s.URL})
+	d := driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}})
 	client := ai.NewClientWithDriver(d, ai.Model{ID: "gateway", API: ai.APIOpenAIChat})
 	response, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("go")})
 	if err != nil || response.Text() != "ok" {
@@ -422,7 +422,7 @@ func TestARateLimitCarriesItsRetryAfter(t *testing.T) {
 		map[string]string{"Retry-After": "30"},
 		`{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)
 
-	_, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	_, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if !ai.IsKind(err, ai.KindRateLimit) {
 		t.Fatalf("error = %v, want a rate limit", err)
 	}
@@ -430,8 +430,8 @@ func TestARateLimitCarriesItsRetryAfter(t *testing.T) {
 		t.Errorf("retry after = %v, want 30s", got)
 	}
 	var e *ai.Error
-	if errors.As(err, &e) && e.Driver != Name {
-		t.Errorf("driver = %q, want %q", e.Driver, Name)
+	if errors.As(err, &e) && e.Driver != name {
+		t.Errorf("driver = %q, want %q", e.Driver, name)
 	}
 }
 
@@ -441,7 +441,7 @@ func TestACanceledCallIsNotAFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := collect(t, ctx, driverFor(t, ai.Config{BaseURL: s.URL}))
+	_, err := collect(t, ctx, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if !ai.IsKind(err, ai.KindCanceled) {
 		t.Fatalf("error = %v, want %q", err, ai.KindCanceled)
 	}
@@ -459,7 +459,7 @@ func TestAnAmbientCredentialIsNeverUsed(t *testing.T) {
 	t.Setenv("OPENAI_PROJECT_ID", "proj-ambient")
 
 	s := sse(t, `{"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"hi"}}]}`, "[DONE]")
-	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL})); err != nil {
+	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}})); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	header, _, path := s.seen()
@@ -481,7 +481,7 @@ func TestModelsReadTheWindowUnderEitherSpelling(t *testing.T) {
 		{"id":"gateway","object":"model","max_input_tokens":128000},
 		{"id":"bare","object":"model"}]}`)
 
-	models, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*Driver).Models(context.Background())
+	models, err := driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}).(*driver).Models(context.Background())
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestModelsRouteResponsesOnlyEntriesToResponses(t *testing.T) {
 		{"id":"claude","object":"model","supported_endpoints":["/chat/completions"]},
 		{"id":"bare","object":"model"}]}`)
 
-	listed, err := driverFor(t, ai.Config{BaseURL: s.URL}).(*Driver).Models(context.Background())
+	listed, err := driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}).(*driver).Models(context.Background())
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
@@ -520,17 +520,13 @@ func TestModelsRouteResponsesOnlyEntriesToResponses(t *testing.T) {
 		"claude":     ai.APIOpenAIChat,
 		"bare":       ai.APIOpenAIChat,
 	}
-	msgs := []ai.Message{ai.UserMessage("hi")}
 	for _, live := range listed {
 		for path, m := range map[string]ai.Model{
 			"decorated": copilot.Resolve(live),
-			"merged":    provider.MergeListing(copilot.Model(live.ID), live),
+			"merged":    endpoint.MergeListing(copilot.Model(live.ID), live),
 		} {
 			if m.API != want[m.ID] {
 				t.Errorf("%s %s: API = %s, want %s", path, m.ID, m.API, want[m.ID])
-			}
-			if err := m.Validate(msgs); err != nil {
-				t.Errorf("%s %s: %v", path, m.ID, err)
 			}
 		}
 	}

@@ -152,12 +152,3 @@ type listedModel struct {
 	// model from the embedding, TTS, image and live models the listing carries.
 	SupportedGenerationMethods []string `json:"supportedGenerationMethods,omitempty"`
 }
-
-// apiError is the parts of the Google API error envelope the driver reads:
-// {"error":{message,status}}. The numeric code repeats the HTTP status.
-type apiError struct {
-	Error struct {
-		Message string `json:"message,omitempty"`
-		Status  string `json:"status,omitempty"`
-	} `json:"error"`
-}

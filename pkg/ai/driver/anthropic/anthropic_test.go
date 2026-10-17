@@ -125,14 +125,14 @@ func TestCacheTokensArriveSplitByWhatTheyCost(t *testing.T) {
 		`"cache_creation":{"ephemeral_1h_input_tokens":600,"ephemeral_5m_input_tokens":300},` +
 		`"cache_read_input_tokens":4000}}}`}, event{"message_stop", `{"type":"message_stop"}`})
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), &ai.Request{})
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	if len(deltas) == 0 || deltas[0].Usage == nil {
 		t.Fatal("message_start carried no usage")
 	}
-	want := ai.Usage{Input: 12, CacheWrite: 900, CacheWrite1h: 600, CacheRead: 4000}
+	want := ai.Usage{Input: 12, CacheWrite: 900, CacheWriteLong: 600, CacheRead: 4000}
 	if got := *deltas[0].Usage; got != want {
 		t.Errorf("usage = %+v, want %+v", got, want)
 	}
@@ -173,7 +173,7 @@ func TestAFailureKeepsItsCodeAndItsMessage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := replies(t, tc.status, tc.header, tc.body)
-			_, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
+			_, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), &ai.Request{})
 			var e *ai.Error
 			if !errors.As(err, &e) {
 				t.Fatalf("error is %T (%v), want *ai.Error", err, err)
@@ -208,7 +208,7 @@ func TestRedactedThinkingComesBackAndGoesBackOut(t *testing.T) {
 	}}
 
 	deltas, err := collect(t, context.Background(),
-		driverFor(t, ai.Config{BaseURL: s.URL, Model: thinker}),
+		driverFor(t, ai.Config{Model: at(thinker, s.URL)}),
 		&ai.Request{Effort: ai.EffortHigh})
 	if err != nil {
 		t.Fatalf("stream: %v", err)
@@ -238,7 +238,7 @@ func TestRedactedThinkingComesBackAndGoesBackOut(t *testing.T) {
 		},
 	}
 	thinker.API = ai.APIAnthropicMessages
-	client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: back.URL, Model: thinker}), thinker)
+	client := ai.NewClientWithDriver(driverFor(t, ai.Config{Model: at(thinker, back.URL)}), thinker)
 	if _, err := client.Complete(t.Context(), req.Messages, ai.WithEffort(req.Effort)); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestUnnamedToolCallsGetDistinctIDsThatTheirResultsStillMatch(t *testing.T) 
 			),
 		},
 	}
-	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), req); err != nil {
+	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), req); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	_, body, _ := s.seen()
@@ -283,7 +283,7 @@ func TestAnAmbientCredentialIsNeverUsed(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://ambient.invalid")
 
 	s := sse(t, done...)
-	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{}); err != nil {
+	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), &ai.Request{}); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	header, _, path := s.seen()
@@ -312,7 +312,7 @@ func TestTheConfigsCredentialTravelsInTheHeaderTheEndpointWants(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := sse(t, done...)
-			cfg := ai.Config{BaseURL: s.URL, APIKey: "sk-this-tenant", Model: ai.Model{ID: "claude-test", Compat: tc.compat}}
+			cfg := ai.Config{APIKey: "sk-this-tenant", Model: ai.Model{BaseURL: s.URL, ID: "claude-test", Compat: tc.compat}}
 			if _, err := collect(t, context.Background(), driverFor(t, cfg), &ai.Request{}); err != nil {
 				t.Fatalf("stream: %v", err)
 			}
@@ -329,7 +329,7 @@ func TestTheConfigsCredentialTravelsInTheHeaderTheEndpointWants(t *testing.T) {
 func TestACutStreamIsRetryableAndACancelledOneIsNot(t *testing.T) {
 	t.Run("cut", func(t *testing.T) {
 		s := cut(t, done[0])
-		_, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
+		_, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), &ai.Request{})
 		if !ai.IsKind(err, ai.KindNetwork) {
 			t.Fatalf("error = %v, want %q", err, ai.KindNetwork)
 		}
@@ -338,7 +338,7 @@ func TestACutStreamIsRetryableAndACancelledOneIsNot(t *testing.T) {
 		s := sse(t, done...)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := collect(t, ctx, driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
+		_, err := collect(t, ctx, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), &ai.Request{})
 		if !ai.IsKind(err, ai.KindCanceled) {
 			t.Fatalf("error = %v, want %q", err, ai.KindCanceled)
 		}
@@ -399,7 +399,7 @@ func TestTheConversationIsCachedUpToItsNewestBlock(t *testing.T) {
 				},
 				CacheRetention: tc.retention,
 			}
-			if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), req); err != nil {
+			if _, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), req); err != nil {
 				t.Fatalf("stream: %v", err)
 			}
 			_, body, _ := s.seen()
@@ -435,7 +435,7 @@ func toolStream(t *testing.T, blocks ...event) []ai.ToolCall {
 	t.Helper()
 	events := append([]event{done[0]}, blocks...)
 	s := sse(t, append(events, done[1])...)
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}), &ai.Request{})
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), &ai.Request{})
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -512,4 +512,10 @@ func TestAToolCallWithNoInputFragmentsHasEmptyInput(t *testing.T) {
 	if len(calls) != 1 || calls[0].ID != "toolu_1" || calls[0].Input != "" {
 		t.Fatalf("calls = %+v, want one Now with empty input", calls)
 	}
+}
+
+// at is m served from url.
+func at(m ai.Model, url string) ai.Model {
+	m.BaseURL = url
+	return m
 }

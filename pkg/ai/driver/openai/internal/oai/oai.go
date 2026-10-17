@@ -43,7 +43,7 @@ func clientOptions(cfg ai.Config) []option.RequestOption {
 		// whole turn. An SDK retrying underneath would multiply it silently.
 		option.WithMaxRetries(0),
 	}
-	if url := cfg.URL(); url != "" {
+	if url := cfg.Model.BaseURL; url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
 	// Keyless endpoints exist — a local Ollama ignores the header entirely — so
@@ -54,7 +54,7 @@ func clientOptions(cfg ai.Config) []option.RequestOption {
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	for k, v := range cfg.MergedHeaders() {
+	for k, v := range cfg.Model.Headers {
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	return opts

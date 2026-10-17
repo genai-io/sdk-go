@@ -76,48 +76,36 @@ type Delta struct {
 
 // Config is everything a driver needs to reach an endpoint.
 type Config struct {
-	// Model is the model to talk to; its API selects the driver.
+	// Model is the model to talk to. Its API selects the driver; its BaseURL
+	// and Headers are where requests go and what they carry.
 	Model Model
 
 	// APIKey is the credential. Some endpoints (a local Ollama) need none.
 	APIKey string
 
-	// BaseURL overrides Model.BaseURL, which in turn overrides the driver's
-	// own default host.
-	BaseURL string
-
 	// HTTPClient is used for every request when set. Supply one to control
 	// timeouts, proxies, or transport-level instrumentation.
 	HTTPClient *http.Client
 
-	// Headers are added to every request — a gateway token, a tenant tag.
-	Headers map[string]string
-
-	// ProtocolConfig carries construction settings only one protocol needs, as
-	// that driver's value — VertexConfig for a model served through Vertex AI.
-	ProtocolConfig ProtocolConfig
+	// Vertex is the deployment of a model served through Vertex AI. The
+	// anthropic/vertex and google/vertex drivers require it; the others ignore
+	// it.
+	Vertex *VertexConfig
 }
 
-// MergedHeaders returns the headers to send: the model's, then the Config's
-// over them, so a Config header of the same name wins.
-func (c Config) MergedHeaders() map[string]string {
-	if len(c.Model.Headers) == 0 && len(c.Headers) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(c.Model.Headers)+len(c.Headers))
-	maps.Copy(out, c.Model.Headers)
-	maps.Copy(out, c.Headers)
-	return out
+// VertexConfig is the deployment a Vertex-served model lives in.
+type VertexConfig struct {
+	// Project is the GCP project ID serving the model.
+	Project string
+	// Region is the serving region. "global" is the usual choice and is what
+	// an empty value resolves to.
+	Region string
 }
 
-// URL returns the base URL to use: the Config override if set, otherwise the
-// model's, otherwise "" for the driver's default.
-func (c Config) URL() string {
-	if c.BaseURL != "" {
-		return c.BaseURL
-	}
-	return c.Model.BaseURL
-}
+// VertexDefaultRegion is where a model is served when the deployment names no
+// region. Google recommends the global endpoint for availability; a specific
+// region is for data residency.
+const VertexDefaultRegion = "global"
 
 // The driver registry: how a Model's protocol is turned into a Driver.
 
@@ -136,7 +124,7 @@ var registry struct {
 
 // RegisterAPI registers the driver factory for a wire protocol. Driver
 // packages call it from init, so a blank import is enough to make a protocol
-// reachable through New and NewDriver. Registering the same API twice panics:
+// reachable through New. Registering the same API twice panics:
 // two factories for one protocol means one of them is silently dead.
 func RegisterAPI(api API, f Factory) {
 	if f == nil {
@@ -160,8 +148,11 @@ func RegisteredAPIs() []API {
 	return slices.Sorted(maps.Keys(registry.m))
 }
 
-// NewDriver builds the driver for cfg.Model's protocol.
-func NewDriver(cfg Config) (Driver, error) {
+// newDriver builds the driver for cfg.Model's protocol.
+func newDriver(cfg Config) (Driver, error) {
+	if cfg.Model.ID == "" {
+		return nil, fmt.Errorf("ai: model ID is required")
+	}
 	if cfg.Model.API == "" {
 		return nil, fmt.Errorf("ai: model %q has no API set", cfg.Model.ID)
 	}
@@ -172,16 +163,12 @@ func NewDriver(cfg Config) (Driver, error) {
 		return nil, unregistered(cfg.Model.API, RegisteredAPIs())
 	}
 	cfg.Model = cfg.Model.Clone()
-	cfg.Headers = maps.Clone(cfg.Headers)
 	return f(cfg)
 }
 
-// New builds the driver for cfg.Model's protocol and wraps it in a Client. It
-// is NewDriver plus NewClientWithDriver, and it is the constructor most callers
-// want: reach for NewDriver and NewClientWithDriver only when the driver has to pass
-// through your hands on the way.
+// New builds the driver for cfg.Model's protocol and wraps it in a Client.
 func New(cfg Config, opts ...Option) (*Client, error) {
-	d, err := NewDriver(cfg)
+	d, err := newDriver(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -197,23 +184,4 @@ func unregistered(api API, registered []API) error {
 			"every protocol's dependencies", api, driverPath, driverPath)
 	}
 	return fmt.Errorf("ai: no driver registered for API %q (registered: %v)", api, registered)
-}
-
-// ProtocolConfig is one driver's protocol-specific construction settings.
-type ProtocolConfig interface {
-	// ProtocolConfig marks this type as one driver's construction settings. A
-	// no-op.
-	ProtocolConfig()
-}
-
-// RejectProtocolConfig returns an invalid-request error for a protocol with no
-// native construction options.
-func RejectProtocolConfig(config Config, driver string) error {
-	if config.ProtocolConfig == nil {
-		return nil
-	}
-	return &Error{
-		Driver: driver, Kind: KindInvalidRequest,
-		Message: "ai: driver " + driver + " does not define native configuration",
-	}
 }

@@ -7,66 +7,37 @@ import (
 	"iter"
 	"math"
 	"reflect"
-	"runtime/debug"
 	"slices"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// ErrBusy means an exchange is already running on this agent. One conversation
-// advances one turn at a time: two of them appending to it would interleave
-// into a history neither asked for. Concurrency belongs between agents.
-var ErrBusy = errors.New("agent: an exchange is already running")
+// ErrBusy means a turn is already running on this agent.
+var ErrBusy = errors.New("agent: a turn is already running")
 
-// Run advances the conversation one exchange and reports what it does as it
-// goes. The last event is TurnEnd, which says how it went.
+// Run advances the conversation one turn: in enters the conversation, then
+// the model is called and its tools run until it stops asking for them. The
+// last event is TurnEnd, which says how the turn went, error included; the
+// iterator's own error is only ErrBusy.
 //
 //	for e, err := range a.Run(ctx, ai.UserMessage("what changed?")) {
 //	    render(e)
 //	}
 //
-// A turn that fails says so on TurnEnd; the iterator's own error is for what
-// happens outside a turn, ErrBusy today.
-//
-// Breaking out of the range ends the exchange, the same as Interrupt, and
-// returns once the tools still running have. Events arrive on the ranging
-// goroutine, so a caller who needs the agent to run ahead of a slow reader
-// forwards them to a buffer of its own — how deep, and what to drop, being
-// decisions only the caller can make.
-//
-// Repeating it is a for loop, and that loop is the caller's: how messages are
-// batched, what a failure means and when to stop are things the application
-// knows and this package does not.
-//
-//	for batch := range myMessages {
-//	    for e, err := range a.Run(ctx, batch...) { render(e) }
-//	}
+// Events arrive on the ranging goroutine. Breaking out of the range ends the
+// turn, as Interrupt does, and returns once the running tools have.
 func (a *Agent) Run(ctx context.Context, in ...ai.Message) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		if !a.running.CompareAndSwap(false, true) {
 			yield(nil, ErrBusy)
 			return
 		}
-		// Announced when this exchange is over and the agent is idle again,
-		// for an Interrupt that came from somewhere it cannot see the range
-		// end. Closed after running is released, so a caller woken by it can
-		// start the next exchange without meeting ErrBusy.
-		stopped := make(chan struct{})
-		a.mu.Lock()
-		a.stopped = stopped
-		a.mu.Unlock()
-		defer func() {
-			a.mu.Lock()
-			a.stopped = closed
-			a.mu.Unlock()
-			a.running.Store(false)
-			close(stopped)
-		}()
+		defer a.running.Store(false)
 
 		// gone remembers a consumer that broke out of the range: yielding to
-		// one again is what the iterator forbids, and stopping reading is
-		// also what ends the exchange.
+		// one again is what the iterator forbids, and stopping reading also
+		// ends the turn.
 		gone := false
 		emit := func(e Event) {
 			if gone {
@@ -101,14 +72,14 @@ func (a *Agent) add(emit func(Event), msg ai.Message) {
 // replacement first, because anything queued behind it belongs to the
 // conversation that replaced and not to the one thrown away.
 //
-// It runs at every step boundary, which is where an exchange opens too — the
+// It runs at every step boundary, which is where a turn opens too — the
 // one place it is safe to change what the model is about to see, and the last
 // moment a replacement can be announced before messages are appended to it.
 func (a *Agent) settle(emit func(Event)) {
 	if replaced, msgs := a.takeReplaced(); replaced {
 		emit(MessagesReplaced{Turn: a.turnNow(), Messages: msgs})
 	}
-	for _, m := range a.taken() {
+	for _, m := range a.takePending() {
 		a.add(emit, m)
 	}
 }
@@ -201,7 +172,7 @@ func (a *Agent) replace(emit func(Event), msgs []ai.Message) {
 // the answer. Nil is agreement to give up, which is also what an agent with no
 // such hook says.
 func (a *Agent) onInferError(ctx context.Context, emit func(Event),
-	inf *Inference, err error, attempt int) (*Retry, error) {
+	inf *Inference, err error, attempt int) (*Recovery, error) {
 
 	hooks := a.hookSet()
 	if !slices.ContainsFunc(hooks, func(h Hook) bool { return h.OnInferError != nil }) {
@@ -210,19 +181,15 @@ func (a *Agent) onInferError(ctx context.Context, emit func(Event),
 
 	// Where the call actually went, so a hook reading a context window reads
 	// the window of the model that refused it.
-	client := inf.Client
-	if client == nil {
-		client = a.Client()
-	}
 	c := InferErrorContext{
 		Inference: inf,
-		Client:    client,
+		Client:    a.clientFor(inf),
 		Err:       err,
 		Attempt:   attempt,
 		Messages:  a.Messages(),
 	}
 
-	var again *Retry
+	var again *Recovery
 	hookErr := a.compacting(ctx, emit,
 		// Priced through the same path a step boundary uses, and only if a
 		// hook announces: most failures are not about size, and measuring one
@@ -284,10 +251,6 @@ func (a *Agent) stepContext(msgs []ai.Message) PreStepContext {
 // not fire — which is what a caller who turned a timeout off asked for.
 const never = time.Duration(math.MaxInt64)
 
-// A turn is one exchange: someone said something, and the loop runs until the
-// model stops asking for tools. It holds as many inferences as the tools
-// require — that is the difference between the two words.
-
 // reason asks the model what to do next: one call, retrying a stream that
 // failed retryably. It returns the response and not its message, because the
 // caller needs both halves — what the model said, and why it stopped.
@@ -298,8 +261,8 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 	var lastErr error
 
 	// replays is what WithRetry's budget has spent on the call as it stands.
-	// A recovery changes the call, so it starts over — see Retry.
-	replays, wait := 1, a.retryBackoff
+	// A recovery changes the call, so it starts over — see Recovery.
+	replays, wait := 0, a.retryBackoff
 
 	for attempt := 1; ; attempt++ {
 		// Rebuilt every attempt, so no hook is handed its own last edit.
@@ -308,15 +271,15 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		if err := a.preInfer(ctx, inf); err != nil {
 			return nil, spent, nil, err
 		}
-		registered := a.Tools()
+		registered := a.toolset()
 		// Bind the final request once; Options can replace the offered tools too.
 		inf.Options = append(inf.Options, func(req *ai.Request) {
 			var offered []Tool
 			for _, definition := range req.Tools {
-				tool, ok := toolNamed(registered, definition.Schema.Name)
-				if !ok || !reflect.DeepEqual(tool.Schema(), definition.Schema) {
+				tool, ok := toolNamed(registered, definition.Name)
+				if !ok || !reflect.DeepEqual(tool.Schema(), definition) {
 					// SetTools without editing this call belongs to the next inference.
-					tool, ok = toolNamed(tools, definition.Schema.Name)
+					tool, ok = toolNamed(tools, definition.Name)
 				}
 				if ok {
 					offered = append(offered, tool)
@@ -324,7 +287,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 			}
 			tools = offered
 		})
-		emit(MessageStart{Turn: a.turnNow(), Attempt: attempt, Inference: inf})
+		emit(InferenceStart{Turn: a.turnNow(), Attempt: attempt, Inference: inf})
 
 		resp, err := a.stream(ctx, emit, inf)
 
@@ -336,7 +299,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		if ctx.Err() != nil {
 			// Abandoned, not failed — but the span still closes: the reader
 			// that saw it open has not gone anywhere.
-			emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
+			emit(InferenceEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 				Response: resp, Err: ctx.Err()})
 			return nil, spent, nil, ctx.Err()
 		}
@@ -348,7 +311,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 			err = a.postInfer(ctx, resp)
 		}
 
-		emit(MessageEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
+		emit(InferenceEnd{Turn: a.turnNow(), Attempt: attempt, Inference: inf,
 			Response: resp, Err: err})
 
 		if err == nil {
@@ -363,7 +326,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 
 		// The loop's own budget answers first, for the failures it knows how
 		// to replay unchanged.
-		if ai.IsRetryable(err) && replays < a.retryAttempts {
+		if ai.IsRetryable(err) && replays < a.retries {
 			replays++
 			if perr := pause(ctx, wait, err); perr != nil {
 				return nil, spent, nil, perr
@@ -381,21 +344,8 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		if again == nil {
 			return nil, spent, nil, err
 		}
-		replays, wait = 1, a.retryBackoff
+		replays, wait = 0, a.retryBackoff
 	}
-}
-
-// PanicError is a tool that panicked. Error is deliberately one line, because
-// it is what the model is told and a stack trace is neither useful to it nor
-// cheap to send; Stack is the whole thing, for whoever is watching ToolEnd.
-type PanicError struct {
-	Tool  string
-	Value any
-	Stack []byte
-}
-
-func (e *PanicError) Error() string {
-	return fmt.Sprintf("tool %s panicked: %v", e.Tool, e.Value)
 }
 
 // errStalled is a stream that has stopped saying anything: the connection is
@@ -404,7 +354,7 @@ func (e *PanicError) Error() string {
 // minted per stall so that what ended a call is compared, not parsed.
 var errStalled = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream went silent"}
 
-// errNoResponse is a stream that ended without ever finishing. ai.Collect
+// errNoResponse is a stream that ended without ever finishing. ai.Client
 // calls the same failure retryable, and so does this — a bare error here would
 // be read as permanent by ai.IsRetryable.
 var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream ended without a response"}
@@ -414,12 +364,7 @@ var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream 
 // and running out cancels the stream, only the stream, with errStalled as the
 // cause. Why a call ended is then read off the context that ended it.
 func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*ai.Response, error) {
-	// The call goes where the inference says, which is the agent's own client
-	// until a hook says otherwise.
-	client := inf.Client
-	if client == nil {
-		client = a.Client()
-	}
+	client := a.clientFor(inf)
 
 	streamCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
@@ -440,7 +385,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 		// once PostInfer has had it.
 		switch evt.Type {
 		case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd:
-			emit(MessageUpdate{Turn: a.turnNow(), Delta: evt})
+			emit(InferenceUpdate{Turn: a.turnNow(), Delta: evt})
 		case ai.EventDone:
 			resp = evt.Response
 		}
@@ -458,8 +403,8 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 }
 
 // errAbandoned is a call that was vetted and then never run, because a hook
-// failed elsewhere in the batch and the exchange is ending with it.
-var errAbandoned = errors.New("agent: the exchange ended before this call ran")
+// failed elsewhere in the batch and the turn is ending with it.
+var errAbandoned = errors.New("agent: the turn ended before this call ran")
 
 // call is one tool call and what became of it, kept in the model's order.
 type call struct {
@@ -477,13 +422,13 @@ type call struct {
 
 // act runs the tools a model asked for: vet the batch, run what survives,
 // close each as it lands, reply. A hook that failed is returned as the third
-// value and ends the exchange; nothing else here does.
+// value and ends the turn; nothing else here does.
 func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, tools []Tool) ([]ai.ToolResult, bool, error) {
 	batch := make([]call, len(calls))
 	messages := a.Messages()
 
 	// hookErr is a hook that could not do its job — infrastructure, not the
-	// model's business — so the batch stops and the exchange ends with it.
+	// model's business — so the batch stops and the turn ends with it.
 	var hookErr error
 
 	// opened is how many calls have a span to close; an unstarted call is not
@@ -576,7 +521,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 			})
 			if err != nil {
 				// The batch is still drained — the tools running are writing
-				// to a channel this loop reads — and then the exchange ends.
+				// to a channel this loop reads — and then the turn ends.
 				hookErr = err
 				break
 			}
@@ -626,9 +571,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 			// to fail, so a panic becomes that.
 			defer func() {
 				if p := recover(); p != nil {
-					c.result, c.err = Result{}, &PanicError{
-						Tool: c.Name, Value: p, Stack: debug.Stack(),
-					}
+					c.result, c.err = Result{}, fmt.Errorf("tool %s panicked: %v", c.Name, p)
 					ch <- update{index: i}
 				}
 			}()
@@ -695,13 +638,13 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 	return results, terminate, nil
 }
 
-// turn runs one exchange: the input goes in, then reason and act alternate
+// turn runs one turn: the input goes in, then reason and act alternate
 // until the model stops asking for tools or the step budget runs out.
 //
 // ctx is this turn's own, so cancelling it is what Interrupt does. Reporting
 // does not go through it: an interrupted turn still has a reader.
 func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (out TurnEnd) {
-	// The turn's own context, so Interrupt ends this exchange and not whatever
+	// The turn's own context, so Interrupt ends this turn and not whatever
 	// called it. Derived here and not by the callers, because two of them
 	// deriving it is two chances to disagree on what Interrupt reaches.
 	turnCtx, stopTurn := context.WithCancel(ctx)
@@ -726,7 +669,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 	// ends of the turn carry the same number.
 	//
 	// No reason means the stack is unwinding through here — a hook panicked —
-	// and an exchange that is exploding has no outcome to report.
+	// and a turn that is exploding has no outcome to report.
 	defer func() {
 		if out.StopReason == "" {
 			return
@@ -737,14 +680,14 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		emit(out)
 	}()
 
-	// Whatever changed while the agent was idle lands before this exchange's
+	// Whatever changed while the agent was idle lands before this turn's
 	// own input: that is the order it was said in.
 	a.settle(emit)
 	for _, m := range in {
 		a.add(emit, m)
 	}
 
-	resumed := 0
+	continued := 0
 	for step := 0; ; step++ {
 		if a.maxSteps > 0 && step >= a.maxSteps {
 			return out.stopped(StopMaxSteps)
@@ -782,13 +725,13 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			// so a caller who asked for it gets another step rather than half
 			// an answer. The prompt goes into the conversation like any other
 			// message, which is what makes the next call see it.
-			if resp.StopReason == ai.StopMaxTokens && a.resumeTries > resumed {
-				resumed++
-				a.add(emit, ai.UserMessage(a.resumePrompt))
+			if resp.StopReason == ai.StopMaxTokens && a.continueTries > continued {
+				continued++
+				a.add(emit, ai.UserMessage(a.continuePrompt))
 				continue
 			}
 			// Something said while the model answered has not been heard: the
-			// exchange ends only when nothing is waiting, or it would sit
+			// turn ends only when nothing is waiting, or it would sit
 			// unread until whoever next thinks to start one.
 			if a.Pending() > 0 {
 				continue
@@ -809,7 +752,7 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 	}
 }
 
-// StopReason says why an exchange ended.
+// StopReason says why a turn ended.
 type StopReason string
 
 const (
@@ -829,7 +772,7 @@ const (
 	StopTerminated StopReason = "terminated"
 	// StopError is an inference that failed past its retry budget.
 	StopError StopReason = "error"
-	// StopCanceled is the context ending mid-exchange.
+	// StopCanceled is the turn being interrupted or its context ending.
 	StopCanceled StopReason = "canceled"
 )
 

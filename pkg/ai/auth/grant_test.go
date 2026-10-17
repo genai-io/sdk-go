@@ -1,4 +1,4 @@
-package oauth
+package auth
 
 import (
 	"context"
@@ -37,11 +37,11 @@ func TestDeviceShowsTheCodeAndWaitsForTheToken(t *testing.T) {
 
 	var shown Prompt
 	ui := Interaction(func(ctx context.Context, p Prompt) error { shown = p; return nil })
-	token, err := Device(t.Context(), &oauth2.Config{ClientID: "client", Endpoint: oauth2.Endpoint{
+	token, err := deviceGrant(t.Context(), &oauth2.Config{ClientID: "client", Endpoint: oauth2.Endpoint{
 		DeviceAuthURL: server.URL + "/code", TokenURL: server.URL + "/token",
 	}}, ui)
 	if err != nil {
-		t.Fatalf("Device: %v", err)
+		t.Fatalf("deviceGrant: %v", err)
 	}
 	if token.AccessToken != "at" || polls != 2 {
 		t.Errorf("token = %q after %d polls, want the one issued once the person finished", token.AccessToken, polls)
@@ -59,7 +59,7 @@ func TestDeviceReportsAFailureToIssueCodes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := Device(t.Context(), &oauth2.Config{ClientID: "nobody", Endpoint: oauth2.Endpoint{
+	_, err := deviceGrant(t.Context(), &oauth2.Config{ClientID: "nobody", Endpoint: oauth2.Endpoint{
 		DeviceAuthURL: server.URL, TokenURL: server.URL,
 	}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "unauthorized_client") {
@@ -96,9 +96,9 @@ func TestCodeExchangesTheCallbackWithItsVerifier(t *testing.T) {
 		return visit(redirect + "?code=the-code&state=" + url.QueryEscape(u.Query().Get("state")))
 	})
 
-	token, err := Code(t.Context(), codeConfig(redirect, provider.URL), ui)
+	token, err := codeGrant(t.Context(), codeConfig(redirect, provider.URL), ui)
 	if err != nil {
-		t.Fatalf("Code: %v", err)
+		t.Fatalf("codeGrant: %v", err)
 	}
 	if token.AccessToken != "at" || token.RefreshToken != "rt" {
 		t.Errorf("token = %+v, want what the exchange issued", token)
@@ -117,7 +117,7 @@ func TestCodeRejectsAMismatchedState(t *testing.T) {
 		return visit(redirect + "?code=the-code&state=" + url.QueryEscape(u.Query().Get("state")+"-wrong"))
 	})
 
-	_, err := Code(t.Context(), codeConfig(redirect, "https://provider.test"), ui)
+	_, err := codeGrant(t.Context(), codeConfig(redirect, "https://provider.test"), ui)
 	if err == nil || !strings.Contains(err.Error(), "did not match") {
 		t.Fatalf("err = %v, want the callback refused", err)
 	}
@@ -129,7 +129,7 @@ func TestCodeReportsWhatTheProviderRefused(t *testing.T) {
 		return visit(redirect + "?error=access_denied&error_description=nope")
 	})
 
-	_, err := Code(t.Context(), codeConfig(redirect, "https://provider.test"), ui)
+	_, err := codeGrant(t.Context(), codeConfig(redirect, "https://provider.test"), ui)
 	if err == nil || !strings.Contains(err.Error(), "access_denied") {
 		t.Fatalf("err = %v, want the provider's own refusal", err)
 	}

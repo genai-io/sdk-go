@@ -264,9 +264,9 @@ func TestAFailedStreamKeepsWhatItProduced(t *testing.T) {
 // A driver that closes its iterator having produced nothing is a bug in the
 // driver, and saying so beats handing back what looks like an empty answer.
 func TestAStreamThatEndsWithoutAResponseIsReported(t *testing.T) {
-	resp, err := Collect(func(yield func(Event, error) bool) {})
+	resp, err := collect(func(yield func(Event, error) bool) {})
 	if resp != nil || !IsKind(err, KindNetwork) {
-		t.Fatalf("Collect = %v, %v; want a network failure and no response", resp, err)
+		t.Fatalf("collect = %v, %v; want a network failure and no response", resp, err)
 	}
 }
 

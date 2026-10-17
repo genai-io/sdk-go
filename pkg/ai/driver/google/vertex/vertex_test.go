@@ -15,12 +15,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// otherConfig stands in for another protocol's construction settings, which
-// this driver must refuse rather than ignore.
-type otherConfig struct{}
-
-func (otherConfig) ProtocolConfig() {}
-
 // Every failure here happens before a request, so it is what a caller
 // enumerating providers actually hits.
 func TestNewRefusesWhatItCannotDeploy(t *testing.T) {
@@ -36,20 +30,10 @@ func TestNewRefusesWhatItCannotDeploy(t *testing.T) {
 		}
 	})
 
-	t.Run("another protocol's settings", func(t *testing.T) {
-		_, err := New(ai.Config{Model: model, ProtocolConfig: otherConfig{}})
-		if err == nil {
-			t.Fatal("a foreign ProtocolConfig was accepted")
-		}
-		if !strings.Contains(err.Error(), "VertexConfig") {
-			t.Errorf("message = %q, want it to name the type this driver expects", err)
-		}
-	})
-
 	t.Run("no credentials", func(t *testing.T) {
 		// Point every ADC source at nothing.
 		t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", filepath.Join(t.TempDir(), "missing.json"))
-		_, err := New(ai.Config{Model: model, ProtocolConfig: ai.VertexConfig{Project: "p"}})
+		_, err := New(ai.Config{Model: model, Vertex: &ai.VertexConfig{Project: "p"}})
 		if !ai.IsAuth(err) {
 			t.Fatalf("error = %v, want a credential failure", err)
 		}
@@ -74,9 +58,8 @@ func TestRequestsCarryTheDeploymentAndTheToken(t *testing.T) {
 	stubCredentials(t)
 
 	d, err := New(ai.Config{
-		Model:          ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL:        s.URL + "/",
-		ProtocolConfig: ai.VertexConfig{Project: "my-project", Region: "us-central1"},
+		Model:  ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex, BaseURL: s.URL + "/"},
+		Vertex: &ai.VertexConfig{Project: "my-project", Region: "us-central1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -117,15 +100,14 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	stubCredentials(t)
 
 	d, err := New(ai.Config{
-		Model:          ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL:        s.URL,
-		ProtocolConfig: ai.VertexConfig{Project: "p"},
+		Model:  ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex, BaseURL: s.URL},
+		Vertex: &ai.VertexConfig{Project: "p"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Name() != Name {
-		t.Errorf("Name = %q, want %q", d.Name(), Name)
+	if d.Name() != name {
+		t.Errorf("Name = %q, want %q", d.Name(), name)
 	}
 	if _, lists := d.(ai.ModelLister); lists {
 		t.Error("the Vertex driver claims a model listing, which Vertex does not publish")
@@ -141,8 +123,8 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	if !errors.As(streamErr, &e) {
 		t.Fatalf("error is %T (%v), want *ai.Error", streamErr, streamErr)
 	}
-	if e.Driver != Name {
-		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, Name)
+	if e.Driver != name {
+		t.Errorf("ai.Error.Driver = %q, want %q", e.Driver, name)
 	}
 }
 

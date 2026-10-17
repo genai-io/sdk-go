@@ -2,23 +2,20 @@ package agent
 
 import "github.com/genai-io/sdk-go/pkg/ai"
 
-// Event is one thing that happened.
+// Event is one thing that happened. The set is closed:
 //
-// The set is closed — event() is unexported — so a consumer switching over it
-// knows this list is all there is:
-//
-//	MessageAdded     MessagesReplaced              the conversation changing
-//	MessageStart     MessageUpdate   MessageEnd    the model producing a message
-//	ToolStart        ToolUpdate      ToolEnd       a tool call, asked to answered
-//	CompactionStart                  CompactionEnd the conversation being shortened
-//	TurnStart                        TurnEnd       the exchange around them
+//	MessageAdded     MessagesReplaced               the conversation changing
+//	InferenceStart   InferenceUpdate  InferenceEnd  one model call
+//	ToolStart        ToolUpdate       ToolEnd       one tool call
+//	CompactionStart                   CompactionEnd the conversation being shortened
+//	TurnStart                         TurnEnd       the turn around them
 //
 // Every event carries its turn, and every closing event carries what opened
-// it, so reading one is reading rather than remembering.
+// it.
 type Event interface{ event() }
 
-// MessageAdded says something entered the conversation, which is the fold of
-// these and MessagesReplaced.
+// MessageAdded says a message entered the conversation. Folding MessageAdded
+// and MessagesReplaced reproduces Messages.
 type MessageAdded struct {
 	Turn    int
 	Message ai.Message
@@ -26,13 +23,9 @@ type MessageAdded struct {
 
 func (MessageAdded) event() {}
 
-// CompactionStart says a PreStep hook has begun shortening the conversation,
-// which is a model call of its own and takes as long as one. A stream that
-// says nothing for that long looks stopped, and this is what a consumer draws
-// instead.
-//
-// The hook opens it, by calling Compacting, because only the code deciding
-// whether to shorten knows that it is about to. The loop closes it.
+// CompactionStart says a PreStep or OnInferError hook has begun shortening
+// the conversation. The hook opens it by calling Compacting; the loop closes
+// it.
 type CompactionStart struct {
 	Turn int
 	// Messages is the conversation being shortened and Tokens what it was
@@ -44,14 +37,8 @@ type CompactionStart struct {
 
 func (CompactionStart) event() {}
 
-// CompactionEnd closes the span, whatever happened: a hook that shortened the
-// conversation, one that thought better of it, and one that failed all close
-// it, because a consumer that opened a spinner has to be told to stop
-// whichever way it went. Err says which of the three this was, with a
-// conversation left alone reported as no error and no MessagesReplaced.
-//
-// It carries what opened it, like every closing event here, so reading one is
-// reading rather than remembering.
+// CompactionEnd closes the span however the hook returned. Err is the hook's
+// error; a conversation left alone has no error and no MessagesReplaced.
 type CompactionEnd struct {
 	Turn     int
 	Messages []ai.Message
@@ -61,12 +48,8 @@ type CompactionEnd struct {
 
 func (CompactionEnd) event() {}
 
-// MessagesReplaced says SetMessages threw the conversation away, reported at
-// the next step boundary — where queued messages enter too, both being changes
-// to what the model is about to see.
-//
-// Everything announced before one is gone: a consumer that ignores it hands
-// back the history compaction just discarded.
+// MessagesReplaced says the conversation was replaced, by SetMessages or a
+// hook, and is now Messages. Everything announced before it is gone.
 type MessagesReplaced struct {
 	Turn     int
 	Messages []ai.Message
@@ -74,9 +57,8 @@ type MessagesReplaced struct {
 
 func (MessagesReplaced) event() {}
 
-// MessageStart says the model has been asked. Only a message the model
-// produces has a span; the rest arrive whole.
-type MessageStart struct {
+// InferenceStart says one model call is going out.
+type InferenceStart struct {
 	Turn int
 	// Attempt rises on a retry — how a consumer knows the partial output it
 	// drew is about to be replaced.
@@ -86,35 +68,31 @@ type MessageStart struct {
 	Inference *Inference
 }
 
-func (MessageStart) event() {}
+func (InferenceStart) event() {}
 
-// MessageUpdate is one streamed fragment, exactly as pkg/ai made it. A reader
-// that falls behind loses fragments rather than holding the agent up —
-// MessageAdded carries the whole thing anyway.
-type MessageUpdate struct {
+// InferenceUpdate is one streamed fragment, exactly as pkg/ai made it.
+type InferenceUpdate struct {
 	Turn  int
 	Delta ai.Event
 }
 
-func (MessageUpdate) event() {}
+func (InferenceUpdate) event() {}
 
-// Text is the fragment of the answer this update carries, empty when it
-// carries anything else. Almost every consumer wants exactly this and nothing
-// around it:
+// Text is the answer text this fragment carries, empty for any other kind.
 //
-//	case agent.MessageUpdate:
+//	case agent.InferenceUpdate:
 //	    fmt.Print(v.Text())
-func (u MessageUpdate) Text() string {
+func (u InferenceUpdate) Text() string {
 	if u.Delta.Type != ai.EventBlockDelta || u.Delta.Block.Type != ai.BlockText {
 		return ""
 	}
 	return u.Delta.Block.Text
 }
 
-// MessageEnd closes the span. A MessageAdded follows once the loop accepts the
-// message, and does not follow at all when Err is set — that absence is what
-// tells a consumer the partial output it drew was discarded.
-type MessageEnd struct {
+// InferenceEnd closes the call. MessageAdded follows with the answer unless
+// Err is set; then the partial output was discarded, and an InferenceStart
+// with a higher Attempt may follow.
+type InferenceEnd struct {
 	Turn      int
 	Attempt   int
 	Inference *Inference
@@ -122,7 +100,7 @@ type MessageEnd struct {
 	Err       error
 }
 
-func (MessageEnd) event() {}
+func (InferenceEnd) event() {}
 
 // ToolStart opens one tool execution, before the gate runs, so Args is what
 // the model sent rather than what a hook rewrote.
@@ -161,23 +139,22 @@ type ToolEnd struct {
 
 func (ToolEnd) event() {}
 
-// TurnStart and TurnEnd bracket one exchange, which holds as many model calls
-// as the tools require.
+// TurnStart and TurnEnd bracket one turn, which holds one or more inferences.
 type TurnStart struct{ Turn int }
 
 func (TurnStart) event() {}
 
-// TurnEnd closes one exchange. A failed turn still reports its usage and why
-// it stopped.
+// TurnEnd closes one turn. A failed turn still reports its usage and why it
+// stopped.
 type TurnEnd struct {
 	Turn int
 	// Message is the last message the model produced, zero if it produced
 	// none. Reading it off the conversation is wrong: that ends in tool
 	// results when a turn stopped on terminated or max_steps.
 	Message ai.Message
-	// Usage is the tokens the exchange spent, summed. Money is not summable
+	// Usage is the tokens the turn spent, summed. Money is not summable
 	// the same way: a turn routed to a second model spent them under two rate
-	// cards, so fold a cost from each MessageEnd instead.
+	// cards, so fold a cost from each InferenceEnd instead.
 	Usage      ai.Usage
 	StopReason StopReason
 	Err        error

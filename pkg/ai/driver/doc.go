@@ -12,7 +12,7 @@
 //	the credential     what to present
 //	the quirks         which field carries reasoning, whether a TTL is accepted
 //
-// Only the first needs code. A host is ai.Config.BaseURL, a credential is
+// Only the first needs code. A host is ai.Model.BaseURL, a credential is
 // ai.Config.APIKey, and the quirks are ai.Model.Compat — all of them values
 // a caller supplies, none of them a reason to compile anything new.
 //
@@ -27,7 +27,7 @@
 // this SDK reaches — DeepSeek, Moonshot, Ollama, Groq, xAI, Alibaba, Z.ai,
 // OpenRouter and the rest — speak OpenAI Chat Completions, so they share
 // openai/chat and differ only in data. Adding one is an entry in
-// ai/catalog/vendors.go and no Go file at all.
+// ai/catalog/table.go and no Go file at all.
 //
 // A directory that groups rather than implements earns its place when it
 // scopes an internal package to exactly the code allowed to use it. openai/
@@ -60,6 +60,7 @@
 //	anthropic         Anthropic Messages
 //	anthropic/vertex  the same, served through Google Cloud Vertex AI
 //	google            Google Gemini generateContent
+//	google/vertex     the same, served through Google Cloud Vertex AI
 //	openai/chat       OpenAI Chat Completions — the industry interchange format
 //	openai/responses  OpenAI Responses — the only one that replays reasoning state
 //	all               a blank import that registers every one of them

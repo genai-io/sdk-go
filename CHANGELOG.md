@@ -9,6 +9,14 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Added
+
+- **`OpenAIResponsesCompat.CodexModelListing`**: the responses driver lists
+  models the way the Codex CLI reads them, so the ChatGPT/Codex endpoint has a
+  live model listing.
+- The Codex and Copilot identity headers are built into their catalog rows, so
+  `auth.Client("openai-codex/…")` works without extra headers.
+
 ### Changed
 
 - **A session is a saved conversation.** It moves to `pkg/session`, and
@@ -27,9 +35,71 @@ Each such change is listed under **Changed** with what to write instead.
   append-only `<id>.jsonl` per session. A save appends only what is new, and a
   rewritten conversation is appended after a `reset` line. `List` returns
   `jsonl.Session{ID, SavedAt}`. The application chooses the id.
+- **The base URL and headers live on the model.** `ai.Config.BaseURL`,
+  `Config.Headers`, `Config.URL()` and `Config.MergedHeaders()` are gone; a
+  driver sends to `Model.BaseURL` with `Model.Headers`. Write an override onto
+  the model: `cfg.Model.BaseURL = url`, and add a header to
+  `cfg.Model.Headers` rather than to `cfg.Headers`. `auth.Config` and
+  `endpoint.ConfigFor` already stamp the environment's, the sign-in's and the
+  endpoint's base URL and headers onto the model they return.
+- **`pkg/ai` makes one call.** The tool loop is gone: a tool is an
+  `ai.Schema`, and `WithTools` takes `...Schema`. Build one with
+  `ai.ToolSchema[T]`, check a call with `Schema.Validate`, decode it with
+  `ToolCall.UnmarshalArgs`. Running tools is `pkg/agent`.
+- **`pkg/ai/provider` is `pkg/ai/endpoint`.** `provider.Provider` is
+  `endpoint.Endpoint`, `catalog.Vendor.Provider` is `Vendor.Endpoint`, and
+  `auth.Provider` is `auth.Endpoint`.
+- **A Vertex deployment is a field.** `ai.Config.Vertex *ai.VertexConfig`
+  replaces `Config.ProtocolConfig`; the two Vertex drivers require it.
+- **Environment lookup lives on the vendor.** `Vendor.KeyFromEnv`,
+  `BaseURLFromEnv` and `VertexFromEnv` take a `getenv` and replace
+  `auth.Key`, `auth.BaseURL`, `auth.Deployment`, `Vendor.ResolveBaseURL`,
+  `Vendor.DeploymentEnv` and `Vendor.Deployment`. `Vendor.VertexEnv` names the
+  variables. Pass `os.Getenv`, or your own secret store.
+- `catalog.MissingEnvError` replaces `auth.MissingKeyError`,
+  `auth.MissingEndpointError` and `catalog.MissingDeploymentError`.
+  `catalog.UnknownVendorError` replaces `catalog.UnknownModelError` and
+  `auth.UnknownVendorError`.
+- **`pkg/ai/auth/oauth` is merged into `auth`.** `oauth.Prompt` and
+  `oauth.Interaction` are `auth.Prompt` and `auth.Interaction`; the grants are
+  internal. `Credential.Endpoint` is `Credential.BaseURL` (json `base_url`).
+- `anthropic.NewWithOptions` and `google.NewAt` are `NewDeployment`, and
+  return an `ai.Driver`.
+- `Usage.CacheWrite1h` is `CacheWriteLong` (json `cache_write_long`).
+- **Agent events are named for what they time.** `MessageStart`,
+  `MessageUpdate` and `MessageEnd` are `InferenceStart`, `InferenceUpdate` and
+  `InferenceEnd`.
+- `agent.Retry` is `agent.Recovery`.
+- `WithRetry(retries, backoff)` counts the replays after the first call, so
+  `WithRetry(2, …)` makes up to three calls.
+- `Agent.Interrupt` returns nothing. The turn is over when the range over `Run`
+  ends.
+- The integration suite moves from `test/` to `integration/`.
 
 ### Removed
 
+- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
+  `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,
+  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and
+  `jsonl.Store.Close`. Read cost and outcome from `InferenceEnd` and `TurnEnd`
+  in your event loop, and keep them with your own records.
+- **The tool loop:** `ai.Tool`, `ai.ToolFunc`, `ai.RunTools` and `Client.Run`.
+  Use `agent.ToolFunc` and `agent.New`.
+- `ai.ProtocolConfig`, `ai.RejectProtocolConfig` and `ai.VertexDeployment`.
+- `ai.Classify`, `ai.StreamError` and `ai.ClassifyMessage`; classification is
+  internal to the drivers.
+- `ai.NewDriver`; call a driver package's `New(cfg)`, or `ai.New`.
+- `ai.Collect`, `ai.IsUnsupported` (use `ai.IsKind(err, ai.KindUnsupported)`),
+  `Model.Offers`, `Model.Validate` and `Model.Reasons`.
+- The exported `Name` and `Driver` of each driver package; read
+  `Driver.Name()`.
+- `provider.ListedAPI`.
+- `auth.Flow`, `auth.Interactive`, `auth.ConsoleInteraction`,
+  `auth.FileStore`, `auth.NewFileStore` and `auth.DefaultStore`. A nil
+  `LoginOptions.Store` is the default file store, and a nil `Interaction`
+  prints to stderr.
+- `Agent.Client`, `Agent.Tools` and `agent.PanicError`. A tool that panics
+  fails like any other tool.
 - `ai.Wrap`, `ai.Middleware`, `ai.Handler` and `ai.Retry`. Decorate a driver
   with your own `Driver`; retry with `agent.WithRetry` or a loop on
   `ai.IsRetryable`.
@@ -41,26 +111,26 @@ Each such change is listed under **Changed** with what to write instead.
   `Client.Model().API`), `Error.Retryable` (use `ai.IsRetryable`) and
   `Model.DefaultLevel` (the rung in `Model.Reasoning` with `Default` set).
 - `anthropic.ClientOptions`, `NewSDKClient` and `NewWithClient`; call
-  `anthropic.NewWithOptions(cfg, api, opts...)`.
+  `anthropic.NewDeployment(cfg, api, opts...)`.
 - `catalog.Vendor.Order` and `Vendor.Verified`; `catalog.All` returns vendors
   in display order.
 - `auth.RegisterFlow`, `auth.DefaultStorePath`, and `List` from `auth.Store`.
-- `oauth.InteractionFunc`; `oauth.Interaction` is now a func type.
 - `mcp.Option` and `mcp.OnToolsChanged`; set `Server.OnToolsChanged`.
 - `agent.Agent.System`.
-- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
-  `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,
-  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and
-  `jsonl.Store.Close`. Read cost and outcome from `MessageEnd` and `TurnEnd` in
-  your event loop, and keep them with your own records.
 - `ai.ProtocolOptions`, `ai.WithProtocolOptions`, `ai.ProtocolOptionsAs`,
   `ai.RejectProtocolOptions`, `Request.ProtocolOptions`, `anthropic.Options` and
-  `responses.Options`. Send an `anthropic-beta` header through `Config.Headers`;
+  `responses.Options`. Send an `anthropic-beta` header through `Model.Headers`;
   put a Responses field such as `prompt_cache_key` in `SamplingParams`.
 - `AnthropicCompat.NoPromptCache` and `NoLongCacheRetention`;
   `OpenAIChatCompat.MaxTokensField`, `NoUsageInStream` and `NoFinishReason`.
 - `catalog.Vendor.SamplingParams`; set `Model.SamplingParams`.
 - `ai.ToolChoice.String`.
+- The `tools` example.
+
+### Fixed
+
+- An error from Gemini on Vertex AI named the Gemini API driver; it now names
+  `google-vertex`.
 
 ## [0.8.0] - 2026-10-01
 

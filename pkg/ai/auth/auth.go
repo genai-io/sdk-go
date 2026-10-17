@@ -2,6 +2,7 @@ package auth
 
 import (
 	"cmp"
+	"os"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
@@ -12,33 +13,19 @@ import (
 // Ollama — counts as available.
 func Available() []catalog.Vendor {
 	var out []catalog.Vendor
-	store, _ := resolveStore(nil)
+	store, storeErr := resolveStore(nil)
 	for _, v := range catalog.All() {
 		// A vendor that signs in through a browser is available exactly when
 		// somebody has signed in.
-		if _, interactive := Interactive(v.ID); interactive {
-			if store != nil {
+		if _, interactive := flows[v.ID]; interactive {
+			if storeErr == nil {
 				if cred, found, err := store.Load(v.ID); err == nil && found && cred.Access != "" {
 					out = append(out, v)
 				}
 			}
 			continue
 		}
-		// A vendor with no default host is unusable until it has one, key or
-		// no key: Azure and Bedrock endpoints name a tenant's own resource.
-		if v.RequiresBaseURL && BaseURL(v) == "" {
-			continue
-		}
-		// And one whose models live in a cloud project is unusable until it is
-		// told which.
-		if _, err := Deployment(v); err != nil {
-			continue
-		}
-		if len(v.KeyEnv) == 0 {
-			out = append(out, v)
-			continue
-		}
-		if key, _ := Key(v); key != "" {
+		if _, err := envConfig(v, ai.Model{}); err == nil {
 			out = append(out, v)
 		}
 	}
@@ -59,37 +46,37 @@ func Config(ref string) (ai.Config, error) {
 		return ai.Config{Model: model}, nil
 	}
 
-	if _, interactive := Interactive(v.ID); interactive {
+	if _, interactive := flows[v.ID]; interactive {
 		return interactiveConfig(v, model, nil)
 	}
 
-	cfg, err := keyConfig(v)
-	if err != nil {
-		return ai.Config{}, err
-	}
-	cfg.Model = model
-	if err := checkBaseURL(v, cfg); err != nil {
-		return ai.Config{}, err
-	}
-	return cfg, nil
+	return envConfig(v, model)
 }
 
-// keyConfig resolves a key-based vendor's credential, endpoint and deployment
-// from the environment.
-func keyConfig(v catalog.Vendor) (ai.Config, error) {
-	key, _ := Key(v)
-	if key == "" && len(v.KeyEnv) > 0 {
-		return ai.Config{}, &MissingKeyError{Vendor: v.ID, EnvVars: v.KeyEnv, Note: v.Note}
-	}
-	deployment, err := Deployment(v)
+// envConfig resolves a key-based vendor's credential, base URL and deployment
+// from the environment. The base URL is written onto the model, replacing the
+// one it carries: an override in the environment is the caller redirecting it.
+func envConfig(v catalog.Vendor, model ai.Model) (ai.Config, error) {
+	key, err := v.KeyFromEnv(os.Getenv)
 	if err != nil {
 		return ai.Config{}, err
 	}
-	return ai.Config{APIKey: key, BaseURL: BaseURL(v), ProtocolConfig: deployment}, nil
+	baseURL, err := v.BaseURLFromEnv(os.Getenv)
+	if err != nil {
+		return ai.Config{}, err
+	}
+	vertex, err := v.VertexFromEnv(os.Getenv)
+	if err != nil {
+		return ai.Config{}, err
+	}
+	if baseURL != "" {
+		model.BaseURL = baseURL
+	}
+	return ai.Config{Model: model, APIKey: key, Vertex: vertex}, nil
 }
 
 // interactiveConfig builds a Config for a vendor that signs in through a
-// browser. It performs no network I/O: the endpoint was recorded at sign-in,
+// browser. It performs no network I/O: the base URL was recorded at sign-in,
 // and the token is minted lazily by the transport on the first request.
 func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config, error) {
 	s, err := resolveStore(store)
@@ -109,7 +96,12 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 	}
 	// APIKey stays empty: the transport supplies a fresh token per request,
 	// and a static one here would go stale mid-session.
-	return ai.Config{Model: model, BaseURL: cmp.Or(cred.Endpoint, v.BaseURL), HTTPClient: client}, nil
+	// The base URL the sign-in resolved to replaces the vendor's default the
+	// model carries.
+	if baseURL := cmp.Or(cred.BaseURL, v.BaseURL); baseURL != "" {
+		model.BaseURL = baseURL
+	}
+	return ai.Config{Model: model, HTTPClient: client}, nil
 }
 
 // Client returns a client for a model reference, with the credential and

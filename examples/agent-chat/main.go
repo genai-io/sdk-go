@@ -1,12 +1,12 @@
-// Command agent-chat holds a conversation, one exchange per line you type.
+// Command agent-chat holds a conversation, one turn per line you type.
 //
 // It exists to show the decision people ask about first: Run advances the
-// conversation by exactly one exchange and then returns. Repeating it is your
+// conversation by exactly one turn and then returns. Repeating it is your
 // loop, not a method on the agent — a CLI reads stdin, a server reads
 // requests, and neither shape belongs in a library. The agent keeps the
-// history between exchanges; nothing here threads it through.
+// history between turns; nothing here threads it through.
 //
-// Ctrl-C ends the exchange in flight and hands the prompt back, instead of
+// Ctrl-C ends the turn in flight and hands the prompt back, instead of
 // killing the process.
 //
 //	export ANTHROPIC_API_KEY=...
@@ -68,7 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Ctrl-C interrupts the exchange, not the program. Between exchanges the
+	// Ctrl-C interrupts the turn, not the program. Between turns the
 	// agent has nothing to interrupt and this does nothing.
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt)
@@ -93,7 +93,7 @@ func main() {
 			continue
 		}
 
-		// One exchange. The history it leaves behind is the starting point of
+		// One turn. The history it leaves behind is the starting point of
 		// the next one, which is why nothing is passed back in.
 		for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 			if err != nil {
@@ -109,12 +109,12 @@ func main() {
 
 func render(e agent.Event) {
 	switch v := e.(type) {
-	case agent.MessageUpdate:
+	case agent.InferenceUpdate:
 		fmt.Print(v.Text())
 	case agent.ToolStart:
 		fmt.Printf("\033[2m[%s %s]\033[0m ", v.Name, strings.TrimSpace(v.Args))
 	case agent.TurnEnd:
-		// An interrupted or failed exchange still reports what it did; say so
+		// An interrupted or failed turn still reports what it did; say so
 		// rather than leaving the reader looking at half an answer.
 		switch {
 		case v.StopReason == agent.StopError:

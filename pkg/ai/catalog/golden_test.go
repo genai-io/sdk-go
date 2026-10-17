@@ -93,8 +93,7 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// goldenRow is what a row states, minus its Deployment func, which JSON
-// cannot carry; DeploymentEnv names what it reads.
+// goldenRow is what a row states, in stable JSON names.
 type goldenRow struct {
 	ID              string            `json:"id"`
 	DisplayName     string            `json:"display_name"`
@@ -104,7 +103,7 @@ type goldenRow struct {
 	BaseURLSuffix   string            `json:"base_url_suffix,omitempty"`
 	RequiresBaseURL bool              `json:"requires_base_url,omitempty"`
 	KeyEnv          []string          `json:"key_env,omitempty"`
-	DeploymentEnv   map[string]string `json:"deployment_env,omitempty"`
+	VertexEnv       map[string]string `json:"vertex_env,omitempty"`
 	Compat          any               `json:"compat,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
 	Note            string            `json:"note,omitempty"`
@@ -116,10 +115,17 @@ func goldenRows() []goldenRow {
 		out = append(out, goldenRow{
 			ID: v.ID, DisplayName: v.DisplayName, API: string(v.API),
 			BaseURL: v.BaseURL, BaseURLEnv: v.BaseURLEnv, BaseURLSuffix: v.BaseURLSuffix,
-			RequiresBaseURL: v.RequiresBaseURL, KeyEnv: v.KeyEnv, DeploymentEnv: v.DeploymentEnv,
+			RequiresBaseURL: v.RequiresBaseURL, KeyEnv: v.KeyEnv, VertexEnv: vertexEnv(v),
 			Compat: v.Compat, Headers: v.Headers,
 			Note: v.Note,
 		})
 	}
 	return out
+}
+
+func vertexEnv(v Vendor) map[string]string {
+	if v.VertexEnv == (VertexEnv{}) {
+		return nil
+	}
+	return map[string]string{"project": v.VertexEnv.Project, "region": v.VertexEnv.Region}
 }

@@ -2,13 +2,17 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
-
-	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
+
+// codexVendor is the catalog row the ChatGPT subscription signs into.
+const codexVendor = "openai-codex"
 
 // The Codex client is OpenAI's published public client for its CLI. The
 // redirect port is fixed because a public client's redirect must be one the
@@ -24,11 +28,11 @@ var codexDefaults = oauth2.Config{
 	},
 }
 
-func newCodexFlow(cfg oauth2.Config) Flow {
-	return Flow{
-		Method: "browser (PKCE)",
-		Login: func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
-			token, err := oauth.Code(ctx, &cfg, ui)
+func newCodexFlow(cfg oauth2.Config) flow {
+	return flow{
+		method: "browser (PKCE)",
+		login: func(ctx context.Context, client *http.Client, ui Interaction) (Credential, error) {
+			token, err := codeGrant(ctx, &cfg, ui)
 			if err != nil {
 				return Credential{}, err
 			}
@@ -38,7 +42,7 @@ func newCodexFlow(cfg oauth2.Config) Flow {
 				ExpiresAt: token.Expiry,
 			}, nil
 		},
-		Token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
+		token: func(ctx context.Context, client *http.Client, c Credential) (string, time.Time, Credential, error) {
 			if !c.Expired() {
 				return c.Access, c.ExpiresAt, c, nil
 			}
@@ -51,5 +55,36 @@ func newCodexFlow(cfg oauth2.Config) Flow {
 			c.Access, c.Refresh, c.ExpiresAt = token.AccessToken, token.RefreshToken, token.Expiry
 			return c.Access, c.ExpiresAt, c, nil
 		},
+		identify: func(h http.Header, token, session string) {
+			h.Set("session_id", session)
+			// The backend rejects a request that does not name the account
+			// the subscription belongs to.
+			if account := codexAccountID(token); account != "" {
+				h.Set("chatgpt-account-id", account)
+			}
+		},
 	}
+}
+
+// codexAccountID reads the ChatGPT account out of an access token's claims,
+// without verifying it: the token was issued to us over TLS, and the account
+// only says which subscription a request is billed to.
+func codexAccountID(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Auth struct {
+			AccountID string `json:"chatgpt_account_id"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	return claims.Auth.AccountID
 }

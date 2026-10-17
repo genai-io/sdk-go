@@ -7,9 +7,8 @@ import (
 	"strings"
 )
 
-// Validate checks a call against what the model can actually do, before it
-// reaches the network. It takes the same arguments as Complete, so a caller
-// can ask whether a request is sendable without sending it.
+// validate checks a call against what the model can actually do, before it
+// reaches the network.
 //
 // It reports what a caller wrote and this model cannot take — an image in a
 // tool result on a protocol that carries only text there, a sampling extension
@@ -17,10 +16,6 @@ import (
 // blocks, which are the model's own state rather than the caller's: the ones
 // this model cannot replay are dropped on the way out, so a conversation stays
 // sendable to whichever model is asked next.
-func (m Model) Validate(messages []Message, opts ...Option) error {
-	return m.validate(newRequest(m, messages, opts))
-}
-
 func (m Model) validate(req *Request) error {
 	if !m.Stage.Available() {
 		msg := fmt.Sprintf("model %s is retired and no longer serves requests", m)
@@ -64,7 +59,7 @@ func (m Model) validateCapabilities(req *Request) error {
 	// what lets a live listing or a hand-built Model carry a rung this package
 	// has never heard of, while still catching a typo instead of silently
 	// falling back to the default.
-	if want := req.Effort; want != EffortDefault && !want.Valid() && !m.Offers(want) {
+	if want := req.Effort; want != EffortDefault && !want.Valid() && !slices.Contains(m.Efforts(), want) {
 		if rungs := m.Efforts(); len(rungs) > 0 {
 			return invalidRequest("model %s does not offer reasoning effort %q; it offers %v", m, want, rungs)
 		}
@@ -148,11 +143,11 @@ func validateSettings(req *Request) error {
 
 	toolNames := make(map[string]bool, len(req.Tools))
 	for i, tool := range req.Tools {
-		name := tool.Schema.Name
+		name := tool.Name
 		if strings.TrimSpace(name) == "" {
 			return invalidRequest("tool %d has no name", i)
 		}
-		if tool.Schema.Definition != nil && tool.Schema.DefinitionMap() == nil {
+		if tool.Definition != nil && tool.DefinitionMap() == nil {
 			return invalidRequest("tool %q parameters must be a JSON Schema object", name)
 		}
 		if toolNames[name] {
@@ -192,104 +187,6 @@ func (m Model) validateProtocolBlock(block Block) error {
 	// reaches this point. Refusing over them would make switching model
 	// mid-conversation impossible for exactly the models it matters for.
 	return nil
-}
-
-// replayable returns a block of another model's reasoning state as this model
-// can take it back, and whether it can at all.
-//
-// Each protocol wants its own and tolerates no other's. Anthropic replays a
-// thinking block only with the signature proving the text was not edited. A
-// Chat Completions endpoint carries the text as reasoning_content, which only
-// some accept and none accept a signature with — so the signature comes off
-// and the reasoning still travels, because it is the thinking that is worth
-// replaying and the signature is only Anthropic's proof of it. Gemini takes
-// the text as a thought part on the same terms. The Responses protocol replays
-// opaque items instead, so readable thinking there is display-only.
-//
-// A protocol this package does not know is left alone: nothing here knows
-// better than the driver that declared it.
-func (m Model) replayable(block Block) (Block, bool) {
-	switch block.Type {
-	case BlockReasoning:
-		if m.API == "" {
-			return block, true
-		}
-		if block.Reasoning == nil {
-			return block, false
-		}
-		r := block.Reasoning
-		switch r.API {
-		case APIAnthropicMessages, APIAnthropicVertex:
-			return block, m.API.anthropicFamily()
-		case "":
-			// Older Anthropic histories have only encrypted content, no item ID.
-			if m.API.anthropicFamily() {
-				return block, r.ID == "" && r.Summary == "" && r.EncryptedContent != ""
-			}
-			return block, m.API == APIOpenAIResponses
-		case APIOpenAIResponses:
-			return block, m.API == APIOpenAIResponses
-		default:
-			return block, false
-		}
-	case BlockThinking:
-		switch {
-		case m.API == "":
-			return block, true
-		case m.API.anthropicFamily():
-			return block, block.Signature != ""
-		case m.API == APIOpenAIChat:
-			block.Signature = ""
-			return block, CompatOf[OpenAIChatCompat](m).ReasoningContent
-		case m.API.googleFamily():
-			block.Signature = ""
-			return block, true
-		default:
-			// APIOpenAIResponses, and any protocol that carries reasoning as
-			// items rather than as text.
-			return block, false
-		}
-	}
-	return block, true
-}
-
-// strip drops the reasoning state this model cannot replay, which is what
-// makes a conversation portable between models. It is the counterpart of
-// validate: state the model produced is dropped or trimmed to what this one
-// takes, and content the caller wrote is refused.
-//
-// A message is rebuilt only when it loses something, so a conversation that
-// stays with one model is not copied on every call.
-func (m Model) strip(msgs []Message) []Message {
-	for i, msg := range msgs {
-		if !m.rewrites(msg.Content) {
-			continue
-		}
-		out := slices.Clone(msgs)
-		for j := i; j < len(out); j++ {
-			content := make(Content, 0, len(out[j].Content))
-			for _, block := range out[j].Content {
-				if kept, ok := m.replayable(block); ok {
-					content = append(content, kept)
-				}
-			}
-			out[j].Content = content
-		}
-		return out
-	}
-	return msgs
-}
-
-// rewrites reports whether this content would come back different, so a
-// conversation staying with the model that made it is not copied per call.
-func (m Model) rewrites(content Content) bool {
-	for _, block := range content {
-		kept, ok := m.replayable(block)
-		if !ok || kept != block {
-			return true
-		}
-	}
-	return false
 }
 
 func validateBlock(role Role, block Block) error {

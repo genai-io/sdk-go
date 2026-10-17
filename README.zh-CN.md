@@ -7,11 +7,13 @@
 
 一个大模型的 Go SDK，分两个包：在 Anthropic、OpenAI、Google 的六种协议之上提供**同一套带类型的 API**，以及一个跑在它外面那圈循环的 agent 运行时。
 
+它是一套组装 agent 的通用模块，可以拿来搭任何 agent，不专属于某一个应用。每个 agent 都需要的能力在这里只实现一份；应用只保留自己的策略和界面。什么该放进来，见 [What belongs here](CONTRIBUTING.md#what-belongs-here)。
+
 **`pkg/ai` —— 一次模型调用**
 
 - **一套 API，六种协议** —— 不管哪家服务，拿到的都是同样的类型。
 - **流式** —— 文本、thinking、工具调用、图片共用一套 start/delta/end 生命周期。
-- **工具调用** —— schema 从你的参数 struct 推导，参数在你的代码运行前先校验。
+- **工具调用** —— schema 从你的参数 struct 推导，调用再解码回同一个 struct。
 - **结构化输出** —— `CompleteAs[T]` 推导 schema、约束生成、解码答案。
 - **带类型的错误** —— 认证、限流、超上下文、不支持，不是要去匹配的子串。
 - **厂商目录** —— 28 家厂商：怎么连上每一家、说它的协议，都是数据。有哪些模型、它们的限额、价格、模态和推理档位由应用提供；SDK 按协议把每一档拼成线上的写法。
@@ -20,7 +22,7 @@
 **`pkg/agent` —— 外面那圈循环**
 
 - **reason 与 act** —— 问模型、跑它要的工具、再问一次。
-- **一切皆事件** —— 一段序列上 10 种类型，而对话就是其中两种的折叠。
+- **一切皆事件** —— 一段序列上 12 种类型，而对话就是其中两种的折叠。
 - **四种 hook** —— 拦下一次工具调用、改写发出去的东西、抹掉返回来的东西。
 - **并行工具** —— 一批默认并发，除非某个工具说它不能。
 - **会话** —— 保存 agent 的对话，并把它加载回来。
@@ -51,7 +53,7 @@
 go get github.com/genai-io/sdk-go
 ```
 
-需要 Go 1.26 或更高版本。
+需要 Go 1.26.9 或更高版本。
 
 ## 客户端 —— `pkg/ai`
 
@@ -91,7 +93,7 @@ func main() {
 
 `auth.Client` 会从厂商文档规定的那个环境变量里读凭证——这里是 `OPENAI_API_KEY`。那个空导入注册的是**一种线协议**；只导入你要用的，或者在模型要到运行时才确定时用 `pkg/ai/driver/all`。
 
-这是**一条链的最短端**：`auth.Client` 就是 `auth.Config` 加 `ai.New`，后者又是 `ai.NewDriver` 加 `ai.NewClientWithDriver`。需要的话就早点停——绝不能顺手读凭证的服务端停在 `ai.New`，要套 middleware 就停在 `ai.NewDriver`。见[构造客户端](docs/clients.zh-CN.md)。
+这是**一条链的最短端**：`auth.Client` 就是 `auth.Config` 加 `ai.New`，后者构造注册好的 driver 并包成客户端。需要的话就早点停——绝不能顺手读凭证的服务端停在 `ai.New`，要套 middleware 就自己构造 driver、交给 `ai.NewClientWithDriver`。见[构造客户端](docs/clients.zh-CN.md)。
 
 #### 换一家服务
 
@@ -105,7 +107,7 @@ client, err := auth.Client(ref)
 
 `catalog.All()` **不联网**就能列出全部厂商；某家有哪些模型，来自它的实时列表或你自己的数据。
 
-可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`tools/`](examples/tools)、[`structured/`](examples/structured) 和四个 agent 例子。
+可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`structured/`](examples/structured) 和五个 agent 例子。
 
 ### 流式
 
@@ -143,7 +145,7 @@ for event, err := range client.Stream(ctx, messages) {
 
 ### 工具调用
 
-一个工具就是**一个名字、一句话、一个函数**。struct 里放的正好是模型可以发来的东西。
+一个工具就是一个 `Schema`：**一个名字、一句话、参数要的那段 JSON**。`ToolSchema` 从 struct 推导出它，struct 里放的正好是模型可以发来的东西。
 
 ```go
 type SearchArgs struct {
@@ -151,47 +153,15 @@ type SearchArgs struct {
 	Limit int    `json:"limit,omitempty" description:"最多返回几段" maximum:"10"`
 }
 
-search := ai.ToolFunc("search", "搜索文档，返回匹配的段落。",
-	func(ctx context.Context, a SearchArgs) (string, error) {
-		return docs.Search(ctx, a.Query, a.Limit) // 依赖走闭包
-	})
+search := ai.ToolSchema[SearchArgs]("search", "搜索文档，返回匹配的段落。")
 
-response, history, err := client.Run(ctx,
-	[]ai.Message{ai.UserMessage(question)}, []ai.Tool{search, fetch})
-```
-
-<details>
-<summary><code>ToolFunc</code> 是简写。它折叠掉的就是下面这段。</summary>
-
-一个工具就是两半：`Schema` 是模型被告知的全部，`Run` 是应答调用的那部分。
-`ToolFunc` 从 `Run` 接受的 Go 类型推导出前者。
-
-```go
-search := ai.Tool{
-	Schema: ai.Schema{
-		Name:        "search",
-		Description: "搜索文档，返回匹配的段落。",
-		Definition:  jsonschema.For[SearchArgs](),
-	},
-	Run: func(ctx context.Context, arguments string) (string, error) {
-		var a SearchArgs
-		if err := (ai.ToolCall{Name: "search", Input: arguments}).UnmarshalArgs(&a); err != nil {
-			return "", err
-		}
-		return docs.Search(ctx, a.Query, a.Limit)
-	},
+response, err := client.Complete(ctx, messages, ai.WithTools(search, fetch))
+for _, call := range response.ToolCalls() {
+	var a SearchArgs
+	err := search.Validate(call.Input) // 先按 schema 校验参数
+	err = call.UnmarshalArgs(&a)       // 再解码回它来自的那个 struct
 }
 ```
-
-**`ai.Tool` 就是一个工具的全部**：上线的那个 schema，加一个应答调用的函数。`ToolFunc` 做的事只有两件——从 `SearchArgs` 推出 schema、把参数解码进它。仅此而已：两种写法产出的定义**逐字节相同**，行为也相同，连错误都一样。
-
-所以那些"逃生口"根本不是特性。手写 schema 是一次赋值 `search.Schema.Definition = handWritten`；到运行时才知道形状的工具就是上面这个写法、schema 从别处来。两者都没用到常规路径之外的任何东西。
-
-`UnmarshalArgs` 就是 `ToolFunc` 用来解码的那个，也值得你直接用：**schema 里没有的参数是错误，不是静默丢弃**——模型编出来的东西该被告知，而不是被执行一半；空文档则按空对象读，那正是**无参数的工具，这里每个协议都会发的东西**。
-
-</details>
-
-`Run` 就是模型需要的那个循环：它请求、你回答、它继续。`history` 是整段对话，追问直接从它接着走。
 
 **`SearchArgs` 只写了一次**，所以发给模型的 schema 和参数解码进去的 struct 不可能各说各话：
 
@@ -207,7 +177,7 @@ search := ai.Tool{
 }
 ```
 
-参数在你的函数运行前先按它校验过，于是**模型的错误会变成它能自己改正的东西**。工具名不存在、参数不对、工具自己失败——都作为 `IsError` 结果回给模型，而不是终止整段对话。
+`UnmarshalArgs` 把 **schema 里没有的参数当错误，不是静默丢弃**——模型编出来的东西该被告知，而不是被执行一半；空文档则按空对象读，那正是**无参数的工具，这里每个协议都会发的东西**。
 
 约束模型调哪个，是**一个值、四种状态**，正好是每个协议都能表达的那四种：
 
@@ -217,7 +187,7 @@ ai.WithToolChoice(ai.ToolChoiceRequired)        // 必须调一个，调哪个�
 ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 ```
 
-轮次本身是你的业务时（要流式输出、要按条件停、要每轮记账），用 `Complete` 加 `RunTools` 自己写这个循环。
+`pkg/ai` 只做一次调用。跑工具、再问一次、直到模型不再要东西，是 [agent](#agent--pkgagent) 的事。
 
 ### 结构化输出
 
@@ -230,7 +200,7 @@ type Person struct {
 person, err := ai.CompleteAs[Person](ctx, client, messages)
 ```
 
-**类型只写一次**：`CompleteAs` 从它推导 schema、原生约束生成、再把答案解码回它。
+**类型只写一次**：`CompleteAs` 从它推导 schema、原生约束生成、再把答案解码回它。手里已经有 schema 时，`WithSchema` 和 `Response.Unmarshal` 就是同样的两半。
 
 **标签的 key 就是它要设的那个 JSON Schema 关键字**——共 11 个——而且每一个字都是 prompt 文本。schema 是按**"能被接受"**推导的，不只是"合法"，这比规范本身更严。见 [`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema)。
 
@@ -267,7 +237,7 @@ text := response.Text()
 history = append(history, response.Message()) // 保留每一个块，保序
 ```
 
-**工具结果也是内容**：文本，以及协议能带的图片——一张截图、一张渲染出来的图。`Model.Validate` 会在那两个带不了的协议上**拒绝请求**，而不是把图悄悄丢掉、让模型去回答一张它从没看见过的图。
+**工具结果也是内容**：文本，以及协议能带的图片——一张截图、一张渲染出来的图。把图片放到带不了的协议上，请求**发出前就会被拒绝**，而不是把图悄悄丢掉、让模型去回答一张它从没看见过的图。
 
 **用 `response.Message()`，不要拿 `response.Text()` 重新拼一条消息** —— 前者把 thinking 和 reasoning 状态带到下一轮，那正是让推理模型能接着想、而不是每轮从头想的东西。
 
@@ -280,7 +250,7 @@ switch {
 case ai.IsAuth(err):            // 凭证不对或缺失
 case ai.IsContextExceeded(err): // 压缩对话后重试
 case ai.IsRetryable(err):       time.Sleep(ai.RetryAfter(err))
-case ai.IsUnsupported(err):     // 这个模型做不了要求它做的事
+case ai.IsKind(err, ai.KindUnsupported): // 这个模型做不了要求它做的事
 }
 ```
 
@@ -293,13 +263,14 @@ case ai.IsUnsupported(err):     // 这个模型做不了要求它做的事
 **`pkg/ai` 永远不读环境变量、不读文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：
 
 ```go
-client, err := ai.New(ai.Config{
-	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
-	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
-})
+model.BaseURL = "https://gateway.internal/v1"
+model.Headers = map[string]string{"X-Tenant": tenant}
+client, err := ai.New(ai.Config{Model: model, APIKey: key, HTTPClient: httpClient})
 ```
 
-`pkg/ai/auth` 是那个**选择性开启**、确实会读环境的入口。`pkg/ai/provider` 夹在目录行和客户端之间：一个配好的 host 加上它上面的模型，其中**"读列表"和"拉列表"是两个动词**。
+请求发到哪、带什么头，都是**模型的事**：`Model.BaseURL` 和 `Model.Headers` 就是最终值，所以要覆盖，由构造 Config 的那一方写到模型上。
+
+`pkg/ai/auth` 是那个**选择性开启**、确实会读环境的入口。`pkg/ai/endpoint` 夹在目录行和客户端之间：一个配好的 host 加上它上面的模型，其中**"读列表"和"拉列表"是两个动词**。
 
 ### 支持的协议
 
@@ -310,6 +281,7 @@ client, err := ai.New(ai.Config{
 | Anthropic Messages | `pkg/ai/driver/anthropic` | 4 |
 | Anthropic on Vertex AI | `pkg/ai/driver/anthropic/vertex` | 1 |
 | Google Gemini | `pkg/ai/driver/google` | 1 |
+| Google Gemini on Vertex AI | `pkg/ai/driver/google/vertex` | 1 |
 
 **厂商是目录里的一行，不是一个包**：大多数提供的端点说的是别人的协议，所以加一家是改数据。
 
@@ -360,13 +332,14 @@ for batch := range myMessages {
 
 ### 一切皆事件
 
-一段序列上 10 种类型，而且集合是**封闭**的——消费者 switch 的时候可以确信这就是全部。有两样东西有值得跟踪的生命周期，它们的报告方式完全一致：开始、中途可能报告、结束。
+一段序列上 12 种类型，而且集合是**封闭**的——消费者 switch 的时候可以确信这就是全部。花时间的东西是一个区间，它们的报告方式完全一致：开始、中途可能报告、结束。
 
 ```
-MessageAdded  MessagesReplaced            对话本身发生变化
-MessageStart  MessageUpdate  MessageEnd   模型正在产生一条消息
-ToolStart     ToolUpdate     ToolEnd      一次工具调用，从提出到答复
-TurnStart                    TurnEnd      包住它们的那一轮
+MessageAdded     MessagesReplaced                对话本身发生变化
+InferenceStart   InferenceUpdate  InferenceEnd   一次模型调用
+ToolStart        ToolUpdate       ToolEnd        一次工具调用
+CompactionStart                   CompactionEnd  对话正在被缩短
+TurnStart                         TurnEnd        包住它们的那一轮
 ```
 
 **对话是第一行的折叠。** 把 `MessageAdded` 按顺序重放，得到的就是 agent 手里那份；遇到 `MessagesReplaced` 就从头开始折，因为在它之前的都是 agent 已经扔掉的。
@@ -383,7 +356,7 @@ flowchart LR
     C -->|答上来了| D{{PostInfer}}
     D --> E["那条消息"] --> F{{PreTool}} --> G["工具执行"] --> H{{PostTool}}
     C -->|失败了| X{{OnInferError}}
-    X -->|Retry| A
+    X -->|Recovery| A
 ```
 
 一套权限系统，就是一个返回 `Decision{Block: true}` 的 `PreTool`。一批工具调用默认并发执行，除非某个工具声明自己不能；工具 panic 也按普通失败处理——告诉模型，这一轮继续。
@@ -405,11 +378,13 @@ for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 store.Save(ctx, id, a.Messages())        // 整份对话
 ```
 
+`pkg/session` 就是那个 `Store`，`pkg/session/jsonl` 给每份对话一个只追加的文件。
+
 压缩不需要任何额外处理：下一次保存存的就是压缩后的对话。
 
 事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；
 能直接跑的程序见 [`examples/agent-chat`](examples/agent-chat)、[`examples/agent-progress`](examples/agent-progress)、
-[`examples/agent-session`](examples/agent-session) 和 [`examples/agent`](examples/agent)。
+[`examples/agent-session`](examples/agent-session)、[`examples/agent`](examples/agent) 和 [`examples/mcp`](examples/mcp)。
 
 ## 文档
 
@@ -421,7 +396,7 @@ store.Save(ctx, id, a.Messages())        // 整份对话
 | [Agent SDK](docs/agent.zh-CN.md) | 结构、事件契约、hook、工具与会话（[English](docs/agent.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
 | [更新日志](CHANGELOG.md) | 每个版本改了什么 |
-| [`examples/`](examples) | 可运行的程序：每家厂商一个，外加工具调用、结构化输出和四个 agent |
+| [`examples/`](examples) | 可运行的程序：每家厂商一个，外加结构化输出和五个 agent |
 
 ## 版本
 

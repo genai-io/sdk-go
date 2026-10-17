@@ -8,8 +8,8 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// request assembles the body of a generate call.
-func (d *Driver) request(req *ai.Request) (*generateRequest, error) {
+// buildParams assembles the body of a generate call.
+func (d *driver) buildParams(req *ai.Request) (*generateRequest, error) {
 	contents, err := d.convertContents(req)
 	if err != nil {
 		return nil, err
@@ -26,7 +26,7 @@ func (d *Driver) request(req *ai.Request) (*generateRequest, error) {
 	return body, nil
 }
 
-func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
+func (d *driver) generationConfig(req *ai.Request) *generationConfig {
 	cfg := &generationConfig{}
 	if req.MaxTokens > 0 {
 		cfg.MaxOutputTokens = int32(req.MaxTokens)
@@ -65,14 +65,14 @@ func (d *Driver) generationConfig(req *ai.Request) *generationConfig {
 	return cfg
 }
 
-func declarations(tools []ai.Tool) []*tool {
+func declarations(tools []ai.Schema) []*tool {
 	if len(tools) == 0 {
 		return nil
 	}
 	decls := make([]*functionDeclaration, 0, len(tools))
 	for _, t := range tools {
-		decl := &functionDeclaration{Name: t.Schema.Name, Description: t.Schema.Description}
-		if schema := t.Schema.DefinitionMap(); schema != nil {
+		decl := &functionDeclaration{Name: t.Name, Description: t.Description}
+		if schema := t.DefinitionMap(); schema != nil {
 			decl.ParametersJSONSchema = schema
 		}
 		decls = append(decls, decl)
@@ -101,7 +101,7 @@ func toolChoiceConfig(req *ai.Request) *toolConfig {
 	return &toolConfig{FunctionCallingConfig: &functionCallingConfig{Mode: mode}}
 }
 
-func (d *Driver) convertContents(req *ai.Request) ([]*content, error) {
+func (d *driver) convertContents(req *ai.Request) ([]*content, error) {
 	out := make([]*content, 0, len(req.Messages))
 
 	for _, msg := range req.Messages {
@@ -110,7 +110,7 @@ func (d *Driver) convertContents(req *ai.Request) ([]*content, error) {
 			role = "model"
 		}
 
-		parts, err := contentParts(msg.Content)
+		parts, err := d.contentParts(msg.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +126,7 @@ func (d *Driver) convertContents(req *ai.Request) ([]*content, error) {
 // contentParts converts message content. Gemini takes image bytes rather than
 // base64 text, so a corrupt attachment is reported here instead of failing as
 // an opaque server-side rejection.
-func contentParts(c ai.Content) ([]*part, error) {
+func (d *driver) contentParts(c ai.Content) ([]*part, error) {
 	parts := make([]*part, 0, len(c))
 	for _, block := range c {
 		switch block.Type {
@@ -145,7 +145,7 @@ func contentParts(c ai.Content) ([]*part, error) {
 			decoded, err := base64.StdEncoding.DecodeString(block.Image.Data)
 			if err != nil {
 				return nil, &ai.Error{
-					Driver:  Name,
+					Driver:  d.Name(),
 					Kind:    ai.KindInvalidRequest,
 					Message: fmt.Sprintf("image %q is not valid base64", block.Image.FileName),
 					Err:     err,

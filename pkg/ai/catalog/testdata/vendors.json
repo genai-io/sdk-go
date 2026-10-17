@@ -16,7 +16,7 @@
     "id": "anthropic-vertex",
     "display_name": "Anthropic (Vertex AI)",
     "api": "anthropic-vertex",
-    "deployment_env": {
+    "vertex_env": {
       "project": "ANTHROPIC_VERTEX_PROJECT_ID",
       "region": "CLOUD_ML_REGION"
     },
@@ -83,7 +83,7 @@
     "id": "google-vertex",
     "display_name": "Google Gemini (Vertex AI)",
     "api": "google-vertex",
-    "deployment_env": {
+    "vertex_env": {
       "project": "GOOGLE_CLOUD_PROJECT",
       "region": "GOOGLE_CLOUD_LOCATION"
     },
@@ -223,7 +223,10 @@
     "headers": {
       "Copilot-Integration-Id": "vscode-chat",
       "Editor-Plugin-Version": "copilot-chat/0.35.0",
-      "Editor-Version": "vscode/1.107.0"
+      "Editor-Version": "vscode/1.107.0",
+      "Openai-Intent": "conversation-panel",
+      "User-Agent": "GitHubCopilotChat/0.26.7",
+      "X-GitHub-Api-Version": "2025-04-01"
     },
     "note": "Copilot authenticates a person, not a service: there is no API key. Sign in with auth.Login(ctx, \"copilot\", ...), which runs GitHub's device-code grant and stores the result. The token it issues lasts about half an hour and is renewed for you."
   },
@@ -233,7 +236,13 @@
     "api": "openai-responses",
     "base_url": "https://chatgpt.com/backend-api/codex",
     "compat": {
-      "no_max_output_tokens": true
+      "no_max_output_tokens": true,
+      "codex_model_listing": true
+    },
+    "headers": {
+      "OpenAI-Beta": "responses=experimental",
+      "User-Agent": "codex_cli_rs",
+      "originator": "codex_cli_rs"
     },
     "note": "A ChatGPT subscription rather than an API key. Sign in with auth.Login(ctx, \"openai-codex\", ...), which runs the PKCE browser grant. The endpoint and client identifier come from OpenAI's Codex CLI, not from published API documentation, and are not covered by the API's compatibility promises."
   },

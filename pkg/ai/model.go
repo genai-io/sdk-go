@@ -48,49 +48,6 @@ func (a API) googleFamily() bool {
 	return a == APIGoogleGenAI || a == APIGoogleVertex
 }
 
-// VertexConfig is the deployment a Vertex-served model lives in. It is passed
-// as Config.ProtocolConfig to the anthropic/vertex and google/vertex drivers.
-type VertexConfig struct {
-	// Project is the GCP project ID serving the model.
-	Project string
-	// Region is the serving region. "global" is the usual choice and is what
-	// an empty value resolves to.
-	Region string
-}
-
-// ProtocolConfig marks VertexConfig as a driver's construction settings.
-func (VertexConfig) ProtocolConfig() {}
-
-// VertexDefaultRegion is where a model is served when the deployment names no
-// region. Google recommends the global endpoint for availability; a specific
-// region is for data residency.
-const VertexDefaultRegion = "global"
-
-// VertexDeployment reads the deployment out of a Config for a Vertex driver,
-// with the region defaulted. No project is a credential failure named for
-// driver: the deployment is how a Vertex caller says who they are, and both
-// Vertex drivers refuse the same way.
-func VertexDeployment(cfg Config, driver string) (VertexConfig, error) {
-	deployment, ok := cfg.ProtocolConfig.(VertexConfig)
-	if cfg.ProtocolConfig != nil && !ok {
-		return VertexConfig{}, &Error{
-			Kind:    KindInvalidRequest,
-			Message: fmt.Sprintf("ai: got native driver configuration of type %T; driver expects ai.VertexConfig", cfg.ProtocolConfig),
-		}
-	}
-	if deployment.Project == "" {
-		return VertexConfig{}, &Error{
-			Driver:  driver,
-			Kind:    KindAuth,
-			Message: "no Google Cloud project: set Config.ProtocolConfig to an ai.VertexConfig, or use auth.Config to read it from the environment",
-		}
-	}
-	if deployment.Region == "" {
-		deployment.Region = VertexDefaultRegion
-	}
-	return deployment, nil
-}
-
 // Modality is a kind of content a model accepts as input.
 type Modality string
 
@@ -130,8 +87,9 @@ type Model struct {
 	// is informational: routing keys off API.
 	Vendor string `json:"vendor,omitempty"`
 
-	// BaseURL overrides the driver's default endpoint. Empty means the
-	// protocol's own default host.
+	// BaseURL is where requests for this model go. Empty means the protocol's
+	// own default host. A caller reaching the model through a gateway or a
+	// proxy sets it here.
 	BaseURL string `json:"base_url,omitempty"`
 
 	// ContextWindow is the maximum input tokens, and MaxOutput the maximum
@@ -170,8 +128,8 @@ type Model struct {
 	// min_p, repetition_penalty. Only the OpenAI-family drivers apply them.
 	SamplingParams map[string]any `json:"sampling_params,omitempty"`
 
-	// Headers are added to every request for this model, on top of whatever
-	// the Config carries.
+	// Headers are sent with every request for this model — a gateway token, a
+	// tenant tag, a vendor's required client identification.
 	Headers map[string]string `json:"headers,omitempty"`
 
 	// Compat holds the protocol-specific behavior flags this endpoint needs —
@@ -191,9 +149,6 @@ func (m Model) Accepts(kind Modality) bool {
 	return slices.Contains(m.Input, kind)
 }
 
-// Reasons reports whether the model has a reasoning ladder.
-func (m Model) Reasons() bool { return len(m.Reasoning) > 0 }
-
 // Efforts returns the rungs the model advertises, least to most.
 func (m Model) Efforts() []Effort {
 	out := make([]Effort, len(m.Reasoning))
@@ -201,13 +156,6 @@ func (m Model) Efforts() []Effort {
 		out[i] = level.Effort
 	}
 	return out
-}
-
-// Offers reports whether the model's ladder declares this exact rung. Use it
-// to ask a model what it can do before asking it to do it; ResolveLevel is
-// what happens when you ask for a rung it does not declare.
-func (m Model) Offers(e Effort) bool {
-	return slices.ContainsFunc(m.Reasoning, func(l ReasoningLevel) bool { return l.Effort == e })
 }
 
 // defaultLevel returns the rung used when a request leaves Effort unset, and
@@ -235,7 +183,7 @@ func (m Model) ResolveLevel(want Effort) (ReasoningLevel, bool) {
 
 // pickLevel is ResolveLevel's choice of rung, before the wire value is filled.
 func (m Model) pickLevel(want Effort) (ReasoningLevel, bool) {
-	if !m.Reasons() {
+	if len(m.Reasoning) == 0 {
 		return ReasoningLevel{}, false
 	}
 	if want == EffortDefault {
@@ -362,7 +310,7 @@ const (
 	StagePreview Stage = "preview"
 	// StageDeprecated still serves requests but has an announced end date.
 	StageDeprecated Stage = "deprecated"
-	// StageRetired no longer serves requests. Validate refuses to send to one.
+	// StageRetired no longer serves requests. A call to one is refused.
 	StageRetired Stage = "retired"
 )
 

@@ -5,35 +5,6 @@ import (
 	"testing"
 )
 
-type fakeConfig struct{ Project string }
-
-func (fakeConfig) ProtocolConfig() {}
-
-// ProtocolConfig carries a driver's own value through an interface, and
-// falling back to the zero value would look like the option having no effect.
-func TestAProtocolConfigOfTheWrongTypeIsReportedRatherThanIgnored(t *testing.T) {
-	want := VertexConfig{Project: "p", Region: "r"}
-	if got, err := VertexDeployment(Config{ProtocolConfig: want}, "stub"); err != nil || got != want {
-		t.Errorf("deployment = %v, %v; want %v", got, err, want)
-	}
-	_, err := VertexDeployment(Config{ProtocolConfig: fakeConfig{}}, "stub")
-	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "fakeConfig") {
-		t.Errorf("err = %v, want it to name the type that was actually given", err)
-	}
-}
-
-// A protocol that defines no escape hatch must say so rather than drop what it
-// was handed.
-func TestAProtocolWithNoEscapeHatchRefusesOne(t *testing.T) {
-	if err := RejectProtocolConfig(Config{}, "stub"); err != nil {
-		t.Errorf("RejectProtocolConfig with none given = %v, want nil", err)
-	}
-	err := RejectProtocolConfig(Config{ProtocolConfig: fakeConfig{}}, "stub")
-	if !IsKind(err, KindInvalidRequest) || !strings.Contains(err.Error(), "stub") {
-		t.Errorf("err = %v, want it to name the driver", err)
-	}
-}
-
 // A missing blank import is the commonest way to hold an unusable client, and
 // the error is the only place it is ever explained.
 func TestAnUnregisteredProtocolSaysWhatToImport(t *testing.T) {
@@ -49,7 +20,10 @@ func TestAnUnregisteredProtocolSaysWhatToImport(t *testing.T) {
 		t.Errorf("err = %q, want it to list what is linked in, in order", some)
 	}
 
-	if _, err := NewDriver(Config{Model: Model{ID: "m"}}); err == nil {
+	if _, err := newDriver(Config{Model: Model{ID: "m"}}); err == nil {
 		t.Error("a model with no API resolved to a driver")
+	}
+	if _, err := newDriver(Config{Model: Model{API: APIOpenAIChat}}); err == nil {
+		t.Error("a model with no ID resolved to a driver")
 	}
 }

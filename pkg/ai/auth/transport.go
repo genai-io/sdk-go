@@ -14,8 +14,9 @@ import (
 
 // transport injects a vendor's current token into every request.
 type transport struct {
-	base   http.RoundTripper
-	source *tokenSource
+	base    http.RoundTripper
+	source  *tokenSource
+	session string
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -36,12 +37,16 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Cloning: a RoundTripper must not modify the request it is given.
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+token)
+	if identify := t.source.flow.identify; identify != nil {
+		identify(clone.Header, token, t.session)
+	}
 	return t.base.RoundTrip(clone)
 }
 
 // HTTPClient returns a client that presents a vendor's stored credential,
-// renewing it as it expires, for a caller that keeps credentials in a Store of
-// its own.
+// renewing it as it expires, along with the identity headers its backend
+// requires per request and per session — for a caller that keeps credentials
+// in a Store of its own.
 func HTTPClient(vendorID string, c Credential, store Store, base *http.Client) (*http.Client, error) {
 	f, ok := flows[vendorID]
 	if !ok {
@@ -55,7 +60,7 @@ func HTTPClient(vendorID string, c Credential, store Store, base *http.Client) (
 		inner = http.DefaultTransport
 	}
 	out := *base
-	out.Transport = &transport{base: inner, source: sharedSource(vendorID, f, store, c)}
+	out.Transport = &transport{base: inner, source: sharedSource(vendorID, f, store, c), session: newUUID()}
 	return &out, nil
 }
 
@@ -63,7 +68,7 @@ func HTTPClient(vendorID string, c Credential, store Store, base *http.Client) (
 // renews it when it runs out, and persists whatever the renewal changed.
 type tokenSource struct {
 	vendor string
-	flow   Flow
+	flow   flow
 	store  Store
 	client *http.Client
 
@@ -90,7 +95,7 @@ type sourceKey struct {
 	store  Store
 }
 
-func sharedSource(vendorID string, f Flow, store Store, c Credential) *tokenSource {
+func sharedSource(vendorID string, f flow, store Store, c Credential) *tokenSource {
 	fresh := func() *tokenSource {
 		return &tokenSource{
 			vendor: vendorID,
@@ -147,7 +152,7 @@ func (s *tokenSource) token(ctx context.Context) (string, error) {
 		}
 	}
 
-	present, expires, updated, err := s.flow.Token(context.WithValue(ctx, oauth2.HTTPClient, s.client), s.client, s.cred)
+	present, expires, updated, err := s.flow.token(context.WithValue(ctx, oauth2.HTTPClient, s.client), s.client, s.cred)
 	if err != nil {
 		return "", err
 	}

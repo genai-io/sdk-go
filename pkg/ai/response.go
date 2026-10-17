@@ -35,10 +35,10 @@ type Usage struct {
 	CacheWrite int `json:"cache_write,omitempty"`
 	CacheRead  int `json:"cache_read,omitempty"`
 
-	// CacheWrite1h is the slice of CacheWrite written to a long-lifetime entry,
+	// CacheWriteLong is the slice of CacheWrite written to a long-lifetime entry,
 	// billed at twice the input rate rather than the cache-write one. It travels
 	// separately because the two cannot be told apart afterwards.
-	CacheWrite1h int `json:"cache_write_1h,omitempty"`
+	CacheWriteLong int `json:"cache_write_long,omitempty"`
 
 	// Reasoning is the tokens spent thinking, where the provider reports them
 	// apart from the answer. Cost prices Output, not this, so it is diagnostic.
@@ -58,9 +58,17 @@ func (u *Usage) Add(other Usage) {
 	u.Input += other.Input
 	u.Output += other.Output
 	u.CacheWrite += other.CacheWrite
-	u.CacheWrite1h += other.CacheWrite1h
+	u.CacheWriteLong += other.CacheWriteLong
 	u.CacheRead += other.CacheRead
 	u.Reasoning += other.Reasoning
+}
+
+// SplitPromptTokens separates a combined prompt count into its fresh and
+// cached halves.
+func SplitPromptTokens(promptTokens, cachedTokens int) (fresh, cached int) {
+	promptTokens = max(promptTokens, 0)
+	cached = min(max(cachedTokens, 0), promptTokens)
+	return promptTokens - cached, cached
 }
 
 // mergeUsage applies an update field by field, ignoring zeros. Protocols
@@ -77,8 +85,8 @@ func mergeUsage(dst *Usage, src Usage) {
 	if src.CacheWrite > 0 {
 		dst.CacheWrite = src.CacheWrite
 	}
-	if src.CacheWrite1h > 0 {
-		dst.CacheWrite1h = src.CacheWrite1h
+	if src.CacheWriteLong > 0 {
+		dst.CacheWriteLong = src.CacheWriteLong
 	}
 	if src.CacheRead > 0 {
 		dst.CacheRead = src.CacheRead

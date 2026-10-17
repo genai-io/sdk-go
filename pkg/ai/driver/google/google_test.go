@@ -82,7 +82,7 @@ func (s *stub) seen() (http.Header, string, string) {
 	return s.header, s.path, s.query
 }
 
-func driverFor(t *testing.T, cfg ai.Config) *Driver {
+func driverFor(t *testing.T, cfg ai.Config) *driver {
 	t.Helper()
 	if cfg.Model.ID == "" {
 		cfg.Model.ID = "gemini-2.5-flash"
@@ -92,7 +92,7 @@ func driverFor(t *testing.T, cfg ai.Config) *Driver {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return d.(*Driver)
+	return d.(*driver)
 }
 
 func collect(t *testing.T, ctx context.Context, d ai.Driver) ([]ai.Delta, error) {
@@ -153,7 +153,7 @@ func TestABlockedPromptIsARefusalThatSaysWhy(t *testing.T) {
 	s := sse(t, `{"promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"the prompt was blocked"},`+
 		`"usageMetadata":{"promptTokenCount":8}}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestATurnThatCalledAFunctionStopsForToolUse(t *testing.T) {
 		`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{"path":"a.go"}}}]}}]}`,
 		`{"candidates":[{"content":{"parts":[{"text":""}]},"finishReason":"STOP"}]}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestAFunctionCallBecomesOneToolCallWithItsArgsAsJSON(t *testing.T) {
 	s := sse(t, `{"candidates":[{"content":{"parts":[{"functionCall":`+
 		`{"id":"c1","name":"read","args":{"path":"a.go","lines":3}}}]},"finishReason":"STOP"}]}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestParallelFunctionCallsKeepTheirOrder(t *testing.T) {
 		`{"functionCall":{"id":"c1","name":"read","args":{}}},`+
 		`{"functionCall":{"id":"c2","name":"grep","args":{}}}]},"finishReason":"STOP"}]}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestParallelFunctionCallsKeepTheirOrder(t *testing.T) {
 func TestAFunctionCallWithoutAnIDKeepsAnEmptyOne(t *testing.T) {
 	s := sse(t, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{}}}]},"finishReason":"STOP"}]}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestAFunctionCallKeepsItsThoughtSignature(t *testing.T) {
 	s := sse(t, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{}},`+
 		`"thoughtSignature":"c2lnbmVk"}]},"finishReason":"STOP"}]}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestThinkingTokensAreCountedAsOutput(t *testing.T) {
 		`"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":30,`+
 		`"candidatesTokenCount":50,"thoughtsTokenCount":400}}`)
 
-	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestModelsKeepsOnlyWhatCanAnswerAPrompt(t *testing.T) {
 		{"name":"models/imagen-4.0","displayName":"Imagen",
 		 "supportedGenerationMethods":["predict"]}]}`)
 
-	models, err := driverFor(t, ai.Config{BaseURL: s.URL}).Models(context.Background())
+	models, err := driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}).Models(context.Background())
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestAFailedCallKeepsWhatTheEndpointSaid(t *testing.T) {
 		map[string]string{"Retry-After": "12"},
 		`{"error":{"code":429,"message":"quota for this model is used up","status":"RESOURCE_EXHAUSTED"}}`)
 
-	_, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+	_, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if !ai.IsKind(err, ai.KindRateLimit) {
 		t.Fatalf("error = %v, want a rate limit", err)
 	}
@@ -379,8 +379,8 @@ func TestAFailedCallKeepsWhatTheEndpointSaid(t *testing.T) {
 	if e.Code != "RESOURCE_EXHAUSTED" {
 		t.Errorf("code = %q, want the status the envelope carried", e.Code)
 	}
-	if e.Driver != Name {
-		t.Errorf("driver = %q, want %q", e.Driver, Name)
+	if e.Driver != string(ai.APIGoogleGenAI) {
+		t.Errorf("driver = %q, want %q", e.Driver, ai.APIGoogleGenAI)
 	}
 }
 
@@ -389,7 +389,7 @@ func TestAFailedCallKeepsWhatTheEndpointSaid(t *testing.T) {
 func TestACutStreamIsRetryableAndACancelledOneIsNot(t *testing.T) {
 	t.Run("cut", func(t *testing.T) {
 		s := cut(t, `{"candidates":[{"content":{"parts":[{"text":"half"}]}}]}`)
-		deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL}))
+		deltas, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 		if !ai.IsKind(err, ai.KindNetwork) {
 			t.Fatalf("error = %v, want %q", err, ai.KindNetwork)
 		}
@@ -401,7 +401,7 @@ func TestACutStreamIsRetryableAndACancelledOneIsNot(t *testing.T) {
 		s := sse(t, `{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if _, err := collect(t, ctx, driverFor(t, ai.Config{BaseURL: s.URL})); !ai.IsKind(err, ai.KindCanceled) {
+		if _, err := collect(t, ctx, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}})); !ai.IsKind(err, ai.KindCanceled) {
 			t.Fatalf("error = %v, want %q", err, ai.KindCanceled)
 		}
 	})
@@ -411,7 +411,7 @@ func TestACutStreamIsRetryableAndACancelledOneIsNot(t *testing.T) {
 // would end up in proxy logs.
 func TestTheKeyTravelsInAHeader(t *testing.T) {
 	s := sse(t, `{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}`)
-	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{BaseURL: s.URL, APIKey: "k"})); err != nil {
+	if _, err := collect(t, context.Background(), driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}, APIKey: "k"})); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	header, path, query := s.seen()
@@ -451,5 +451,25 @@ func TestTheEventReaderHandlesTheFramingThatArrives(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("event %d = %.40q…, want %.40q…", i, got[i], want[i])
 		}
+	}
+}
+
+// A corrupt image is refused before the network, and the refusal names the
+// protocol the caller reached — Vertex, not the Gemini API.
+func TestACorruptImageNamesTheDeploymentItWasSentTo(t *testing.T) {
+	d, err := NewDeployment(ai.Config{Model: ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex}},
+		ai.APIGoogleVertex, "http://unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &ai.Request{Messages: []ai.Message{ai.UserMessage("what is this?",
+		ai.Image{MediaType: "image/png", Data: "not base64!"})}}
+	var streamErr error
+	for _, err := range d.Stream(context.Background(), req) {
+		streamErr = err
+	}
+	var e *ai.Error
+	if !errors.As(streamErr, &e) || e.Driver != string(ai.APIGoogleVertex) {
+		t.Errorf("error = %v, want one from %q", streamErr, ai.APIGoogleVertex)
 	}
 }

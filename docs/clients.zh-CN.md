@@ -13,13 +13,13 @@
           │
           │  auth.Config       凭证，以及发到哪里
           ▼
-      ai.Config               从厂商自己的环境变量读到的 APIKey、BaseURL、
-          │                   部署相关设置——而且需要 key 却没有时
+      ai.Config               从厂商自己的环境变量读到的 APIKey、模型的
+          │                   BaseURL、部署相关设置——而且需要 key 却没有时
           │                   **就在这里失败**，而不是三次调用之后甩你一个 401
           │
-          │  ai.NewDriver      协议的具体实现
+          │  <driver>.New      协议的具体实现
           ▼
-      ai.Driver               按 Model.API 从注册表里找到——注册表正是
+      ai.Driver               ai.New 按 Model.API 从注册表里找到——注册表正是
           │                   那个空导入填进去的；它握着 HTTP 传输层
           │                   和厂商的认证头
           │
@@ -43,9 +43,9 @@ func Client(ref string, opts ...ai.Option) (*ai.Client, error) {
 	return ai.New(cfg, opts...)
 }
 
-// ai.New = ai.NewDriver + ai.NewClientWithDriver
+// ai.New = 注册好的 driver + ai.NewClientWithDriver
 func New(cfg Config, opts ...Option) (*Client, error) {
-	d, err := NewDriver(cfg)
+	d, err := newDriver(cfg) // 空导入为 cfg.Model.API 注册的那个工厂
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ client, err := auth.Client("openai/gpt-4.1")
 cfg, err := auth.Config("openai/gpt-4.1")
 client, err := ai.New(cfg)
 
-driver, err := ai.NewDriver(cfg)
+driver, err := responses.New(cfg) // cfg.Model.API 对应的 driver 包
 client := ai.NewClientWithDriver(driver, cfg.Model)
 ```
 
@@ -72,7 +72,7 @@ client := ai.NewClientWithDriver(driver, cfg.Model)
 | `auth.Client(ref)` | 命令行工具 | 一个引用。凭证由环境提供。 |
 | `auth.Config(ref)` | 同上，但端点或 `http.Client` 必须改 | 引用，外加你对 `Config` 的改动 |
 | `ai.New(cfg)` | 服务端。**一点环境状态都不许读** | `Model` 和凭证 |
-| `ai.NewDriver(cfg)` | driver 必须经你的手——套 middleware | 同上，外加最后一步自己拼 |
+| `<driver>.New(cfg)` | driver 必须经你的手——套 middleware | 同上，外加 driver 包和最后一步自己拼 |
 | `ai.NewClientWithDriver(driver, model)` | 你已经握着 driver 了，包括测试里的桩 | driver 和 `Model` |
 
 每条路都需要对应协议的 driver 已注册，一个空导入就够。模型要到运行时才确定就用 `all`；编译期就知道协议、又不想把其他厂商的 SDK 链进来，就只导入那一个。
@@ -90,19 +90,19 @@ client, err := auth.Client("anthropic/claude-opus-5", ai.WithEffort(ai.EffortHig
 
 它在目录里查这个引用，从那家厂商文档规定的环境变量读凭证，返回客户端。**厂商需要 key 而它的环境变量一个都没设时，就在这里失败**——而不是发一个空凭证出去、稍后变成一个莫名其妙的 401。
 
-对于那些认证的是**人**而不是服务的厂商——GitHub Copilot、ChatGPT/Codex——它会跑浏览器登录，把结果以 `0600` 存在用户配置目录下。**那个凭证库是这个库唯一会写的文件。**
+对于那些认证的是**人**而不是服务的厂商——GitHub Copilot、ChatGPT/Codex——它用 `auth.Login` 以 `0600` 存在用户配置目录下的凭证，没有就返回 `*auth.NotSignedInError`。**那个凭证库是这个库唯一会写的文件。**
 
 ## 停在 `auth.Config`
 
 ```go
 cfg, err := auth.Config("openai/gpt-4.1")
-cfg.BaseURL = "https://gateway.internal/v1"
+cfg.Model.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
 client, err := ai.New(cfg)
 ```
 
-`auth.Config` 填好凭证和端点就停下，所以它返回的是一个**你可以随便改的普通 `ai.Config`**。
+`auth.Config` 填好凭证和端点就停下，所以它返回的是一个**你可以随便改的普通 `ai.Config`**。请求发到哪、带什么头，就是模型的 `BaseURL` 和 `Headers`；你在那里写什么，发出去的就是什么。
 
 ## 停在 `ai.New`
 
@@ -111,23 +111,24 @@ client, err := ai.New(cfg)
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
+model.BaseURL = "https://gateway.internal/v1"
+model.Headers = map[string]string{"X-Tenant": tenant}
+
 client, err := ai.New(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
-	BaseURL:    "https://gateway.internal/v1",
 	HTTPClient: httpClient,
-	Headers:    map[string]string{"X-Tenant": tenant},
 })
 ```
 
 `catalog.Model` 是**单独的那一次查表**——给一个 `厂商/模型` 引用，查出端点、协议和怪癖，**不联网、不需要凭证**。目录只列厂商、不列模型：`ContextWindow`、`MaxOutput`、`Pricing`、`Input`、`Reasoning` 由应用用自己的数据填。`Reasoning` 只写模型提供哪几档，每一档在线上的写法由 SDK 按协议推出来，`Model.WireEfforts` 说明协议能区分哪几档。
 
-## 停在 `ai.NewDriver`
+## 停在 driver
 
 执行策略——成本统计、缓存、日志——是**装饰 driver**，所以它需要拿到 driver 这个值：
 
 ```go
-driver, err := ai.NewDriver(cfg)
+driver, err := responses.New(cfg)
 client := ai.NewClientWithDriver(metered{driver}, cfg.Model)
 ```
 
@@ -145,20 +146,20 @@ client := ai.NewClientWithDriver(scripted{deltas: deltas}, ai.Model{
 
 因为 `Driver` 只有两个方法，给某个用例写的桩就是几行。例子见 [CONTRIBUTING.md](../CONTRIBUTING.md#testing-your-own-code)。
 
-## Provider 不在这条链上
+## Endpoint 不在这条链上
 
-上面所有东西造出来的都是**一个模型**的客户端。`Provider` 是它旁边的一层：**一个配好的 host 加上它上面的模型列表**——模型选择器要的就是这个。
+上面所有东西造出来的都是**一个模型**的客户端。`Endpoint` 是它旁边的一层：**一个配好的 host 加上它上面的模型列表**——模型选择器要的就是这个。
 
 ```go
-p, err := auth.Provider("ollama")
+e, err := auth.Endpoint("ollama")
 
-models := p.Models()          // 同步，从不阻塞，从不失败
-err = p.Refresh(ctx)          // 唯一会联网的调用
+models := e.Models()          // 同步，从不阻塞，从不失败
+err = e.Refresh(ctx)          // 唯一会联网的调用
 
-client, err := p.Client("llama4")
+client, err := e.Client("llama4")
 ```
 
-**"读列表"和"拉列表"是两个动词**，这是故意的：选择器直接从目录立刻渲染，而一个挂掉的 host 卡不住它。目录里没有的 host，用 `provider.New(provider.Config{…})`。
+**"读列表"和"拉列表"是两个动词**，这是故意的：选择器直接从目录立刻渲染，而一个挂掉的 host 卡不住它。目录里没有的 host，用 `endpoint.New(endpoint.Config{…})`。
 
 ## 默认值与覆盖
 

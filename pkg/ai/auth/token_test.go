@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,8 +13,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/genai-io/sdk-go/pkg/ai/auth/oauth"
 )
 
 // The test vendors. The stub flows are added once and their behavior varied
@@ -39,11 +38,11 @@ func init() {
 		}
 		return fn(c)
 	}
-	signIn := func(ctx context.Context, client *http.Client, ui oauth.Interaction) (Credential, error) {
+	signIn := func(ctx context.Context, client *http.Client, ui Interaction) (Credential, error) {
 		return Credential{Access: "signed-in"}, nil
 	}
-	flows[stubVendor] = Flow{Method: "stub", Login: signIn, Token: answer}
-	flows[rotateVendor] = Flow{Method: "stub", Login: signIn, Token: answer}
+	flows[stubVendor] = flow{method: "stub", login: signIn, token: answer}
+	flows[rotateVendor] = flow{method: "stub", login: signIn, token: answer}
 }
 
 // withTokenHook installs the stub's renewal for one test.
@@ -61,23 +60,6 @@ func withTokenHook(t *testing.T, fn func(c Credential) (string, time.Time, Crede
 	})
 	forgetSources(stubVendor)
 	forgetSources(rotateVendor)
-}
-
-// TestInteractiveKnowsTheRegisteredVendors covers the two grants this package
-// ships and a stub added by the tests.
-func TestInteractiveKnowsTheRegisteredVendors(t *testing.T) {
-	for _, id := range []string{"copilot", "openai-codex", stubVendor} {
-		method, ok := Interactive(id)
-		if !ok {
-			t.Errorf("Interactive(%q) said no; a registered flow is not reachable", id)
-		}
-		if method == "" {
-			t.Errorf("Interactive(%q) named no grant", id)
-		}
-	}
-	if _, ok := Interactive("deepseek"); ok {
-		t.Error("a key-based vendor was reported as signing in interactively")
-	}
 }
 
 func TestExpiredIsOneRule(t *testing.T) {
@@ -109,7 +91,7 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 	var minted int
 	withTokenHook(t, func(c Credential) (string, time.Time, Credential, error) {
 		minted++
-		c.Endpoint = fmt.Sprintf("https://endpoint-%d.test", minted)
+		c.BaseURL = fmt.Sprintf("https://endpoint-%d.test", minted)
 		// Each token is good for less than the margin, so the next request
 		// has to renew.
 		return fmt.Sprintf("tok-%d", minted), time.Now().Add(expiryMargin / 2), c, nil
@@ -152,8 +134,8 @@ func TestTheTransportPresentsAndRenews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Endpoint != "https://endpoint-2.test" {
-		t.Errorf("stored endpoint = %q, want what the last renewal reported", stored.Endpoint)
+	if stored.BaseURL != "https://endpoint-2.test" {
+		t.Errorf("stored base URL = %q, want what the last renewal reported", stored.BaseURL)
 	}
 	if stored.Vendor != stubVendor {
 		t.Errorf("stored vendor = %q, want it stamped so it can be loaded back", stored.Vendor)
@@ -313,7 +295,7 @@ func TestTwoClientsShareOneRenewal(t *testing.T) {
 	defer upstream.Close()
 
 	store := newTestFileStore(t)
-	otherHandle, err := NewFileStore(store.path)
+	otherHandle, err := newFileStore(store.path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +375,7 @@ func TestARotatedTokenThatCannotBeStoredFailsLoudly(t *testing.T) {
 // and a session with a read-only config directory still has to work.
 func TestASaveFailureThatLosesNothingDoesNotFailTheTurn(t *testing.T) {
 	withTokenHook(t, func(c Credential) (string, time.Time, Credential, error) {
-		c.Endpoint = "https://rediscovered.test"
+		c.BaseURL = "https://rediscovered.test"
 		return "tok", time.Now().Add(time.Hour), c, nil
 	})
 
@@ -462,10 +444,10 @@ func TestCodexRefreshesAnExpiredCredential(t *testing.T) {
 
 	cfg := codexDefaults
 	cfg.Endpoint.TokenURL = server.URL
-	flow := newCodexFlow(cfg)
+	codex := newCodexFlow(cfg)
 
 	stale := Credential{Access: "old", Refresh: "rt", ExpiresAt: time.Now().Add(-time.Minute)}
-	present, expires, updated, err := flow.Token(t.Context(), server.Client(), stale)
+	present, expires, updated, err := codex.token(t.Context(), server.Client(), stale)
 	if err != nil {
 		t.Fatalf("Token: %v", err)
 	}
@@ -474,5 +456,43 @@ func TestCodexRefreshesAnExpiredCredential(t *testing.T) {
 	}
 	if form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt" || form.Get("client_id") != cfg.ClientID {
 		t.Errorf("refresh sent %v", form)
+	}
+}
+
+// TestTheCodexClientPresentsTheAccountAndOneSession: the backend refuses a
+// request that does not name the subscription's account, which the access
+// token carries as a claim.
+func TestTheCodexClientPresentsTheAccountAndOneSession(t *testing.T) {
+	var seen []http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Clone())
+	}))
+	defer upstream.Close()
+
+	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-1"}}`))
+	access := "e30." + claims + ".sig"
+	client, err := HTTPClient(codexVendor, Credential{Vendor: codexVendor, Access: access}, &memStore{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, upstream.URL, nil)
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+	}
+	if got := seen[0].Get("chatgpt-account-id"); got != "acct-1" {
+		t.Errorf("chatgpt-account-id = %q, want the token's claim", got)
+	}
+	if seen[0].Get("session_id") == "" || seen[0].Get("session_id") != seen[1].Get("session_id") {
+		t.Errorf("session_id = %q then %q, want one session for the client", seen[0].Get("session_id"), seen[1].Get("session_id"))
+	}
+
+	h := http.Header{}
+	flows[copilotVendor].identify(h, "", "")
+	if h.Get("X-Request-Id") == "" {
+		t.Error("a Copilot request carries no X-Request-Id")
 	}
 }

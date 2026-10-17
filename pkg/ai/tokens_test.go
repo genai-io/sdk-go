@@ -115,11 +115,11 @@ func TestAPromptIsSizedWithItsToolsAndSystemPrompt(t *testing.T) {
 		t.Error("the system prompt was not counted")
 	}
 
-	withTools := (&Request{Messages: msgs, Tools: []Tool{{Schema: Schema{
+	withTools := (&Request{Messages: msgs, Tools: []Schema{{
 		Name:        "read",
 		Description: "Read a file from disk",
 		Definition:  map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}},
-	}}}}).EstimateTokens()
+	}}}).EstimateTokens()
 	if withTools <= bare {
 		t.Error("the tool definitions were not counted")
 	}

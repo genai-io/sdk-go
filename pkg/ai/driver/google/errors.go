@@ -15,7 +15,7 @@ import (
 // the response so a 429's Retry-After is honoured.
 func readAPIError(res *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	var envelope apiError
+	var envelope errorEnvelope
 	_ = json.Unmarshal(raw, &envelope)
 	message := strings.TrimSpace(envelope.Error.Message)
 	if message == "" {
@@ -44,4 +44,13 @@ func details(err error) errs.Details {
 		return se.Details
 	}
 	return errs.Details{}
+}
+
+// errorEnvelope is the parts of the Google API error envelope the driver reads:
+// {"error":{message,status}}. The numeric code repeats the HTTP status.
+type errorEnvelope struct {
+	Error struct {
+		Message string `json:"message,omitempty"`
+		Status  string `json:"status,omitempty"`
+	} `json:"error"`
 }

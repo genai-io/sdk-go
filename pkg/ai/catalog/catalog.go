@@ -8,9 +8,9 @@
 //
 // # Where things live
 //
-//	vendors.go   the table — one entry per vendor, and the file to edit
-//	presets.go   the dialects and deployments an entry is written in
-//	vendor.go    what an entry means, and what a model inherits from it
+//	table.go     the table — one entry per vendor, and the file to edit
+//	vendor.go    what an entry means, what a model inherits from it, and
+//	             reading its variables
 //	catalog.go   looking a vendor or a model reference up
 //	errors.go    what an unresolvable reference reports
 package catalog
@@ -58,7 +58,7 @@ func row(id string) (Vendor, bool) {
 
 // Model resolves a "vendor/model" reference to a model carrying that
 // vendor's protocol facts. The catalog lists no models, so a bare ID is an
-// UnknownModelError.
+// error.
 func Model(ref string) (ai.Model, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -66,11 +66,11 @@ func Model(ref string) (ai.Model, error) {
 	}
 	vendorID, id, ok := strings.Cut(ref, "/")
 	if !ok {
-		return ai.Model{}, &UnknownModelError{Ref: ref}
+		return ai.Model{}, fmt.Errorf("catalog: %q names no vendor; write it as \"vendor/%s\"", ref, ref)
 	}
 	v, found := Find(vendorID)
 	if !found {
-		return ai.Model{}, &UnknownModelError{Ref: ref}
+		return ai.Model{}, &UnknownVendorError{Vendor: vendorID}
 	}
 	if id == "" {
 		return ai.Model{}, fmt.Errorf("catalog: reference %q names vendor %q with no model", ref, vendorID)

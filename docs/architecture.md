@@ -30,7 +30,7 @@ Volcengine speak Anthropic Messages. What actually distinguishes them is a base
 URL, an environment variable and a reasoning dialect — three things that are
 all data.
 
-So **a vendor is a row in `catalog/vendors.go`, not a package.** Adding an
+So **a vendor is a row in `catalog/table.go`, not a package.** Adding an
 OpenAI-compatible endpoint is an entry in a table. Only a new wire format needs
 Go code.
 
@@ -43,32 +43,32 @@ The chain a caller walks down:
 
 ```
 catalog.Vendor      data - a row you can read without a network
-      | .Provider(cfg)
+      | .Endpoint(cfg)
       v
-provider.Provider   that row configured and credentialed, with a live model list
+endpoint.Endpoint   that row configured and credentialed, with a live model list
       | .Client(modelID)
       v
 ai.Client           one model
 ```
 
 Each rung adds one kind of knowledge and delegates down. `catalog` needs no
-network; `provider` reaches one; `Client` runs one call.
+network; `endpoint` reaches one; `Client` runs one call.
 
 Every step down is named for what it hands back, so the chain reads the same
 whichever rung you enter it at:
 
 | From | Call | You get |
 | --- | --- | --- |
-| `catalog.Vendor` | `.Provider(cfg)` | `*provider.Provider` |
-| `provider.Provider` | `.Client(modelID)` | `*ai.Client` |
+| `catalog.Vendor` | `.Endpoint(cfg)` | `*endpoint.Endpoint` |
+| `endpoint.Endpoint` | `.Client(modelID)` | `*ai.Client` |
 | `ai.Config` | `ai.New(cfg)` | `*ai.Client` |
-| `ai.Config` | `ai.NewDriver(cfg)` | `ai.Driver` |
+| `ai.Config` | a driver package's `New(cfg)` | `ai.Driver` |
 | a reference | `auth.Client(ref)` | `*ai.Client` |
-| a vendor ID | `auth.Provider(id)` | `*provider.Provider` |
+| a vendor ID | `auth.Endpoint(id)` | `*endpoint.Endpoint` |
 
 Every package-level constructor takes a `Config` and is named for what it
-returns — `ai.New` a `*Client`, `ai.NewDriver` a `Driver`, and the same shape
-in every driver package and in `provider.New`. `ai.NewClientWithDriver(driver, model)`
+returns — `ai.New` a `*Client`, each driver package's `New` a `Driver`, and
+`endpoint.New` an `*Endpoint`. `ai.NewClientWithDriver(driver, model)`
 is the exception, and its name says why: it starts from a `Driver` you already
 hold.
 
@@ -85,7 +85,7 @@ in a server holding several tenants' keys. `pkg/ai/auth` is the opt-in that
 does read them, which is what a command-line tool wants. The split is an import
 boundary, not a convention.
 
-**Protocol is a second axis, not the next rung.** A Provider *has* a protocol;
+**Protocol is a second axis, not the next rung.** An endpoint *has* a protocol;
 it is not one. Put the two axes on one picture and the driver's place is
 obvious — it hangs off the model, not off the chain:
 
@@ -93,7 +93,7 @@ obvious — it hangs off the model, not off the chain:
   auth.Client("deepseek/deepseek-v4-pro")
         |
         v
-  catalog.Vendor ---> provider.Provider ---> ai.Client ---> ai.Driver ---> HTTPS
+  catalog.Vendor ---> endpoint.Endpoint ---> ai.Client ---> ai.Driver ---> HTTPS
    a row of data       host + credential      one model     one protocol
    no network          + live model list          |             ^
                                                   |             |
@@ -108,12 +108,12 @@ URL, an environment variable and a reasoning dialect.
 The cardinality is what keeps the two words apart:
 
 ```
-1 protocol  ->  many providers     18 vendors speak OpenAI Chat Completions
-1 provider  ->  many models
+1 protocol  ->  many endpoints     18 vendors speak OpenAI Chat Completions
+1 endpoint  ->  many models
 1 model     ->  1 client
 ```
 
-So **provider** names a configured host you can reach, and **protocol** names
+So **endpoint** names a configured host you can reach, and **protocol** names
 the request shape it speaks. `Compat` scopes to the second, which is why
 `AnthropicCompat` describes MiniMax and Volcengine too: they speak that
 protocol without being that vendor.
@@ -219,7 +219,7 @@ The dividing line for every setting:
 | | Where it goes |
 | --- | --- |
 | Every protocol can express it, spelled differently | a `With*` option; the driver translates |
-| Only one protocol has it | not modeled; `SamplingParams` (OpenAI family) or `Config.Headers` reach it untranslated |
+| Only one protocol has it | not modeled; `SamplingParams` (OpenAI family) or `Model.Headers` reach it untranslated |
 
 Reasoning effort is the clearest case of the first. "How hard should it think"
 exists everywhere, and every vendor spells it differently — Anthropic wants
@@ -239,11 +239,9 @@ refused, and the error names what the model does offer.
 `prompt_cache_key` is the second case. No other protocol has the concept, so
 it goes in `SamplingParams` and lands in the body as written.
 
-Construction settings only one protocol needs travel in `Config.ProtocolConfig`,
-typed rather than `any`: `ai.ProtocolConfig` is a marker interface, so a value
-that was never meant to go there is a compile error. A value of the *wrong
-driver's* type is caught when that driver reads it — Go has no union type, so
-that half cannot be a compile error.
+The one construction setting only some protocols need — the Vertex project
+and region — is a typed field, `Config.Vertex`. The two Vertex drivers require
+it and the rest ignore it.
 
 ## Protocol dialects
 
@@ -302,7 +300,7 @@ Between `client.Complete(ctx, messages, opts...)` and bytes on the wire:
         |  +---------------------- Client.prepare ------------------------+
         +--| newRequest         model defaults -> client -> call, in order |
         |  | validateStructure  the tagged-union invariants a Block holds  |
-        |  | Repair      pair tool calls, replace invalid UTF-8     |
+        |  | Repair             pair tool calls, replace invalid UTF-8     |
         |  | validate           settings, then what this model cannot do   |
         |  +--------------------------------------------------------------+
         v
@@ -344,8 +342,9 @@ silently degraded answer. Sending an image to a text-only endpoint used to mean
 the image was dropped and the model answered about something it had never seen.
 
 Failures that do reach the network come back classified, so the answer to "what
-now" is in the type: `IsAuth`, `IsContextExceeded`, `IsRetryable`,
-`IsUnsupported`. A failed turn returns both an error *and* a `*Response`
+now" is in the type: `IsAuth`, `IsContextExceeded`, `IsRetryable`, and
+`IsKind` for the rest. Each driver hands its failure to one shared classifier,
+`driver/internal/errs`, so the kinds mean the same thing on every protocol. A failed turn returns both an error *and* a `*Response`
 carrying what arrived first, so a partial answer and its cost survive.
 
 ## Boundaries the compiler enforces
@@ -366,26 +365,24 @@ Some rules here are conventions and some are checked. It is worth knowing which:
     +-- pkg/ai/driver/*   one package per protocol. Each pulls in that
     |                     protocol's vendor SDK, and nothing else does.
     |
-    +-- pkg/ai/provider   one configured host and its live model list
+    +-- pkg/ai/endpoint   one configured host and its live model list
           |
           +-- pkg/ai/catalog    the vendor table
                 |
-                +-- pkg/ai/auth    env, files, OAuth
+                +-- pkg/ai/auth    env, the credential file, OAuth
   ```
 
   `catalog` depends on **no** driver package — its whole tree is `pkg/ai` plus
-  `pkg/ai/provider`. That is what lets a program talking to one vendor avoid
+  `pkg/ai/endpoint`. That is what lets a program talking to one vendor avoid
   linking every vendor's SDK, and it is why the `Compat` types live in `pkg/ai`
   rather than beside the drivers that read them.
-- `driver/openai/internal/errs` is unreachable from `driver/anthropic`, by
-  `internal/`.
-- `pkg/ai`, `pkg/ai/jsonschema`, `pkg/ai/catalog` and `pkg/ai/provider` have **zero
+- `driver/openai/internal/oai` is unreachable from `driver/anthropic`, and
+  `driver/internal/errs` from anything outside `driver/`, by `internal/`.
+- `pkg/ai`, `pkg/ai/jsonschema`, `pkg/ai/catalog` and `pkg/ai/endpoint` have **zero
   module dependencies** between them and the standard library. A vendor SDK
   enters the build only through the driver you blank-import — and
   `pkg/agent/mcp` is the same bargain for the Model Context Protocol SDK:
   import it and you link it, do not and you do not.
-- `ProtocolConfig` rejects a value that was never meant to be one, at compile
-  time.
 - `Driver` is two methods, so a stub in a test is two methods. `pkg/ai/aitest`
   is that stub, shipped, so no one writes it again.
 
@@ -431,7 +428,7 @@ and the Anthropic driver falls back to its own
 
 Two layers, and the split is deliberate.
 
-`test/` is one black-box package. It imports the SDK the way an application
+`integration/` is one black-box package. It imports the SDK the way an application
 does and asserts on two things only: **the bytes that reached the endpoint, and
 the value that came back.** Every endpoint is a stub HTTP server, so the suite
 needs no network and no credential. Tests that reach inside verify the

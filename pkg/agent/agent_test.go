@@ -34,9 +34,9 @@ func names(events []agent.Event) []string {
 		switch v := e.(type) {
 		case agent.MessageAdded:
 			name += "(" + string(v.Message.Role) + ")"
-		case agent.MessageStart:
+		case agent.InferenceStart:
 			name += fmt.Sprintf("(attempt=%d)", v.Attempt)
-		case agent.MessageEnd:
+		case agent.InferenceEnd:
 			if v.Err != nil {
 				name += "(err)"
 			}
@@ -46,10 +46,10 @@ func names(events []agent.Event) []string {
 	return out
 }
 
-// collect drives one exchange and returns everything the agent reported —
+// collect drives one turn and returns everything the agent reported —
 // which is what a golden-sequence assertion compares against. It is also the
 // smallest complete use of the package: two channels and a range.
-// outcome folds an exchange the way a caller with nothing to render would:
+// outcome folds a turn the way a caller with nothing to render would:
 // range it, keep the TurnEnd. Four lines, at every such call site — which is
 // what a fold in the SDK would have saved.
 func outcome(t *testing.T, a *agent.Agent, msgs ...ai.Message) (agent.TurnEnd, error) {
@@ -78,7 +78,7 @@ func collect(t *testing.T, a *agent.Agent, msgs ...ai.Message) ([]agent.Event, e
 		events = append(events, e)
 	}
 
-	// A failed exchange is reported on the stream, not returned.
+	// A failed turn is reported on the stream, not returned.
 	for _, e := range events {
 		if v, ok := e.(agent.TurnEnd); ok && v.Err != nil {
 			return events, v.Err
@@ -92,7 +92,7 @@ func collect(t *testing.T, a *agent.Agent, msgs ...ai.Message) ([]agent.Event, e
 func steps(events []agent.Event) int {
 	n := 0
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok && v.Attempt == 1 {
+		if v, ok := e.(agent.InferenceStart); ok && v.Attempt == 1 {
 			n++
 		}
 	}
@@ -104,7 +104,7 @@ func steps(events []agent.Event) int {
 func attempts(events []agent.Event) int {
 	n := 0
 	for _, e := range events {
-		if _, ok := e.(agent.MessageStart); ok {
+		if _, ok := e.(agent.InferenceStart); ok {
 			n++
 		}
 	}
@@ -118,27 +118,27 @@ func assertSequence(t *testing.T, got []agent.Event, want []string) {
 	}
 }
 
-// An exchange closes nothing, so a caller may take several in a row, and the
+// A turn closes nothing, so a caller may take several in a row, and the
 // turns are numbered in order.
-func TestExchangesRunInSequence(t *testing.T) {
+func TestTurnsRunInSequence(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("first"), aitest.Says("second")))
 
 	for i, want := range []string{"first", "second"} {
 		out, err := outcome(t, a, ai.UserMessage("ask"))
 		if err != nil {
-			t.Fatalf("exchange %d: %v", i+1, err)
+			t.Fatalf("turn %d: %v", i+1, err)
 		}
 		if got := out.Message.Text(); got != want {
-			t.Errorf("exchange %d returned %q, want %q", i+1, got, want)
+			t.Errorf("turn %d returned %q, want %q", i+1, got, want)
 		}
 		if out.Turn != i+1 {
-			t.Errorf("exchange %d numbered %d", i+1, out.Turn)
+			t.Errorf("turn %d numbered %d", i+1, out.Turn)
 		}
 	}
 }
 
-// A failure ends its own exchange and nothing more: the next one runs.
-func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
+// A failure ends its own turn and nothing more: the next one runs.
+func TestAFailedTurnDoesNotPoisonTheNext(t *testing.T) {
 	a := newAgent(t, aitest.New(
 		aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "no key"}),
 		aitest.Says("second time"),
@@ -150,15 +150,15 @@ func TestAFailedExchangeDoesNotPoisonTheNext(t *testing.T) {
 
 	out, err := outcome(t, a, ai.UserMessage("second"))
 	if err != nil {
-		t.Fatalf("the second exchange failed too: %v", err)
+		t.Fatalf("the second turn failed too: %v", err)
 	}
 	if out.StopReason != agent.StopEndTurn {
 		t.Errorf("stop reason = %q, want the agent to have carried on", out.StopReason)
 	}
 }
 
-// One conversation advances one exchange at a time.
-func TestAConcurrentExchangeIsRefused(t *testing.T) {
+// One conversation advances one turn at a time.
+func TestAConcurrentTurnIsRefused(t *testing.T) {
 	release := make(chan struct{})
 	blocking := agent.ToolFunc("wait", "Wait.",
 		func(ctx context.Context, _ struct{}) (agent.Result, error) {
@@ -188,18 +188,18 @@ func TestAConcurrentExchangeIsRefused(t *testing.T) {
 
 	_, err := outcome(t, a, ai.UserMessage("also"))
 	if !errors.Is(err, agent.ErrBusy) {
-		t.Errorf("a second exchange = %v, want ErrBusy", err)
+		t.Errorf("a second turn = %v, want ErrBusy", err)
 	}
 
 	close(release)
 	if err := <-done; err != nil {
-		t.Fatalf("the first exchange failed: %v", err)
+		t.Fatalf("the first turn failed: %v", err)
 	}
 }
 
-// Repeating an exchange is a for loop the caller writes, which is what lets it
+// Repeating a turn is a for loop the caller writes, which is what lets it
 // decide the batching and what a failure means.
-func TestSeveralExchangesAreACallersLoop(t *testing.T) {
+func TestSeveralTurnsAreACallersLoop(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("first"), aitest.Says("second")))
 
 	var answers []string
@@ -220,15 +220,15 @@ func TestSeveralExchangesAreACallersLoop(t *testing.T) {
 	if want := []string{"first", "second"}; !slices.Equal(answers, want) {
 		t.Errorf("answers = %v, want %v", answers, want)
 	}
-	// Five: one, then two-and-this-too as one exchange, each with its answer.
+	// Five: one, then two-and-this-too as one turn, each with its answer.
 	if got := len(a.Messages()); got != 5 {
-		t.Errorf("the conversation holds %d messages, want 5 — the second batch is one exchange", got)
+		t.Errorf("the conversation holds %d messages, want 5 — the second batch is one turn", got)
 	}
 }
 
-// Collect folds an exchange for a caller that wants the answer rather than the
+// Collect folds a turn for a caller that wants the answer rather than the
 // progress — the shape a subagent behind a tool call needs.
-func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
+func TestCollectFoldsAnTurnIntoItsOutcome(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("the answer")))
 
 	out, err := outcome(t, a, ai.UserMessage("ask"))
@@ -243,10 +243,10 @@ func TestCollectFoldsAnExchangeIntoItsOutcome(t *testing.T) {
 	}
 }
 
-// A message added while an exchange is running joins it at the next step
+// A message added while a turn is running joins it at the next step
 // boundary, and is reported there — so the stream and the conversation agree
 // about what the model was shown.
-func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
+func TestAddedMessagesJoinTheTurnAtAStepBoundary(t *testing.T) {
 	echo := agent.ToolFunc("echo", "Echo.",
 		func(_ context.Context, _ struct{}) (agent.Result, error) {
 			return agent.TextResult("echoed"), nil
@@ -261,7 +261,7 @@ func TestAddedMessagesJoinTheExchangeAtAStepBoundary(t *testing.T) {
 		}
 		switch v := e.(type) {
 		case agent.ToolEnd:
-			// Added while the exchange is in flight, from the range body.
+			// Added while the turn is in flight, from the range body.
 			a.AddMessages(ai.UserMessage("and also"), ai.UserMessage("and this"))
 		case agent.MessageAdded:
 			if v.Message.Role == ai.RoleUser {
@@ -320,18 +320,18 @@ func TestTheAgentIsReconfiguredBetweenInferences(t *testing.T) {
 	if sent[1].System != "second prompt" {
 		t.Errorf("call 2 system = %q, want the replacement", sent[1].System)
 	}
-	if n := len(sent[0].Tools); n != 1 || sent[0].Tools[0].Schema.Name != "before" {
+	if n := len(sent[0].Tools); n != 1 || sent[0].Tools[0].Name != "before" {
 		t.Errorf("call 1 offered %v, want the original toolset", toolNames(sent[0].Tools))
 	}
-	if n := len(sent[1].Tools); n != 1 || sent[1].Tools[0].Schema.Name != "after" {
+	if n := len(sent[1].Tools); n != 1 || sent[1].Tools[0].Name != "after" {
 		t.Errorf("call 2 offered %v, want the replacement", toolNames(sent[1].Tools))
 	}
 }
 
-func toolNames(tools []ai.Tool) []string {
+func toolNames(tools []ai.Schema) []string {
 	out := make([]string, len(tools))
 	for i, t := range tools {
-		out[i] = t.Schema.Name
+		out[i] = t.Name
 	}
 	return out
 }
@@ -363,17 +363,21 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 		func() { a.SetTools(slow) },
 		func() { a.AddMessages(ai.UserMessage("from outside")) },
 		func() { _ = a.Messages() },
-		func() { _ = a.Tools() },
 	} {
 		wg.Add(1)
 		go func(f func()) {
 			defer wg.Done()
 			<-running
+			// Paced, not spun: four goroutines hammering the lock starve the
+			// turn, and AddMessages in a tight loop grows the conversation
+			// that every Messages copies.
+			tick := time.NewTicker(100 * time.Microsecond)
+			defer tick.Stop()
 			for {
 				select {
 				case <-stop:
 					return
-				default:
+				case <-tick.C:
 					f()
 				}
 			}
@@ -404,8 +408,7 @@ func TestAnAgentIsSafeToTouchWhileItRuns(t *testing.T) {
 // toolset is the agent's, not a suggestion — and until Tools went out
 // unconditionally there was no way for it to say so.
 func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
-	stray := ai.ToolFunc("stray", "configured on the client",
-		func(context.Context, struct{}) (string, error) { return "", nil })
+	stray := ai.ToolSchema[struct{}]("stray", "configured on the client")
 	driver := aitest.New(aitest.Says("ok"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"},
 		ai.WithTools(stray))
@@ -423,11 +426,11 @@ func TestAnAgentWithNoToolsOffersNone(t *testing.T) {
 	}
 }
 
-// Replacing the conversation while an exchange runs lands on it at once — that
-// is what the lock is for — and is announced at that exchange's next step
-// boundary. Waiting for the next exchange left it unannounced when there was
+// Replacing the conversation while a turn runs lands on it at once — that
+// is what the lock is for — and is announced at that turn's next step
+// boundary. Waiting for the next turn left it unannounced when there was
 // no next one, which is a compaction the session never heard about.
-func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
+func TestAReplacementDuringAnTurnIsAnnouncedAtItsNextStep(t *testing.T) {
 	var a *agent.Agent
 	swap := agent.ToolFunc("compact", "Replace the conversation.",
 		func(context.Context, struct{}) (agent.Result, error) {
@@ -450,11 +453,11 @@ func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
 		return ok
 	})
 	if at < 0 {
-		t.Fatal("the exchange that replaced the conversation never announced it")
+		t.Fatal("the turn that replaced the conversation never announced it")
 	}
 	replaced := during[at].(agent.MessagesReplaced)
 	if replaced.Turn != 1 {
-		t.Errorf("the announcement belongs to turn %d, want the exchange that made it", replaced.Turn)
+		t.Errorf("the announcement belongs to turn %d, want the turn that made it", replaced.Turn)
 	}
 	// It carries the conversation as it stands: the replacement, and the tool
 	// results that answering the batch appended to it.
@@ -465,20 +468,20 @@ func TestAReplacementDuringAnExchangeIsAnnouncedAtItsNextStep(t *testing.T) {
 	// Nothing is sent against a conversation whose replacement has not been
 	// announced, which is the whole of the rule.
 	if !slices.ContainsFunc(during[at:], func(e agent.Event) bool {
-		_, ok := e.(agent.MessageStart)
+		_, ok := e.(agent.InferenceStart)
 		return ok
 	}) {
-		t.Error("the announcement came after the last call of the exchange")
+		t.Error("the announcement came after the last call of the turn")
 	}
 
-	// And the next exchange does not announce it a second time.
+	// And the next turn does not announce it a second time.
 	next, err := collect(t, a, ai.UserMessage("again"))
 	if err != nil {
 		t.Fatalf("the next turn failed: %v", err)
 	}
 	for _, e := range next {
 		if _, ok := e.(agent.MessagesReplaced); ok {
-			t.Error("the replacement was announced again by the exchange after it")
+			t.Error("the replacement was announced again by the turn after it")
 		}
 	}
 }
@@ -516,8 +519,8 @@ func TestReplacingAnEmptyConversationWithAnEmptyOneIsNotNews(t *testing.T) {
 }
 
 // A message added while the model gives its final answer is not left for an
-// exchange nobody may start: this one takes another step to hear it.
-func TestAMessageAddedDuringTheLastAnswerExtendsTheExchange(t *testing.T) {
+// turn nobody may start: this one takes another step to hear it.
+func TestAMessageAddedDuringTheLastAnswerExtendsTheTurn(t *testing.T) {
 	driver := aitest.New(aitest.Says("waiting on the review"), aitest.Says("got it"))
 	a := newAgent(t, driver)
 
@@ -527,32 +530,32 @@ func TestAMessageAddedDuringTheLastAnswerExtendsTheExchange(t *testing.T) {
 			t.Fatalf("run: %v", err)
 		}
 		switch v := e.(type) {
-		case agent.MessageStart:
+		case agent.InferenceStart:
 			if starts++; starts == 1 {
 				a.AddMessages(ai.UserMessage("the review finished"))
 			}
 		case agent.TurnEnd:
 			ends++
 			if got := v.Message.Text(); got != "got it" {
-				t.Errorf("the exchange ended on %q, want the answer to the late message", got)
+				t.Errorf("the turn ended on %q, want the answer to the late message", got)
 			}
 		}
 	}
 	if ends != 1 || driver.Calls() != 2 {
-		t.Fatalf("exchanges = %d, inferences = %d; want 1 exchange of 2 inferences", ends, driver.Calls())
+		t.Fatalf("turns = %d, inferences = %d; want 1 turn of 2 inferences", ends, driver.Calls())
 	}
 	if msgs := driver.Last().Messages; msgs[len(msgs)-1].Text() != "the review finished" {
 		t.Errorf("the second inference did not end on the late message")
 	}
 	if n := a.Pending(); n != 0 {
-		t.Errorf("Pending = %d after the exchange, want 0", n)
+		t.Errorf("Pending = %d after the turn, want 0", n)
 	}
 }
 
-// A message queued after an exchange's last step boundary belongs to the
-// conversation ahead of the next exchange's own input: it was said first, and a
+// A message queued after a turn's last step boundary belongs to the
+// conversation ahead of the next turn's own input: it was said first, and a
 // fold is only the conversation if that order is the truth.
-func TestMessagesQueuedBetweenExchangesEnterAheadOfTheNextInput(t *testing.T) {
+func TestMessagesQueuedBetweenTurnsEnterAheadOfTheNextInput(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("first"), aitest.Says("second")))
 
 	if _, err := outcome(t, a, ai.UserMessage("one")); err != nil {
@@ -573,7 +576,7 @@ func TestMessagesQueuedBetweenExchangesEnterAheadOfTheNextInput(t *testing.T) {
 	}
 	want := []string{"said while nothing was running", "two", "second"}
 	if !slices.Equal(added, want) {
-		t.Errorf("the exchange announced %v, want %v", added, want)
+		t.Errorf("the turn announced %v, want %v", added, want)
 	}
 
 	var held []string

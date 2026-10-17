@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -44,12 +42,6 @@ const (
 	// do. It is caught before the network, so nothing was spent.
 	KindUnsupported ErrorKind = "unsupported"
 )
-
-// IsUnsupported reports whether err is a request the model cannot serve —
-// images to a text-only endpoint, tools to a model without them, a retired
-// model. Retrying or switching credentials cannot help; changing the request
-// or the model can.
-func IsUnsupported(err error) bool { return IsKind(err, KindUnsupported) }
 
 // Error is a provider failure, classified.
 type Error struct {
@@ -146,68 +138,6 @@ func RetryAfter(err error) time.Duration {
 	return 0
 }
 
-// contextExceededSignatures are the ways providers say "this prompt exceeds
-// the context window". Matching is on message text because no provider
-// distinguishes it from other 400s with a machine-readable code.
-var contextExceededSignatures = []string{
-	"prompt is too long",                // Anthropic
-	"prompt_too_long",                   // Anthropic error type
-	"maximum context length",            // OpenAI and compatibles
-	"context_length_exceeded",           // OpenAI error code
-	"reduce the length of the messages", // OpenAI remediation text
-	"input token count",                 // Google Gemini
-	"exceeds the maximum number of tokens",
-	"context length exceeded",
-	"too many tokens",
-}
-
-// notContextExceededSignatures are messages that match a context-exceeded
-// signature but mean something else entirely.
-var notContextExceededSignatures = []string{
-	"rate limit",
-	"too many requests",
-	"throttling",
-	"quota exceeded",
-	"please wait before",
-}
-
-// ClassifyMessage reports whether a provider message says the prompt exceeded
-// the context window. Drivers call it before status classification, because
-// the condition arrives as an ordinary 400.
-func ClassifyMessage(msg string) (ErrorKind, bool) {
-	lower := strings.ToLower(msg)
-	for _, sig := range notContextExceededSignatures {
-		if strings.Contains(lower, sig) {
-			return KindUnknown, false
-		}
-	}
-	for _, sig := range contextExceededSignatures {
-		if strings.Contains(lower, sig) {
-			return KindContextExceeded, true
-		}
-	}
-	return KindUnknown, false
-}
-
-// classifyStatus maps an HTTP status onto a Kind, extracting Retry-After from
-// resp for a 429. resp may be nil.
-func classifyStatus(status int, resp *http.Response) (ErrorKind, time.Duration) {
-	switch {
-	case status == http.StatusTooManyRequests:
-		return KindRateLimit, parseRetryAfter(resp)
-	case status == http.StatusRequestTimeout,
-		status == http.StatusConflict,
-		status >= 500:
-		return KindOverloaded, 0
-	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return KindAuth, 0
-	case status >= 400:
-		return KindInvalidRequest, 0
-	default:
-		return KindUnknown, 0
-	}
-}
-
 // classifyTransport classifies an error carrying no HTTP status: cancellation,
 // a dropped connection, or a timeout. It reports false when err is none of
 // those, leaving the driver to fall back to its own signals.
@@ -229,76 +159,4 @@ func classifyTransport(err error) (ErrorKind, bool) {
 		return KindNetwork, true
 	}
 	return KindUnknown, false
-}
-
-// parseRetryAfter reads a Retry-After header in either allowed form,
-// delta-seconds or an HTTP date. It returns 0 when absent or unparseable.
-func parseRetryAfter(resp *http.Response) time.Duration {
-	if resp == nil {
-		return 0
-	}
-	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
-	if v == "" {
-		return 0
-	}
-	if secs, err := strconv.Atoi(v); err == nil {
-		if secs <= 0 {
-			return 0
-		}
-		return time.Duration(secs) * time.Second
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		if d := time.Until(t); d > 0 {
-			return d
-		}
-	}
-	return 0
-}
-
-// Classify assembles an *Error from what a driver has to hand. It applies the
-// checks in the order that keeps each from masking the next: an already
-// classified error, then a cancel, then the message, then the status, with the
-// transport as the last word.
-func Classify(driver string, status int, resp *http.Response, code, message string, err error) *Error {
-	var typed *Error
-	if errors.As(err, &typed) {
-		return typed
-	}
-	out := &Error{Driver: driver, Status: status, Code: code, Message: message, Err: err}
-	if out.Message == "" && err != nil {
-		out.Message = err.Error()
-	}
-
-	if err != nil && errors.Is(err, context.Canceled) {
-		out.Kind = KindCanceled
-		return out
-	}
-	// A context overflow arrives as an ordinary 400 with no machine-readable
-	// code, so the message is the only place to read it from — but only on a
-	// 400: a 401 or 503 mentioning tokens is a key or a busy server, not this.
-	if status == 0 || status == http.StatusBadRequest {
-		if kind, ok := ClassifyMessage(out.Message); ok {
-			out.Kind = kind
-			return out
-		}
-	}
-	if status != 0 {
-		out.Kind, out.RetryAfter = classifyStatus(status, resp)
-		return out
-	}
-	if kind, ok := classifyTransport(err); ok {
-		out.Kind = kind
-		return out
-	}
-	out.Kind = KindUnknown
-	return out
-}
-
-// StreamError is Classify for an error that terminated a stream.
-func StreamError(driver string, status int, resp *http.Response, code, message string, err error) *Error {
-	out := Classify(driver, status, resp, code, message, err)
-	if out.Kind == KindUnknown {
-		out.Kind = KindNetwork
-	}
-	return out
 }

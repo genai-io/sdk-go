@@ -13,7 +13,7 @@ type Request struct {
 	System string
 
 	Messages []Message
-	Tools    []Tool
+	Tools    []Schema
 
 	// MaxTokens caps the output. Zero leaves the cap off the wire.
 	MaxTokens int
@@ -59,7 +59,7 @@ func WithSystem(system string) Option {
 
 // WithTools offers the model a set of tools. Calling it replaces any tools a
 // lower layer set; calling it with none removes them.
-func WithTools(tools ...Tool) Option {
+func WithTools(tools ...Schema) Option {
 	return func(r *Request) { r.Tools = slices.Clone(tools) }
 }
 
@@ -180,7 +180,7 @@ var efforts = []Effort{
 }
 
 // Valid reports whether e is one of the portable rungs above. A model may
-// still offer rungs of its own naming; Model.Offers is what answers that.
+// still offer rungs of its own naming; Model.Efforts lists them.
 func (e Effort) Valid() bool {
 	if e == EffortDefault {
 		return true

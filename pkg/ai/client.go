@@ -128,13 +128,11 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 // Complete runs one inference call and returns the aggregated response,
 // discarding the intermediate events.
 func (c *Client) Complete(ctx context.Context, messages []Message, opts ...Option) (*Response, error) {
-	return Collect(c.Stream(ctx, messages, opts...))
+	return collect(c.Stream(ctx, messages, opts...))
 }
 
-// Collect drains an event stream and returns its final Response. It is what
-// Complete is built from, exposed so a caller who already holds a stream can
-// aggregate it without re-running the request.
-func Collect(events iter.Seq2[Event, error]) (*Response, error) {
+// collect drains an event stream and returns its final Response.
+func collect(events iter.Seq2[Event, error]) (*Response, error) {
 	var resp *Response
 	for event, err := range events {
 		if event.Type == EventDone && event.Response != nil {

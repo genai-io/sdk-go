@@ -258,7 +258,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 		t.Fatalf("turn failed: %v", err)
 	}
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok {
+		if v, ok := e.(agent.InferenceStart); ok {
 			sent = v.Inference
 		}
 	}
@@ -277,9 +277,6 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 	}
 
 	// None of it stuck to the agent.
-	if len(a.Tools()) != 2 {
-		t.Errorf("the agent holds %d tools, want both", len(a.Tools()))
-	}
 	if len(a.Messages()) != 2 {
 		t.Errorf("the injected message stuck to the conversation: %d messages", len(a.Messages()))
 	}
@@ -289,7 +286,7 @@ func TestPreInferChangesTheCallNotTheAgent(t *testing.T) {
 		t.Fatalf("second turn failed: %v", err)
 	}
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok {
+		if v, ok := e.(agent.InferenceStart); ok {
 			sent = v.Inference
 		}
 	}
@@ -335,9 +332,9 @@ func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
 
 	for _, e := range events {
 		switch e.(type) {
-		case agent.MessageStart:
+		case agent.InferenceStart:
 			t.Error("a refused call was announced as started")
-		case agent.MessageEnd:
+		case agent.InferenceEnd:
 			t.Error("a call that never started was reported as ended")
 		}
 	}
@@ -362,7 +359,7 @@ func TestAPreInferErrorEndsTheTurnBeforeAnythingIsSent(t *testing.T) {
 // The hook is handed this agent's own request: its prompt, its conversation,
 // its tools. Not the client's — the client merges its defaults and repairs the
 // history after the hook has had its say, so what the hook edits is an input to
-// that, not a copy of its output. MessageStart reports the same request,
+// that, not a copy of its output. InferenceStart reports the same request,
 // so a consumer sees exactly what the hook saw.
 func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 	client := ai.NewClientWithDriver(aitest.New(aitest.Says("done")),
@@ -399,12 +396,12 @@ func TestPreInferSeesTheAgentsOwnRequest(t *testing.T) {
 
 	var sent *agent.Inference
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok {
+		if v, ok := e.(agent.InferenceStart); ok {
 			sent = v.Inference
 		}
 	}
 	if sent != seen {
-		t.Error("MessageStart reported a different request than the hook was given")
+		t.Error("InferenceStart reported a different request than the hook was given")
 	}
 }
 
@@ -421,7 +418,7 @@ func TestPreInferRunsBeforeEveryAttempt(t *testing.T) {
 	attempts := 0
 	a, err := agent.New(client,
 		agent.WithSystem("base"),
-		agent.WithRetry(3, 0),
+		agent.WithRetry(2, 0),
 		agent.WithHooks(agent.Hook{
 			PreInfer: func(_ context.Context, inf *agent.Inference) error {
 				attempts++
@@ -478,7 +475,7 @@ func TestPreInferHooksChain(t *testing.T) {
 		t.Fatalf("turn failed: %v", err)
 	}
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok && v.Inference.System != "one two three" {
+		if v, ok := e.(agent.InferenceStart); ok && v.Inference.System != "one two three" {
 			t.Errorf("sent %q, want every hook's edit", v.Inference.System)
 		}
 	}
@@ -615,7 +612,7 @@ func TestAPostInferRefusalIsNotRetried(t *testing.T) {
 	// The span is still closed: this call did happen.
 	var ended int
 	for _, e := range events {
-		if v, ok := e.(agent.MessageEnd); ok {
+		if v, ok := e.(agent.InferenceEnd); ok {
 			ended++
 			if v.Err == nil {
 				t.Error("the call reported success on a refused response")
@@ -629,7 +626,7 @@ func TestAPostInferRefusalIsNotRetried(t *testing.T) {
 
 // A hook that refuses is refusing, whatever kind of error it picks. One that
 // happens to look transient must still not be retried, and must not leave an
-// MessageEnd with no MessageStart before it.
+// InferenceEnd with no InferenceStart before it.
 func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
 	driver := aitest.New(aitest.Says("one"), aitest.Says("two"), aitest.Says("three"))
 	client := ai.NewClientWithDriver(driver, ai.Model{ID: "stub", API: "stub"})
@@ -653,9 +650,9 @@ func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
 	var started, ended int
 	for _, e := range events {
 		switch e.(type) {
-		case agent.MessageStart:
+		case agent.InferenceStart:
 			started++
-		case agent.MessageEnd:
+		case agent.InferenceEnd:
 			ended++
 		}
 	}
@@ -666,7 +663,7 @@ func TestARetryableLookingRefusalIsStillARefusal(t *testing.T) {
 
 // The two answers a gate can give are not the same answer. A Decision that
 // blocks is policy: the model is told and gets to try something else. An error
-// is infrastructure — the hook could not do its job — and the exchange ends.
+// is infrastructure — the hook could not do its job — and the turn ends.
 func TestAGateRefusesWithADecisionAndFailsWithAnError(t *testing.T) {
 	ran := 0
 	tool := agent.ToolFunc("rm", "Delete things.",
@@ -687,7 +684,7 @@ func TestAGateRefusesWithADecisionAndFailsWithAnError(t *testing.T) {
 				return agent.Decision{Block: true, Reason: "not on this machine"}, nil
 			}, agent.StopEndTurn, 2, true},
 
-		{"a failure ends the exchange",
+		{"a failure ends the turn",
 			func(context.Context, agent.PreToolContext) (agent.Decision, error) {
 				return agent.Decision{}, errors.New("the permission service is down")
 			}, agent.StopError, 1, false},
@@ -714,7 +711,7 @@ func TestAGateRefusesWithADecisionAndFailsWithAnError(t *testing.T) {
 			}
 
 			// What the model was told, if anything: a refused call is answered,
-			// a failed exchange leaves the call unanswered and ends.
+			// a failed turn leaves the call unanswered and ends.
 			answered := false
 			for _, m := range a.Messages() {
 				if len(m.ToolResults()) > 0 {
@@ -780,7 +777,7 @@ func TestAFailedToolHookStillClosesTheSpan(t *testing.T) {
 			}
 			last := events[len(events)-1].(agent.TurnEnd)
 			if last.StopReason != agent.StopError || last.Err == nil {
-				t.Errorf("the exchange ended %q / %v, want error and the hook's own", last.StopReason, last.Err)
+				t.Errorf("the turn ended %q / %v, want error and the hook's own", last.StopReason, last.Err)
 			}
 		})
 	}
@@ -788,7 +785,7 @@ func TestAFailedToolHookStillClosesTheSpan(t *testing.T) {
 
 // A hook runs on the goroutine ranging over Run, so a panic in one is the
 // caller's to recover — unlike a tool, which runs where nobody else can. What
-// the agent owes is to come out of it idle rather than holding the exchange.
+// the agent owes is to come out of it idle rather than holding the turn.
 func TestAPanickingHookIsTheCallersToCatch(t *testing.T) {
 	first := true
 	a := newAgent(t, aitest.New(aitest.Says("never reached"), aitest.Says("fine")),
@@ -812,9 +809,9 @@ func TestAPanickingHookIsTheCallersToCatch(t *testing.T) {
 		t.Fatal("the panic never reached the caller; it was swallowed somewhere")
 	}
 
-	// And the agent is free: a second exchange is not ErrBusy.
+	// And the agent is free: a second turn is not ErrBusy.
 	if out, err := outcome(t, a, ai.UserMessage("again")); err != nil || out.StopReason != agent.StopEndTurn {
-		t.Errorf("the exchange after a panicking hook = %v / %q, want a clean end_turn", err, out.StopReason)
+		t.Errorf("the turn after a panicking hook = %v / %q, want a clean end_turn", err, out.StopReason)
 	}
 }
 
@@ -890,7 +887,7 @@ func TestPreStepReplacesTheConversationAtTheBoundary(t *testing.T) {
 		return ok
 	})
 	call := slices.IndexFunc(events, func(e agent.Event) bool {
-		_, ok := e.(agent.MessageStart)
+		_, ok := e.(agent.InferenceStart)
 		return ok
 	})
 	switch {
@@ -931,7 +928,7 @@ func TestPreStepReturningNilChangesNothing(t *testing.T) {
 		}
 	}
 	if got := len(a.Messages()); got != 2 {
-		t.Errorf("the conversation holds %d messages, want the exchange's own two", got)
+		t.Errorf("the conversation holds %d messages, want the turn's own two", got)
 	}
 }
 
@@ -1004,8 +1001,8 @@ func TestPreStepHooksChainIntoOneReplacement(t *testing.T) {
 	}
 }
 
-// A hook that could not do its job ends the exchange, the same as every other.
-func TestPreStepFailingEndsTheExchange(t *testing.T) {
+// A hook that could not do its job ends the turn, the same as every other.
+func TestPreStepFailingEndsTheTurn(t *testing.T) {
 	boom := errors.New("the summariser is down")
 	a := newAgent(t, aitest.New(aitest.Says("never asked")),
 		agent.WithHooks(agent.Hook{
@@ -1145,13 +1142,13 @@ func TestOnInferErrorRecoversAnOversizedPrompt(t *testing.T) {
 	)
 	asked := 0
 	a := newAgent(t, driver, agent.WithHooks(agent.Hook{
-		OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+		OnInferError: func(ctx context.Context, c agent.InferErrorContext) (*agent.Recovery, error) {
 			asked++
 			if !ai.IsContextExceeded(c.Err) {
 				return nil, nil
 			}
 			agent.Compacting(ctx)
-			return &agent.Retry{Messages: []ai.Message{ai.UserMessage("(the summary)")}}, nil
+			return &agent.Recovery{Messages: []ai.Message{ai.UserMessage("(the summary)")}}, nil
 		},
 	}))
 
@@ -1168,16 +1165,16 @@ func TestOnInferErrorRecoversAnOversizedPrompt(t *testing.T) {
 	assertSequence(t, events, []string{
 		"TurnStart",
 		"MessageAdded(user)",
-		"MessageStart(attempt=1)",
-		"MessageEnd(err)",
+		"InferenceStart(attempt=1)",
+		"InferenceEnd(err)",
 		"CompactionStart",
 		"MessagesReplaced",
 		"CompactionEnd",
-		"MessageStart(attempt=2)",
-		"MessageUpdate",
-		"MessageUpdate",
-		"MessageUpdate",
-		"MessageEnd",
+		"InferenceStart(attempt=2)",
+		"InferenceUpdate",
+		"InferenceUpdate",
+		"InferenceUpdate",
+		"InferenceEnd",
 		"MessageAdded(assistant)",
 		"TurnEnd",
 	})
@@ -1189,8 +1186,8 @@ func TestOnInferErrorRecoversAnOversizedPrompt(t *testing.T) {
 }
 
 // Without the hook the loop's own answer stands: an oversized prompt is not
-// retryable, so nothing recovers it and the exchange ends on it.
-func TestAnOversizedPromptEndsTheExchangeWithNoHook(t *testing.T) {
+// retryable, so nothing recovers it and the turn ends on it.
+func TestAnOversizedPromptEndsTheTurnWithNoHook(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"})))
 
 	out, err := outcome(t, a, ai.UserMessage("hi"))
@@ -1215,13 +1212,13 @@ func TestARecoveryDoesNotSpendTheRetryBudgetAndRestartsIt(t *testing.T) {
 	)
 
 	var attempts []int
-	a := newAgent(t, driver, agent.WithRetry(2, 0), agent.WithHooks(agent.Hook{
-		OnInferError: func(_ context.Context, c agent.InferErrorContext) (*agent.Retry, error) {
+	a := newAgent(t, driver, agent.WithRetry(1, 0), agent.WithHooks(agent.Hook{
+		OnInferError: func(_ context.Context, c agent.InferErrorContext) (*agent.Recovery, error) {
 			attempts = append(attempts, c.Attempt)
 			if len(attempts) > 1 {
 				return nil, nil // out of ideas the second time
 			}
-			return &agent.Retry{}, nil
+			return &agent.Recovery{}, nil
 		},
 	}))
 
@@ -1245,7 +1242,7 @@ func TestDecliningToRecoverKeepsTheOriginalFailure(t *testing.T) {
 	tooLong := &ai.Error{Kind: ai.KindContextExceeded, Message: "prompt is too long"}
 	a := newAgent(t, aitest.New(aitest.Fails(tooLong)),
 		agent.WithHooks(agent.Hook{
-			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
 				return nil, nil
 			},
 		}))
@@ -1257,12 +1254,12 @@ func TestDecliningToRecoverKeepsTheOriginalFailure(t *testing.T) {
 }
 
 // A hook that could not do its job is the application failing, not the model,
-// so the exchange ends with what the hook said rather than what it was asked
+// so the turn ends with what the hook said rather than what it was asked
 // about — the rule every other hook here already keeps.
-func TestAFailingRecoveryHookEndsTheExchange(t *testing.T) {
+func TestAFailingRecoveryHookEndsTheTurn(t *testing.T) {
 	boom := errors.New("the summariser is down")
 	a := newAgent(t, aitest.New(aitest.Fails(&ai.Error{Kind: ai.KindContextExceeded, Message: "too long"})), agent.WithHooks(agent.Hook{
-		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
 			return nil, boom
 		},
 	}))
@@ -1283,9 +1280,9 @@ func TestAPostInferRefusalIsNotOfferedToTheRecoveryHook(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("here you go")),
 		agent.WithHooks(agent.Hook{
 			PostInfer: func(context.Context, *ai.Response) error { return refused },
-			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
 				asked = true
-				return &agent.Retry{}, nil
+				return &agent.Recovery{}, nil
 			},
 		}))
 
@@ -1309,8 +1306,8 @@ func TestPreInferIsToldWhatEndedTheAttemptBefore(t *testing.T) {
 			seen = append(seen, inf.LastErr)
 			return nil
 		},
-		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
-			return &agent.Retry{Messages: []ai.Message{ai.UserMessage("shorter")}}, nil
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
+			return &agent.Recovery{Messages: []ai.Message{ai.UserMessage("shorter")}}, nil
 		},
 	}))
 
@@ -1336,8 +1333,8 @@ func TestARouteOnlyRecoveryReplacesNothing(t *testing.T) {
 		aitest.Fails(&ai.Error{Kind: ai.KindAuth, Message: "bad key"}),
 		aitest.Says("the other endpoint"),
 	), agent.WithHooks(agent.Hook{
-		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
-			return &agent.Retry{}, nil
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
+			return &agent.Recovery{}, nil
 		},
 	}))
 
@@ -1361,13 +1358,13 @@ func TestTheFirstRecoveryAnswerIsTaken(t *testing.T) {
 		aitest.Says("ok"),
 	),
 		agent.WithHooks(agent.Hook{
-			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
-				return &agent.Retry{Messages: []ai.Message{ai.UserMessage("first")}}, nil
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
+				return &agent.Recovery{Messages: []ai.Message{ai.UserMessage("first")}}, nil
 			},
 		}, agent.Hook{
-			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+			OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
 				second = true
-				return &agent.Retry{Messages: []ai.Message{ai.UserMessage("second")}}, nil
+				return &agent.Recovery{Messages: []ai.Message{ai.UserMessage("second")}}, nil
 			},
 		}))
 
@@ -1384,13 +1381,13 @@ func TestTheFirstRecoveryAnswerIsTaken(t *testing.T) {
 }
 
 // A turn that was stopped is not a turn that failed to answer. Asking the hook
-// to recover it would restart the very exchange the caller just ended.
+// to recover it would restart the very turn the caller just ended.
 func TestACancelledTurnIsNotOfferedToTheRecoveryHook(t *testing.T) {
 	var asked atomic.Bool
 	a := newAgent(t, aitest.Always(aitest.Hangs()), agent.WithHooks(agent.Hook{
-		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Retry, error) {
+		OnInferError: func(context.Context, agent.InferErrorContext) (*agent.Recovery, error) {
 			asked.Store(true)
-			return &agent.Retry{}, nil
+			return &agent.Recovery{}, nil
 		},
 	}))
 
@@ -1405,7 +1402,7 @@ func TestACancelledTurnIsNotOfferedToTheRecoveryHook(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
-		if _, ok := e.(agent.MessageStart); ok {
+		if _, ok := e.(agent.InferenceStart); ok {
 			close(started)
 		}
 		if v, ok := e.(agent.TurnEnd); ok {

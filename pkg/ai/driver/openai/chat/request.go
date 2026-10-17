@@ -10,7 +10,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
-func (d *Driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatCompletionNewParams {
+func (d *driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatCompletionNewParams {
 	params := sdk.ChatCompletionNewParams{
 		Model:         d.model.ID,
 		Messages:      d.convertMessages(req),
@@ -73,7 +73,7 @@ func toolChoice(req *ai.Request) *sdk.ChatCompletionToolChoiceOptionUnionParam {
 }
 
 // applyReasoning writes the endpoint's reasoning switch into the request.
-func (d *Driver) applyReasoning(params *sdk.ChatCompletionNewParams, level ai.ReasoningLevel) {
+func (d *driver) applyReasoning(params *sdk.ChatCompletionNewParams, level ai.ReasoningLevel) {
 	if d.compat.Thinking == ai.ThinkingNone || level.Effort == ai.EffortDefault {
 		return
 	}
@@ -123,7 +123,7 @@ func (d *Driver) applyReasoning(params *sdk.ChatCompletionNewParams, level ai.Re
 	}
 }
 
-func (d *Driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessageParamUnion {
+func (d *driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessageParamUnion {
 	out := make([]sdk.ChatCompletionMessageParamUnion, 0, len(req.Messages)+1)
 
 	if req.System != "" {
@@ -169,7 +169,7 @@ func toolResultImages(results []ai.ToolResult) ai.Content {
 	return out
 }
 
-func (d *Driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
+func (d *driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
 	// A text-only turn takes the simple string form, which every
 	// implementation accepts; the array form is only needed for images.
 	if !msg.Content.HasImages() {
@@ -205,7 +205,7 @@ func (d *Driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion
 	}
 }
 
-func (d *Driver) assistantMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
+func (d *driver) assistantMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
 	var param sdk.ChatCompletionAssistantMessageParam
 	if text := msg.Content.Text(); text != "" {
 		param.Content.OfString = sdk.Opt(text)
@@ -237,15 +237,15 @@ func convertToolCalls(calls []ai.ToolCall) []sdk.ChatCompletionMessageToolCallUn
 	return out
 }
 
-func convertTools(tools []ai.Tool) []sdk.ChatCompletionToolUnionParam {
+func convertTools(tools []ai.Schema) []sdk.ChatCompletionToolUnionParam {
 	out := make([]sdk.ChatCompletionToolUnionParam, 0, len(tools))
 	for _, t := range tools {
-		params := sdk.FunctionParameters(t.Schema.DefinitionMap())
+		params := sdk.FunctionParameters(t.DefinitionMap())
 		out = append(out, sdk.ChatCompletionToolUnionParam{
 			OfFunction: &sdk.ChatCompletionFunctionToolParam{
 				Function: sdk.FunctionDefinitionParam{
-					Name:        t.Schema.Name,
-					Description: sdk.String(t.Schema.Description),
+					Name:        t.Name,
+					Description: sdk.String(t.Description),
 					Parameters:  params,
 				},
 			},

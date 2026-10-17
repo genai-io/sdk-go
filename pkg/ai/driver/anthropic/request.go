@@ -75,7 +75,7 @@ func (t *toolIDs) mint() string {
 	return fmt.Sprintf("toolu_compat_%d", t.n)
 }
 
-func (d *Driver) buildParams(req *ai.Request) (*sdk.MessageNewParams, error) {
+func (d *driver) buildParams(req *ai.Request) (*sdk.MessageNewParams, error) {
 	var ids toolIDs
 
 	// The rung carries both halves of the mapping: Value is what
@@ -183,7 +183,7 @@ func (d *Driver) buildParams(req *ai.Request) (*sdk.MessageNewParams, error) {
 
 // cacheControl maps the requested retention onto a cache_control marker. A nil
 // result means no breakpoint, which is what CacheNone asks for.
-func (d *Driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphemeralParam {
+func (d *driver) cacheControl(retention ai.CacheRetention) *sdk.CacheControlEphemeralParam {
 	if retention == ai.CacheNone {
 		return nil
 	}
@@ -321,11 +321,11 @@ func mergeConsecutive(msgs []sdk.MessageParam) []sdk.MessageParam {
 	return out
 }
 
-func convertTools(tools []ai.Tool) []sdk.ToolUnionParam {
+func convertTools(tools []ai.Schema) []sdk.ToolUnionParam {
 	out := make([]sdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		schema := sdk.ToolInputSchemaParam{}
-		if props := t.Schema.DefinitionMap(); props != nil {
+		if props := t.DefinitionMap(); props != nil {
 			if properties, ok := props["properties"]; ok {
 				schema.Properties = properties
 			}
@@ -334,8 +334,8 @@ func convertTools(tools []ai.Tool) []sdk.ToolUnionParam {
 		}
 		out = append(out, sdk.ToolUnionParam{
 			OfTool: &sdk.ToolParam{
-				Name:        t.Schema.Name,
-				Description: sdk.String(t.Schema.Description),
+				Name:        t.Name,
+				Description: sdk.String(t.Description),
 				InputSchema: schema,
 			},
 		})

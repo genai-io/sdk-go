@@ -6,16 +6,15 @@ import (
 	"iter"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/genai-io/sdk-go/pkg/agent"
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
-// Breaking out of the range ends the exchange: a consumer that stopped reading
+// Breaking out of the range ends the turn: a consumer that stopped reading
 // has stopped caring about this turn.
-func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
+func TestBreakingOutOfTheRangeEndsTheTurn(t *testing.T) {
 	driver := aitest.New(
 		aitest.Asks(ai.ToolCall{ID: "c1", Name: "never", Input: `{}`}),
 		aitest.Says("unreachable"),
@@ -26,7 +25,7 @@ func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stream: %v", err)
 		}
-		if _, ok := e.(agent.MessageEnd); ok {
+		if _, ok := e.(agent.InferenceEnd); ok {
 			break
 		}
 	}
@@ -37,79 +36,23 @@ func TestBreakingOutOfTheRangeEndsTheExchange(t *testing.T) {
 	}
 }
 
-// Interrupt says when the exchange it ended has actually finished. The caller
-// that presses escape is not the caller ranging over Run, so it cannot see the
-// range end; without this it has no way to know when the agent stopped
-// touching the conversation.
-func TestInterruptSaysWhenTheExchangeIsOver(t *testing.T) {
-	release := make(chan struct{})
-	held := agent.ToolFunc("hold", "blocks until released",
-		func(ctx context.Context, _ struct{}) (agent.Result, error) {
-			select {
-			case <-release:
-			case <-ctx.Done():
-			}
-			return agent.TextResult("let go"), nil
-		})
-	d := aitest.New(aitest.Asks(ai.ToolCall{ID: "1", Name: "hold", Input: "{}"}), aitest.Says("done"))
-	a := newAgent(t, d, agent.WithTools(held))
-
-	inTool := make(chan struct{})
-	stopped := make(chan (<-chan struct{}), 1)
-	go func() {
-		<-inTool
-		stopped <- a.Interrupt() // from somewhere that never sees the range
-	}()
-
-	ranging := make(chan struct{})
-	go func() {
-		defer close(ranging)
-		for e := range a.Run(context.Background(), ai.UserMessage("go")) {
-			if _, ok := e.(agent.ToolStart); ok {
-				close(inTool)
-			}
-		}
-	}()
-
-	select {
-	case <-(<-stopped):
-	case <-time.After(2 * time.Second):
-		t.Fatal("the channel from Interrupt never closed")
-	}
-
-	// Closed means over: the range has ended and the agent is free again.
-	select {
-	case <-ranging:
-	case <-time.After(time.Second):
-		t.Error("the channel closed while the exchange was still running")
-	}
-	if _, err := outcome(t, a, ai.UserMessage("again")); err != nil {
-		t.Errorf("the agent was still busy after it said it had stopped: %v", err)
-	}
-	close(release)
-}
-
-// Between exchanges there is nothing to interrupt, and waiting on it must not
-// be a way to hang.
-func TestInterruptBetweenExchangesDoesNotBlock(t *testing.T) {
+// Between turns there is nothing to interrupt, and doing so must not affect
+// the next turn.
+func TestInterruptBetweenTurnsDoesNothing(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("hi")))
 
-	select {
-	case <-a.Interrupt():
-	case <-time.After(time.Second):
-		t.Fatal("Interrupt blocked with no exchange running")
-	}
+	a.Interrupt()
 
 	// And it did not poison the next one.
 	if out, err := outcome(t, a, ai.UserMessage("go")); err != nil || out.StopReason != agent.StopEndTurn {
-		t.Errorf("the next exchange = %v / %q, want a clean end_turn", err, out.StopReason)
+		t.Errorf("the next turn = %v / %q, want a clean end_turn", err, out.StopReason)
 	}
 }
 
 // A model that is still talking when the user gives up on it: the stream is
-// abandoned, and the exchange has to say so without pretending the call was
+// abandoned, and the turn has to say so without pretending the call was
 // free. The tokens were spent whether or not the answer was kept.
-// Ending an exchange mid-stream, both ways round: Interrupt, which ends this
+// Ending a turn mid-stream, both ways round: Interrupt, which ends this
 // turn, and cancelling the context Run was given, which ends everything.
 func TestAnInterruptedStreamClosesItsSpanAndKeepsWhatItCost(t *testing.T) {
 	for _, tc := range []struct {
@@ -145,16 +88,16 @@ func TestAnInterruptedStreamClosesItsSpanAndKeepsWhatItCost(t *testing.T) {
 					t.Fatalf("the iterator yielded %v", err)
 				}
 				events = append(events, e)
-				if _, ok := e.(agent.MessageUpdate); ok {
+				if _, ok := e.(agent.InferenceUpdate); ok {
 					tc.stop(a, cancel)
 				}
 			}
 
-			var end agent.MessageEnd
+			var end agent.InferenceEnd
 			var closed, addedAfter bool
 			for _, e := range events {
 				switch v := e.(type) {
-				case agent.MessageEnd:
+				case agent.InferenceEnd:
 					end, closed = v, true
 				case agent.MessageAdded:
 					if closed {
@@ -166,7 +109,7 @@ func TestAnInterruptedStreamClosesItsSpanAndKeepsWhatItCost(t *testing.T) {
 				t.Fatal("the span that opened was never closed; a reader is still waiting on it")
 			}
 			if end.Err == nil {
-				t.Error("MessageEnd says the call succeeded; nothing came of it")
+				t.Error("InferenceEnd says the call succeeded; nothing came of it")
 			}
 			if addedAfter {
 				t.Error("an abandoned answer was added to the conversation")

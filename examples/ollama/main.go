@@ -16,7 +16,7 @@ import (
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
-	"github.com/genai-io/sdk-go/pkg/ai/provider"
+	"github.com/genai-io/sdk-go/pkg/ai/endpoint"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/openai/chat"
 )
@@ -38,21 +38,21 @@ func run(modelID, question string) error {
 
 	// An Endpoint is the right shape for a local server: what it serves changes
 	// as you pull and remove models, so ask it rather than trusting a table.
-	p, err := auth.Provider("ollama")
+	e, err := auth.Endpoint("ollama")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("\033[2m%s · no credential needed\033[0m\n", p.Name())
+	fmt.Printf("\033[2m%s · no credential needed\033[0m\n", e.Name())
 
 	// Models() answers immediately from the static baseline; Refresh is the
 	// only thing that touches the network. A picker renders first and corrects
 	// itself after — it never blocks on a server that might be down.
-	if err := p.Refresh(context.Background()); err != nil {
+	if err := e.Refresh(context.Background()); err != nil {
 		return fmt.Errorf("is ollama running? %w", err)
 	}
-	show(p)
+	show(e)
 
-	client, err := p.Client(modelID)
+	client, err := e.Client(modelID)
 	if err != nil {
 		return err
 	}
@@ -64,8 +64,8 @@ func run(modelID, question string) error {
 	return nil
 }
 
-func show(p *provider.Provider) {
-	models := p.Models()
+func show(e *endpoint.Endpoint) {
+	models := e.Models()
 	fmt.Printf("\033[2m%d model(s) pulled locally:", len(models))
 	for i, m := range models {
 		if i == 5 {

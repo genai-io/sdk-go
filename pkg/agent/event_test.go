@@ -15,7 +15,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/aitest"
 )
 
-// The plain exchange from the design's first sequence diagram.
+// The plain turn from the design's first sequence diagram.
 func TestTurnEmitsTheDocumentedTextSequence(t *testing.T) {
 	a := newAgent(t, aitest.New(aitest.Says("hello there")))
 
@@ -27,11 +27,11 @@ func TestTurnEmitsTheDocumentedTextSequence(t *testing.T) {
 	assertSequence(t, events, []string{
 		"TurnStart",
 		"MessageAdded(user)",
-		"MessageStart(attempt=1)",
-		"MessageUpdate", // block start
-		"MessageUpdate", // block delta
-		"MessageUpdate", // block end
-		"MessageEnd",
+		"InferenceStart(attempt=1)",
+		"InferenceUpdate", // block start
+		"InferenceUpdate", // block delta
+		"InferenceUpdate", // block end
+		"InferenceEnd",
 		"MessageAdded(assistant)",
 		"TurnEnd",
 	})
@@ -68,19 +68,19 @@ func TestTurnWithAToolRunsASecondInference(t *testing.T) {
 	assertSequence(t, events, []string{
 		"TurnStart",
 		"MessageAdded(user)",
-		"MessageStart(attempt=1)",
-		"MessageUpdate", // the tool call block arrives complete: start
-		"MessageUpdate", // ...and end
-		"MessageEnd",
+		"InferenceStart(attempt=1)",
+		"InferenceUpdate", // the tool call block arrives complete: start
+		"InferenceUpdate", // ...and end
+		"InferenceEnd",
 		"MessageAdded(assistant)",
 		"ToolStart",
 		"ToolEnd",
 		"MessageAdded(user)", // tool results are a user turn on every protocol
-		"MessageStart(attempt=1)",
-		"MessageUpdate",
-		"MessageUpdate",
-		"MessageUpdate",
-		"MessageEnd",
+		"InferenceStart(attempt=1)",
+		"InferenceUpdate",
+		"InferenceUpdate",
+		"InferenceUpdate",
+		"InferenceEnd",
 		"MessageAdded(assistant)",
 		"TurnEnd",
 	})
@@ -181,7 +181,7 @@ func TestAFailedAttemptStillCountsWhatItCost(t *testing.T) {
 			Usage:      ai.Usage{Input: 40, Output: 6},
 			StopReason: ai.StopEndTurn,
 		}),
-	), agent.WithRetry(3, 0))
+	), agent.WithRetry(2, 0))
 
 	events, err := collect(t, a, ai.UserMessage("hi"))
 	if err != nil {
@@ -194,7 +194,7 @@ func TestAFailedAttemptStillCountsWhatItCost(t *testing.T) {
 	}
 	attempts := 0
 	for _, e := range events {
-		if _, ok := e.(agent.MessageStart); ok {
+		if _, ok := e.(agent.InferenceStart); ok {
 			attempts++
 		}
 	}
@@ -377,7 +377,7 @@ func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
 	}
 	var announced int
 	for _, e := range events {
-		if v, ok := e.(agent.MessageStart); ok && v.Inference != nil {
+		if v, ok := e.(agent.InferenceStart); ok && v.Inference != nil {
 			announced++
 			if v.Inference.System != "base · edited" {
 				t.Errorf("announced %q, want the edited prompt", v.Inference.System)
@@ -391,7 +391,7 @@ func TestTheAnnouncedRequestIsTheOneThatWentOut(t *testing.T) {
 
 // The fragment a consumer almost always wants, without reaching through two
 // levels of the event that carries it.
-func TestAMessageUpdateSaysWhatFragmentItCarries(t *testing.T) {
+func TestAnInferenceUpdateSaysWhatFragmentItCarries(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		delta ai.Event
@@ -404,7 +404,7 @@ func TestAMessageUpdateSaysWhatFragmentItCarries(t *testing.T) {
 		{"the end", ai.Event{Type: ai.EventDone}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			u := agent.MessageUpdate{Delta: tc.delta}
+			u := agent.InferenceUpdate{Delta: tc.delta}
 			if got := u.Text(); got != tc.text {
 				t.Errorf("Text() = %q, want %q", got, tc.text)
 			}
@@ -438,7 +438,7 @@ func TestAFailedTurnIsReportedOnceAndOnTheStream(t *testing.T) {
 	}
 }
 
-// Every event says which exchange it belongs to, so a consumer following
+// Every event says which turn it belongs to, so a consumer following
 // several does not have to remember which one it is in: a fragment that cannot
 // say what it belongs to is one an interface has to guess about.
 func TestEveryEventCarriesItsTurn(t *testing.T) {
@@ -474,9 +474,9 @@ func TestEveryEventCarriesItsTurn(t *testing.T) {
 		}
 	}
 
-	// The first exchange goes through every kind of event there is, so this is
+	// The first turn goes through every kind of event there is, so this is
 	// the whole set and not the handful that happened to be easy.
 	if len(seen) != 10 {
-		t.Errorf("the exchanges reported %d kinds of event %v, want the 10 there are", len(seen), seen)
+		t.Errorf("the turns reported %d kinds of event %v, want the 10 there are", len(seen), seen)
 	}
 }

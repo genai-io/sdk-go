@@ -116,7 +116,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	var end agent.TurnEnd
 	for e, err := range a.Run(ctx, ai.UserMessage(prompt)) {
 		if err != nil {
-			// Outside-the-turn failures only; the exchange reports its own on
+			// Outside-the-turn failures only; the turn reports its own on
 			// TurnEnd.
 			return err
 		}
@@ -144,7 +144,7 @@ func compact(a *agent.Agent, keep int) {
 	}
 	// A real one summarises with a model call, and runs from a PreStep hook so
 	// that it can fire mid-turn, when a long run of tools is what filled the
-	// window. This one just drops the middle, between exchanges.
+	// window. This one just drops the middle, between turns.
 	kept := msgs[len(msgs)-keep:]
 	a.SetMessages(kept)
 
@@ -173,7 +173,7 @@ var clock = agent.ToolFunc("now", "The current date and time.",
 
 func render(e agent.Event) {
 	switch v := e.(type) {
-	case agent.MessageUpdate:
+	case agent.InferenceUpdate:
 		fmt.Print(v.Text())
 	case agent.ToolStart:
 		fmt.Printf("\033[2m[%s]\033[0m ", v.Name)

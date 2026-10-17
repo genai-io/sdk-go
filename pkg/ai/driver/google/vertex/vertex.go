@@ -21,8 +21,8 @@ import (
 	googledriver "github.com/genai-io/sdk-go/pkg/ai/driver/google"
 )
 
-// Name is the driver's identifier.
-const Name = string(ai.APIGoogleVertex)
+// name is the driver's identifier.
+const name = string(ai.APIGoogleVertex)
 
 // cloudPlatformScope is the OAuth scope Vertex AI accepts a token under.
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
@@ -39,13 +39,16 @@ type driver struct {
 }
 
 // New builds a driver from a Config. The GCP project and region come from
-// Config.ProtocolConfig as an ai.VertexConfig; package ai/auth fills one in from
-// the environment.
+// Config.Vertex; package ai/auth fills it in from the environment.
 func New(cfg ai.Config) (ai.Driver, error) {
-	deployment, err := ai.VertexDeployment(cfg, Name)
-	if err != nil {
-		return nil, err
+	if cfg.Vertex == nil || cfg.Vertex.Project == "" {
+		return nil, &ai.Error{
+			Driver:  name,
+			Kind:    ai.KindAuth,
+			Message: "no Google Cloud project: set Config.Vertex, or use auth.Config to read it from the environment",
+		}
 	}
+	project, region := cfg.Vertex.Project, cmp.Or(cfg.Vertex.Region, ai.VertexDefaultRegion)
 
 	// Finding the credential reads files and the environment; the token is
 	// minted on the first request. So a failure here is a missing credential,
@@ -53,7 +56,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	creds, err := google.FindDefaultCredentials(context.Background(), cloudPlatformScope)
 	if err != nil {
 		return nil, &ai.Error{
-			Driver:  Name,
+			Driver:  name,
 			Kind:    ai.KindAuth,
 			Message: fmt.Sprintf("Google Application Default Credentials are unavailable: %v", err),
 		}
@@ -66,16 +69,16 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	cfg.HTTPClient = &authed
 	cfg.APIKey = "" // the credential is the token, and a key header beside it would be refused
 
-	base := strings.TrimSuffix(cfg.URL(), "/")
+	base := strings.TrimSuffix(cfg.Model.BaseURL, "/")
 	if base == "" {
-		base = baseURL(deployment.Region)
+		base = baseURL(region)
 	}
-	d, err := googledriver.NewAt(cfg, ai.APIGoogleVertex,
-		fmt.Sprintf("%s/v1/projects/%s/locations/%s/publishers/google/models", base, deployment.Project, deployment.Region))
+	d, err := googledriver.NewDeployment(cfg, ai.APIGoogleVertex,
+		fmt.Sprintf("%s/v1/projects/%s/locations/%s/publishers/google/models", base, project, region))
 	if err != nil {
 		return nil, err
 	}
-	return driver{d, d}, nil
+	return driver{d, d.(ai.TokenCounter)}, nil
 }
 
 // baseURL is the host a region is served from. The global endpoint has no

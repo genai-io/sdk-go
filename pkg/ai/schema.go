@@ -11,18 +11,18 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/jsonschema"
 )
 
-// Schema constrains an answer to a JSON shape.
+// Schema is a named JSON shape. It describes either a tool's arguments, offered
+// with WithTools, or the shape of an answer, asked for with WithSchema.
 type Schema struct {
-	// Name identifies the shape. Some protocols require one, and it is what
-	// appears in an error when the answer does not match.
+	// Name is the string the model calls a tool by. For an answer's shape it
+	// identifies the shape; some protocols require one.
 	Name string `json:"name,omitempty"`
 
-	// Description tells the model what the shape is for. Providers pass it to
-	// the model, so it is prompt text, not documentation.
+	// Description tells the model what the tool or the shape is for.
+	// Providers pass it to the model, so it is prompt text, not documentation.
 	Description string `json:"description,omitempty"`
 
-	// Definition is the JSON Schema itself, typically a map[string]any. It is
-	// the same shape a Tool takes for its parameters.
+	// Definition is the JSON Schema itself, typically a map[string]any.
 	Definition any `json:"definition,omitempty"`
 
 	// Strict asks for exact conformance where the protocol distinguishes it
@@ -32,9 +32,29 @@ type Schema struct {
 	Strict bool `json:"strict,omitempty"`
 }
 
-// SchemaOf builds a Schema from a Go type, ready for WithSchema. The schema is
-// named after T; description is prompt text the model reads, and may be empty
-// when the type name already says what the shape is for.
+// ToolSchema derives a tool's schema from its Go argument type.
+//
+//	type SearchArgs struct {
+//		Query string `json:"query" description:"what to look for, in plain words"`
+//		Limit int    `json:"limit,omitempty" description:"how many passages" maximum:"10"`
+//	}
+//
+//	search := ai.ToolSchema[SearchArgs]("search", "Search the docs and return matching passages.")
+func ToolSchema[T any](name, description string) Schema {
+	t := reflect.TypeFor[T]()
+	if t.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("ai: a tool's arguments must be a struct, not %v", t))
+	}
+	if name == "" {
+		panic(fmt.Sprintf("ai: the tool taking %s has no name; "+
+			"that is the string the model calls", t))
+	}
+	return Schema{Name: name, Description: description, Definition: jsonschema.ForType(t)}
+}
+
+// SchemaOf derives an answer's shape from a Go type, ready for WithSchema. The
+// schema is named after T; description is prompt text the model reads, and may
+// be empty when the type name already says what the shape is for.
 //
 //	type Order struct {
 //		Name     string `json:"name" description:"full name, family name last"`

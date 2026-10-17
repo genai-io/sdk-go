@@ -36,7 +36,7 @@ func (c *Client) CountTokens(ctx context.Context, messages []Message, opts ...Op
 		// A counting endpoint that is down should not stop a caller sizing a
 		// prompt. Auth, malformed requests and cancellation are different:
 		// estimating would hide a failure generation will hit too.
-		if IsUnsupported(err) || IsRetryable(err) {
+		if IsKind(err, KindUnsupported) || IsRetryable(err) {
 			return TokenCount{Tokens: req.EstimateTokens()}, nil
 		}
 		return TokenCount{}, err
@@ -96,9 +96,9 @@ func (r *Request) EstimateTokens() int {
 		total += messageOverhead + estimateContent(m.Content)
 	}
 	for _, t := range r.Tools {
-		total += messageOverhead + EstimateTokens(t.Schema.Name) + EstimateTokens(t.Schema.Description)
-		if t.Schema.Definition != nil {
-			if schema, err := json.Marshal(t.Schema.Definition); err == nil {
+		total += messageOverhead + EstimateTokens(t.Name) + EstimateTokens(t.Description)
+		if t.Definition != nil {
+			if schema, err := json.Marshal(t.Definition); err == nil {
 				total += EstimateTokens(string(schema))
 			}
 		}
@@ -230,12 +230,4 @@ func estimateImage(img *Image) int {
 		return unsizedImageTokens
 	}
 	return (cfg.Width*cfg.Height + pixelsPerImageToken - 1) / pixelsPerImageToken
-}
-
-// SplitPromptTokens separates a combined prompt count into its fresh and
-// cached halves.
-func SplitPromptTokens(promptTokens, cachedTokens int) (fresh, cached int) {
-	promptTokens = max(promptTokens, 0)
-	cached = min(max(cachedTokens, 0), promptTokens)
-	return promptTokens - cached, cached
 }

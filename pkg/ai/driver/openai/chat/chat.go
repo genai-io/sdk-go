@@ -6,13 +6,13 @@
 //
 //	chat.go     construction, Stream and Models
 //	request.go  an ai.Request translated into Chat params
+//	errors.go   this protocol's failures classified into ai.Error kinds
 package chat
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"iter"
 	"net/http"
@@ -23,20 +23,16 @@ import (
 	"github.com/openai/openai-go/v3/packages/ssestream"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
-// Name is the driver's identifier.
-const Name = string(ai.APIOpenAIChat)
-
-// fail classifies this protocol's failures.
-var fail = errs.For(Name, oai.Details)
+// name is the driver's identifier.
+const name = string(ai.APIOpenAIChat)
 
 func init() { ai.RegisterAPI(ai.APIOpenAIChat, New) }
 
-// Driver talks to one Chat Completions endpoint.
-type Driver struct {
+// driver talks to one Chat Completions endpoint.
+type driver struct {
 	client sdk.Client
 	model  ai.Model
 	compat ai.OpenAIChatCompat
@@ -45,14 +41,7 @@ type Driver struct {
 // New builds a driver from a Config. Registered as the factory for
 // ai.APIOpenAIChat.
 func New(cfg ai.Config) (ai.Driver, error) {
-	if cfg.Model.ID == "" {
-		return nil, fmt.Errorf("%s: model ID is required", Name)
-	}
-	if err := ai.RejectProtocolConfig(cfg, Name); err != nil {
-		return nil, err
-	}
-
-	return &Driver{
+	return &driver{
 		client: oai.NewClient(cfg),
 		model:  cfg.Model,
 		compat: ai.CompatOf[ai.OpenAIChatCompat](cfg.Model),
@@ -60,10 +49,10 @@ func New(cfg ai.Config) (ai.Driver, error) {
 }
 
 // Name identifies the driver.
-func (d *Driver) Name() string { return Name }
+func (d *driver) Name() string { return name }
 
 // Stream runs one Chat Completions call.
-func (d *Driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
+func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
 		level, _ := d.model.ResolveLevel(req.Effort)
 		params := d.buildParams(req, level)
@@ -250,7 +239,7 @@ func (s *toolCallSet) byID(id string) *ai.ToolCall {
 // context_length; LiteLLM and VS Code LM gateways, max_input_tokens. A model
 // whose supported_endpoints (GitHub Copilot's field) omit Chat but name
 // Responses is listed as a Responses model, since Chat would refuse it.
-func (d *Driver) Models(ctx context.Context) ([]ai.Model, error) {
+func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 	// One request is the whole listing: the SDK's page type for /models reports
 	// no next page ever, because the endpoint does not paginate.
 	page, err := d.client.Models.List(ctx)
@@ -334,6 +323,6 @@ func mapFinishReason(reason string) ai.StopReason {
 }
 
 var (
-	_ ai.Driver      = (*Driver)(nil)
-	_ ai.ModelLister = (*Driver)(nil)
+	_ ai.Driver      = (*driver)(nil)
+	_ ai.ModelLister = (*driver)(nil)
 )

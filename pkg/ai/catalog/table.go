@@ -32,13 +32,9 @@ var vendors = []Vendor{
 		// Vertex resolves its own endpoint from the deployment region, and
 		// authenticates with Google credentials rather than a key. The two
 		// variables below name the deployment, not a credential.
-		DeploymentEnv: map[string]string{
-			"project": "ANTHROPIC_VERTEX_PROJECT_ID",
-			"region":  "CLOUD_ML_REGION",
-		},
-		Deployment: vertexDeployment,
-		Compat:     claudeAdaptiveNoTemp,
-		Note:       "Authenticates with Google Application Default Credentials; set ANTHROPIC_VERTEX_PROJECT_ID and, optionally, CLOUD_ML_REGION.",
+		VertexEnv: VertexEnv{Project: "ANTHROPIC_VERTEX_PROJECT_ID", Region: "CLOUD_ML_REGION"},
+		Compat:    claudeAdaptiveNoTemp,
+		Note:      "Authenticates with Google Application Default Credentials; set ANTHROPIC_VERTEX_PROJECT_ID and, optionally, CLOUD_ML_REGION.",
 	},
 	{
 		ID:          "openai",
@@ -116,13 +112,9 @@ var vendors = []Vendor{
 		// authenticates with Google credentials rather than a key. The two
 		// variables below name the deployment, not a credential; they are the
 		// ones Google's own Gen AI SDK reads.
-		DeploymentEnv: map[string]string{
-			"project": "GOOGLE_CLOUD_PROJECT",
-			"region":  "GOOGLE_CLOUD_LOCATION",
-		},
-		Deployment: vertexDeployment,
-		Compat:     ai.GoogleCompat{ThinkingLevel: true},
-		Note:       "Authenticates with Google Application Default Credentials; set GOOGLE_CLOUD_PROJECT and, optionally, GOOGLE_CLOUD_LOCATION (default global).",
+		VertexEnv: VertexEnv{Project: "GOOGLE_CLOUD_PROJECT", Region: "GOOGLE_CLOUD_LOCATION"},
+		Compat:    ai.GoogleCompat{ThinkingLevel: true},
+		Note:      "Authenticates with Google Application Default Credentials; set GOOGLE_CLOUD_PROJECT and, optionally, GOOGLE_CLOUD_LOCATION (default global).",
 	},
 	{
 		ID:          "deepseek",
@@ -259,7 +251,15 @@ var vendors = []Vendor{
 		DisplayName: "ChatGPT (Codex)",
 		API:         ai.APIOpenAIResponses,
 		BaseURL:     "https://chatgpt.com/backend-api/codex",
-		Compat:      ai.OpenAIResponsesCompat{NoMaxOutputTokens: true},
+		Compat:      ai.OpenAIResponsesCompat{NoMaxOutputTokens: true, CodexModelListing: true},
+		// The backend serves the Codex lineup only to a caller presenting
+		// itself as the Codex CLI. auth adds the per-session and per-account
+		// headers that complete the identity.
+		Headers: map[string]string{
+			"OpenAI-Beta": "responses=experimental",
+			"originator":  "codex_cli_rs",
+			"User-Agent":  "codex_cli_rs",
+		},
 		Note: "A ChatGPT subscription rather than an API key. Sign in with " +
 			"auth.Login(ctx, \"openai-codex\", ...), which runs the PKCE browser grant. " +
 			"The endpoint and client identifier come from OpenAI's Codex CLI, not from " +
@@ -363,12 +363,18 @@ var aliases = map[string]string{
 	"minmax": "minimax",
 }
 
+// Current Claude takes adaptive thinking and rejects a non-default temperature.
+var claudeAdaptiveNoTemp = ai.AnthropicCompat{ForceAdaptiveThinking: true, NoTemperature: true}
+
 // copilotHeaders identify the caller as an editor integration. The Copilot API
 // refuses requests that do not. It is not exported: a package-level map that
-// anyone can write to is a process-wide setting nobody declared, and the entry
-// below hands out a copy of it to whoever needs one.
+// anyone can write to is a process-wide setting nobody declared, and the copilot
+// row hands out a copy of it to whoever needs one.
 var copilotHeaders = map[string]string{
 	"Editor-Version":         "vscode/1.107.0",
 	"Editor-Plugin-Version":  "copilot-chat/0.35.0",
 	"Copilot-Integration-Id": "vscode-chat",
+	"User-Agent":             "GitHubCopilotChat/0.26.7",
+	"Openai-Intent":          "conversation-panel",
+	"X-GitHub-Api-Version":   "2025-04-01",
 }

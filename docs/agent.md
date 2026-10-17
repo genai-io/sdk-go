@@ -590,17 +590,17 @@ record:
 sessions/                       session.Open("sessions")
   20261016-101500.jsonl         one session; the file name is its id
     {"type":"message","time":…,"message":{…}}              ┐ appended as the conversation grew
-    {"type":"custom","time":…,"name":"title","data":{…}}   │ w.Append("title", v): the application's own
+    {"type":"app","time":…,"name":"title","data":{…}}      │ w.Append("title", v): the application's own
     {"type":"truncate","time":…}                           ← compaction: the conversation is cut to nothing
     {"type":"message","time":…,"message":{…}}              ┘ the compacted conversation, then what followed
 ```
 
 `Load` replays the lines: a message appends, a truncate cuts the
-conversation to its first `keep` messages, a custom record is passed over.
+conversation to its first `keep` messages, an app record is passed over.
 `Records` returns every line in order — what an application folds its own
 records from — and `Record.Apply` takes the conversation one record further,
 for a reader that needs it as of each line. The application's records are all
-`custom`, told apart by name, so a later version can add a type of its own
+`app`, told apart by name, so a later version can add a type of its own
 without meeting one of the application's; a reader that meets a type it does
 not know fails rather than replay the conversation wrong. `Save`
 appends only what differs from what the file holds — the messages after the

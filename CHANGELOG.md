@@ -19,22 +19,26 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
-- **A session is a saved conversation.** It moves to `pkg/session`, and
-  `session.Store` is `Save(ctx, id, msgs)` and `Load(ctx, id)`. Replace the
-  recorder with a load before the run and a save after it:
+- **A session is a conversation on disk.** It moves to `pkg/session`, one
+  package with one store: `session.Open(dir)`, and a session is an
+  append-only `<id>.jsonl`. Replace the recorder with a writer that saves as
+  the conversation changes:
 
   ```go
-  history, err := store.Load(ctx, id)   // session.ErrNotFound if new
+  w, err := store.Write(ctx, id)   // one writer per session; session.ErrBusy if taken
+  defer w.Close()
+  history, err := store.Load(ctx, id)
   a.SetMessages(history)
-  // run the agent
-  err = store.Save(ctx, id, a.Messages())
+  // on agent.MessageAdded and agent.MessagesReplaced:
+  err = w.Save(a.Messages())
   ```
 
   Compaction needs nothing extra: the next save holds the compacted
-  conversation. `pkg/agent/session/jsonl` becomes `pkg/session/jsonl`: one
-  append-only `<id>.jsonl` per session. A save appends only what is new, and a
-  rewritten conversation is appended after a `reset` line. `List` returns
-  `jsonl.Session{ID, SavedAt}`. The application chooses the id.
+  conversation. A save appends only what is new, and a rewritten conversation
+  is appended after a `reset` line. `w.Append(typ, v)` keeps an application's
+  own records in the same log, and `Records` with `session.Conversation` reads
+  them back. `List` returns `session.Info{ID, ModTime}`; `Fork` and `Delete`
+  copy and remove one. The application chooses the id.
 - **The base URL and headers live on the model.** `ai.Config.BaseURL`,
   `Config.Headers`, `Config.URL()` and `Config.MergedHeaders()` are gone; a
   driver sends to `Model.BaseURL` with `Model.Headers`. Write an override onto
@@ -78,10 +82,10 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Removed
 
-- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
-  `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,
-  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and
-  `jsonl.Store.Close`. Read cost and outcome from `InferenceEnd` and `TurnEnd`
+- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `Entry` with all
+  its types, the `Store` interface, `Store.Create`, `Entries` and `Meta`,
+  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and the
+  `jsonl` package. Read cost and outcome from `InferenceEnd` and `TurnEnd`
   in your event loop, and keep them with your own records.
 - **The tool loop:** `ai.Tool`, `ai.ToolFunc`, `ai.RunTools` and `Client.Run`.
   Use `agent.ToolFunc` and `agent.New`.

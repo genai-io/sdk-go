@@ -367,18 +367,21 @@ flowchart LR
 
 ### 会话
 
-agent 从头到尾不知道有存储这回事。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，用完把 agent 手里的那份存回去。
+agent 从头到尾不知道有存储这回事。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，随着它变化把 agent 手里的那份存回去。
 
 ```go
-history, _ := store.Load(ctx, id)        // 新会话返回 session.ErrNotFound
+w, _ := store.Write(ctx, id)             // 每个会话一个写入者
+history, _ := store.Load(ctx, id)
 a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
-    render(e)
+    switch e.(type) {
+    case agent.MessageAdded, agent.MessagesReplaced:
+        w.Save(a.Messages())             // 只追加新的部分
+    }
 }
-store.Save(ctx, id, a.Messages())        // 整份对话
 ```
 
-`pkg/session` 就是那个 `Store`，`pkg/session/jsonl` 给每份对话一个只追加的文件。
+`pkg/session` 给每份对话一个只追加的文件，应用自己的记录也写在消息旁边。
 
 压缩不需要任何额外处理：下一次保存存的就是压缩后的对话。
 

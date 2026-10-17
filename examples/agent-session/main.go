@@ -3,12 +3,17 @@
 //
 // The agent knows nothing about storage, and the store knows nothing about
 // agents. A conversation is a []ai.Message: load one, hand it to the agent,
-// and save what the agent holds afterwards —
+// and save what the agent holds whenever its conversation changes —
 //
-//	history, _ := store.Load(ctx, id)        // session.ErrNotFound if new
+//	w, _ := store.Write(ctx, id)             // this process's writer
+//	history, _ := store.Load(ctx, id)
 //	a.SetMessages(history)
-//	for e, err := range a.Run(ctx, msg) { … }
-//	store.Save(ctx, id, a.Messages())
+//	for e, err := range a.Run(ctx, msg) {
+//		switch e.(type) {
+//		case agent.MessageAdded, agent.MessagesReplaced:
+//			w.Save(a.Messages())
+//		}
+//	}
 //
 // — compaction included: the next save is the compacted conversation. See
 // compact below.
@@ -34,7 +39,6 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/auth"
 	"github.com/genai-io/sdk-go/pkg/session"
-	"github.com/genai-io/sdk-go/pkg/session/jsonl"
 
 	_ "github.com/genai-io/sdk-go/pkg/ai/driver/all"
 )
@@ -58,7 +62,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	ctx := context.Background()
 
 	// A store is a directory, one file per conversation.
-	store, err := jsonl.Open(dir)
+	store, err := session.Open(dir)
 	if err != nil {
 		return err
 	}
@@ -74,7 +78,7 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 	// a new one. An id is any name the store accepts.
 	id := resume
 	if !fresh && id == "" {
-		sessions, err := store.List(ctx) // most recently saved first
+		sessions, err := store.List(ctx) // most recently written first
 		if err != nil {
 			return err
 		}
@@ -86,8 +90,16 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 		id = time.Now().Format("20060102-150405")
 	}
 
+	// One writer per session: a second process on the same id gets
+	// session.ErrBusy here rather than interleaving its lines with ours.
+	w, err := store.Write(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, w.Close()) }()
+
 	history, err := store.Load(ctx, id)
-	if err != nil && !errors.Is(err, session.ErrNotFound) {
+	if err != nil {
 		return err
 	}
 	if len(history) > 0 {
@@ -121,22 +133,23 @@ func run(model, dir, resume string, fresh, list bool, keep int, prompt string) (
 			return err
 		}
 		render(e)
-		if v, ok := e.(agent.TurnEnd); ok {
+		switch v := e.(type) {
+		case agent.MessageAdded, agent.MessagesReplaced:
+			// Saved as it changes, so what a failed or interrupted turn
+			// got through is still the conversation.
+			if err := w.Save(a.Messages()); err != nil {
+				return err
+			}
+		case agent.TurnEnd:
 			end = v
 		}
-	}
-
-	// Saved even when the turn failed: what it got through is still the
-	// conversation.
-	if err := store.Save(ctx, id, a.Messages()); err != nil {
-		return err
 	}
 	fmt.Printf("\n\n\033[2m— %s · %d tokens · %s\033[0m\n", end.StopReason, end.Usage.Total(), id)
 	return end.Err
 }
 
 // compact throws most of the conversation away. The store needs telling
-// nothing: the save after this run is the compacted conversation.
+// nothing: the next save is the compacted conversation.
 func compact(a *agent.Agent, keep int) {
 	msgs := a.Messages()
 	if len(msgs) <= keep {
@@ -151,7 +164,7 @@ func compact(a *agent.Agent, keep int) {
 	fmt.Printf("\033[2mcompacted %d messages to %d\033[0m\n", len(msgs), len(kept))
 }
 
-func listSessions(ctx context.Context, store *jsonl.Store) error {
+func listSessions(ctx context.Context, store *session.Store) error {
 	sessions, err := store.List(ctx)
 	if err != nil {
 		return err
@@ -161,7 +174,7 @@ func listSessions(ctx context.Context, store *jsonl.Store) error {
 		return nil
 	}
 	for _, s := range sessions {
-		fmt.Printf("%s  %s\n", s.ID, s.SavedAt.Local().Format(time.RFC822))
+		fmt.Printf("%s  %s\n", s.ID, s.ModTime.Local().Format(time.RFC822))
 	}
 	return nil
 }

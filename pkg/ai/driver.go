@@ -14,6 +14,7 @@ import (
 //
 //	Driver        required — translate a Request, send it, stream Deltas back
 //	ModelLister   optional — the endpoint can list the models it serves
+//	TokenCounter  optional — the endpoint can size a prompt without running it
 
 // Driver is one wire protocol, as a black box.
 type Driver interface {
@@ -30,6 +31,16 @@ type Driver interface {
 // models it serves. Client.Models reports KindUnsupported without it.
 type ModelLister interface {
 	Models(ctx context.Context) ([]Model, error)
+}
+
+// TokenCounter is the optional capability of an endpoint that will size a
+// prompt without generating from it. Anthropic and Google publish one; the
+// OpenAI-family protocols do not, so their drivers omit this and callers get
+// EstimateTokens instead.
+type TokenCounter interface {
+	// CountTokens reports the request's exact size, as the provider's own
+	// tokenizer sees it. req is borrowed on the same terms as Stream's.
+	CountTokens(ctx context.Context, req *Request) (int, error)
 }
 
 // Delta is the protocol-driver output. Block is one ordered content update:
@@ -65,22 +76,16 @@ type Delta struct {
 
 // Config is everything a driver needs to reach an endpoint.
 type Config struct {
-	// Model is the model to talk to; its API selects the driver.
+	// Model is the model to talk to. Its API selects the driver; its BaseURL
+	// and Headers are where requests go and what they carry.
 	Model Model
 
 	// APIKey is the credential. Some endpoints (a local Ollama) need none.
 	APIKey string
 
-	// BaseURL overrides Model.BaseURL, which in turn overrides the driver's
-	// own default host.
-	BaseURL string
-
 	// HTTPClient is used for every request when set. Supply one to control
 	// timeouts, proxies, or transport-level instrumentation.
 	HTTPClient *http.Client
-
-	// Headers are added to every request — a gateway token, a tenant tag.
-	Headers map[string]string
 
 	// Vertex is the deployment of a model served through Vertex AI. The
 	// anthropic/vertex and google/vertex drivers require it; the others ignore
@@ -101,27 +106,6 @@ type VertexConfig struct {
 // region. Google recommends the global endpoint for availability; a specific
 // region is for data residency.
 const VertexDefaultRegion = "global"
-
-// EffectiveHeaders returns the headers to send: the model's, then the Config's
-// over them, so a Config header of the same name wins.
-func (c Config) EffectiveHeaders() map[string]string {
-	if len(c.Model.Headers) == 0 && len(c.Headers) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(c.Model.Headers)+len(c.Headers))
-	maps.Copy(out, c.Model.Headers)
-	maps.Copy(out, c.Headers)
-	return out
-}
-
-// EffectiveBaseURL returns the base URL to use: the Config override if set,
-// otherwise the model's, otherwise "" for the driver's default.
-func (c Config) EffectiveBaseURL() string {
-	if c.BaseURL != "" {
-		return c.BaseURL
-	}
-	return c.Model.BaseURL
-}
 
 // The driver registry: how a Model's protocol is turned into a Driver.
 
@@ -179,7 +163,6 @@ func newDriver(cfg Config) (Driver, error) {
 		return nil, unregistered(cfg.Model.API, RegisteredAPIs())
 	}
 	cfg.Model = cfg.Model.Clone()
-	cfg.Headers = maps.Clone(cfg.Headers)
 	return f(cfg)
 }
 

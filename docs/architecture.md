@@ -219,7 +219,7 @@ The dividing line for every setting:
 | | Where it goes |
 | --- | --- |
 | Every protocol can express it, spelled differently | a `With*` option; the driver translates |
-| Only one protocol has it | not modeled; `SamplingParams` (OpenAI family) or `Config.Headers` reach it untranslated |
+| Only one protocol has it | not modeled; `SamplingParams` (OpenAI family) or `Model.Headers` reach it untranslated |
 
 Reasoning effort is the clearest case of the first. "How hard should it think"
 exists everywhere, and every vendor spells it differently — Anthropic wants
@@ -281,8 +281,9 @@ only what the protocol itself would reject — an unanswered tool call left by a
 Ctrl-C, invalid UTF-8 from a conversation that passed through a JavaScript
 runtime. Repair is not policy.
 
-It does not rewrite a request to make it work. A model with no system role is
-an error naming the model. Moving the instructions into a user turn is a
+It does not rewrite a request to make it work. A model with no system role, or
+one that cannot constrain output to a schema, is an error naming the model.
+Moving the instructions into a user turn, or asking for JSON in words, is a
 decision about the product, not about the wire.
 
 It does not guess. A model whose context window is unknown has none, not a
@@ -321,6 +322,9 @@ Everything in the box happens once, for every protocol. That is the line a
 driver sits behind: it translates and streams, and does nothing else. It is
 also why `Client.Complete` is not a second code path — it drains `Stream`, so
 a request reaches an endpoint exactly one way.
+
+The same `*ai.Request` is what `CountTokens` measures, so a prompt cannot be
+sized differently from how it is sent.
 
 ## Failing before the network
 

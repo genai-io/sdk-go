@@ -14,6 +14,7 @@ loop around it.
 - **One API, six protocols** — the same types whichever provider serves the request.
 - **Streaming** — text, thinking, tool calls and images on one start/delta/end lifecycle.
 - **Tool calling** — the schema derived from your argument struct, and the call decoded back into it.
+- **Structured outputs** — `CompleteAs[T]` derives the schema, constrains generation and decodes.
 - **Typed errors** — auth, rate limit, context exceeded and unsupported, not substrings to match.
 - **A vendor catalog** — 28 vendors: how to reach each one and speak its protocol, as data. Which models exist, their limits, prices, modalities and reasoning efforts are the application's to supply; the SDK spells each effort the way the protocol wants.
 - **No ambient credentials** — `pkg/ai` reads no environment variable and no file.
@@ -24,7 +25,7 @@ loop around it.
 - **Everything as events** — ten types on one sequence, and the conversation is the fold of two of them.
 - **Four hooks** — refuse a tool call, rewrite what is sent, redact what came back.
 - **Parallel tools** — a batch runs concurrently unless a tool says it cannot.
-- **Plain-data conversations** — what the agent holds is a `[]ai.Message`; save it however you save things.
+- **Sessions** — save an agent's conversation, and load it back.
 - **MCP** — an MCP server's tools arrive as the agent's own, ready for `WithTools`.
 
 [Installation](#installation) · [中文文档](README.zh-CN.md)
@@ -33,6 +34,7 @@ loop around it.
 [Quickstart](#quickstart) ·
 [Streaming](#streaming) ·
 [Tool use](#tool-use) ·
+[Structured outputs](#structured-outputs) ·
 [Request options](#request-options) ·
 [Messages](#messages-and-content) ·
 [Errors](#errors-and-execution-policy) ·
@@ -43,7 +45,7 @@ loop around it.
 [The loop](#the-loop) ·
 [Events](#everything-is-an-event) ·
 [Hooks](#hooks) ·
-[Saving a conversation](#saving-a-conversation)
+[Sessions](#sessions)
 
 ## Installation
 
@@ -114,8 +116,8 @@ client, err := auth.Client(ref)
 
 `catalog.All()` lists every vendor, without a network call; the models a vendor serves come from its live listing or from your own data.
 
-Runnable examples are in [`examples/`](examples) — one per vendor, plus four
-agents.
+Runnable examples are in [`examples/`](examples) — one per vendor, plus
+[`structured/`](examples/structured) and five agents.
 
 ### Streaming
 
@@ -193,11 +195,6 @@ arguments decode into cannot disagree:
 }
 ```
 
-A tag key is the JSON Schema keyword it sets — eleven of them — and every word
-is prompt text. Schemas are derived to be *accepted*, not merely valid, which
-is a stricter target than the specification. See
-[`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema).
-
 `UnmarshalArgs` treats an argument the schema does not have as an error rather
 than a silent drop — a model that invents one should be told, not obeyed
 halfway — and reads an empty document as an empty object, which is what every
@@ -214,6 +211,26 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // this one
 
 `pkg/ai` makes one call. Running the tools and calling again until the model
 stops asking is [the agent](#the-agent--pkgagent).
+
+### Structured outputs
+
+```go
+type Person struct {
+	Name string `json:"name" description:"full legal name, family name last"`
+	Age  int    `json:"age" description:"age in whole years" minimum:"0"`
+}
+
+person, err := ai.CompleteAs[Person](ctx, client, messages)
+```
+
+The type is named once: `CompleteAs` derives the schema from it, constrains
+generation natively, and decodes the answer into it. `WithSchema` and
+`Response.Unmarshal` are the same two halves, for a schema you hold already.
+
+A tag key is the JSON Schema keyword it sets — eleven of them — and every word
+is prompt text. Schemas are derived to be *accepted*, not merely valid, which
+is a stricter target than the specification. See
+[`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema).
 
 ### Request options
 
@@ -294,11 +311,14 @@ logging and metering stay yours.
 safe in a server holding several tenants' keys:
 
 ```go
-client, err := ai.New(ai.Config{
-	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
-	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
-})
+model.BaseURL = "https://gateway.internal/v1"
+model.Headers = map[string]string{"X-Tenant": tenant}
+client, err := ai.New(ai.Config{Model: model, APIKey: key, HTTPClient: httpClient})
 ```
+
+Where a request goes and what it carries are the model's: `Model.BaseURL` and
+`Model.Headers` are the final values, so whoever builds the Config writes an
+override onto the model.
 
 `pkg/ai/auth` is the opt-in that does read it. `pkg/ai/endpoint` sits between a
 catalog row and a client: one configured host and the models on it, where
@@ -418,25 +438,29 @@ Retry is off by default; `WithRetry` turns it on. What a replay cannot
 fix — a prompt over the window, a key out of quota — is `OnInferError`, which
 answers a failed call with a shorter conversation and another go at the step.
 
-### Saving a conversation
+### Sessions
 
-The agent never learns storage exists. A conversation is a `[]ai.Message`,
-plain data that encodes as JSON: load it, hand it over, save what the agent
-holds afterwards.
+The agent never learns storage exists. A conversation is a `[]ai.Message`:
+load it, hand it over, save what the agent holds afterwards.
 
 ```go
-a.SetMessages(history)                   // whatever you saved last time
+history, _ := store.Load(ctx, id)        // session.ErrNotFound if new
+a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
     render(e)
 }
-save(id, a.Messages())                   // the whole conversation
+store.Save(ctx, id, a.Messages())        // the whole conversation
 ```
+
+`pkg/session` is that `Store`, and `pkg/session/jsonl` keeps one append-only
+file per conversation.
 
 Compaction needs nothing more: the next save is the compacted conversation.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition
-rules and tools, and [`examples/agent-chat`](examples/agent-chat),
+rules, tools and sessions, and [`examples/agent-chat`](examples/agent-chat),
 [`examples/agent-progress`](examples/agent-progress),
+[`examples/agent-session`](examples/agent-session),
 [`examples/agent`](examples/agent) and [`examples/mcp`](examples/mcp) for
 programs that run.
 
@@ -455,7 +479,7 @@ programs that run.
 | | |
 | --- | --- |
 | [API reference](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/agent) | The agent, its events, its hooks and its tools |
-| [The Agent SDK](docs/agent.md) | Structure, the event contract, hooks and tools ([中文](docs/agent.zh-CN.md)) |
+| [The Agent SDK](docs/agent.md) | Structure, the event contract, hooks, tools and sessions ([中文](docs/agent.zh-CN.md)) |
 
 **The project**
 
@@ -463,7 +487,7 @@ programs that run.
 | --- | --- |
 | [Contributing](CONTRIBUTING.md) | Development setup, implementing a protocol, and the test suite |
 | [Changelog](CHANGELOG.md) | What changed in each release |
-| [`examples/`](examples) | Runnable programs: one per vendor, plus four agents |
+| [`examples/`](examples) | Runnable programs: one per vendor, plus structured output and five agents |
 
 ## Versioning
 

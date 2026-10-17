@@ -4,7 +4,7 @@
 //
 // # Where things live
 //
-//	google.go     construction, Stream and Models
+//	google.go     construction, Stream, Models and CountTokens
 //	request.go    an ai.Request translated into a generate call
 //	wire.go       the protocol's own types, transcribed from the API definition
 //	transport.go  URLs, headers and the server-sent-event stream
@@ -44,8 +44,8 @@ func init() { ai.RegisterAPI(ai.APIGoogleGenAI, New) }
 type driver struct {
 	client *http.Client
 	// api is the protocol as the caller reached it: the Gemini API, or the
-	// same body through Vertex AI. It is what the driver and its errors
-	// answer to, so a failure on Vertex
+	// same body through Vertex AI, which counts tokens in its own shape. It
+	// is what the driver and its errors answer to, so a failure on Vertex
 	// does not send anyone to the Gemini API's console.
 	api  ai.API
 	fail errs.Classifier
@@ -62,7 +62,7 @@ type driver struct {
 // New builds a driver from a Config. Registered as the factory for
 // ai.APIGoogleGenAI.
 func New(cfg ai.Config) (ai.Driver, error) {
-	base := cmp.Or(cfg.EffectiveBaseURL(), defaultBaseURL)
+	base := cmp.Or(cfg.Model.BaseURL, defaultBaseURL)
 	return NewDeployment(cfg, ai.APIGoogleGenAI, strings.TrimSuffix(base, "/")+"/"+apiVersion+"/models")
 }
 
@@ -77,7 +77,7 @@ func NewDeployment(cfg ai.Config, api ai.API, modelsURL string) (ai.Driver, erro
 		fail:      errs.For(string(api), details),
 		modelsURL: modelsURL,
 		apiKey:    cfg.APIKey,
-		headers:   cfg.EffectiveHeaders(),
+		headers:   cfg.Model.Headers,
 		model:     cfg.Model,
 		compat:    ai.CompatOf[ai.GoogleCompat](cfg.Model),
 	}, nil
@@ -236,6 +236,41 @@ func mapFinishReason(reason string) ai.StopReason {
 	}
 }
 
+// CountTokens asks the endpoint how large a prompt is, without generating from
+// it. Gemini publishes this, so a caller never has to estimate.
+func (d *driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) {
+	contents, err := d.convertContents(req)
+	if err != nil {
+		return 0, err
+	}
+	inner := &countTokensInner{Contents: contents}
+	// The system instruction and the tool declarations count against the
+	// window too.
+	if req.System != "" {
+		inner.SystemInstruction = &content{Parts: []*part{{Text: req.System}}}
+	}
+	inner.Tools = declarations(req.Tools)
+
+	// Vertex takes those fields flat. The Gemini API takes them only inside a
+	// generateContentRequest wrapper, which also has to name the model.
+	var body any = inner
+	if d.api == ai.APIGoogleGenAI {
+		inner.Model = "models/" + d.model.ID
+		body = &countTokensRequest{GenerateContentRequest: inner}
+	}
+	res, err := d.post(ctx, d.methodURL("countTokens", ""), body)
+	if err != nil {
+		return 0, d.fail.Wrap(err)
+	}
+	defer func() { _ = res.Body.Close() }() // nothing to do about a failure to close a read body
+
+	var out countTokensResponse
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return 0, d.fail.Wrap(err)
+	}
+	return int(out.TotalTokens), nil
+}
+
 // Models lists the models the endpoint serves that can answer a prompt. The
 // listing also carries embedding, image, speech and live models, which say so
 // in supportedGenerationMethods. Experimental and "-latest" aliases are dropped
@@ -292,6 +327,7 @@ func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 var (
-	_ ai.Driver      = (*driver)(nil)
-	_ ai.ModelLister = (*driver)(nil)
+	_ ai.Driver       = (*driver)(nil)
+	_ ai.ModelLister  = (*driver)(nil)
+	_ ai.TokenCounter = (*driver)(nil)
 )

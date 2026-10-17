@@ -171,6 +171,13 @@ func (d *driver) buildParams(req *ai.Request) (*sdk.MessageNewParams, error) {
 	if len(req.Tools) > 0 {
 		params.Tools = convertTools(req.Tools)
 	}
+	// Structured output shares output_config with the effort level, so it is
+	// set on the same struct rather than replacing it.
+	if req.Schema != nil {
+		if def := req.Schema.DefinitionMap(); def != nil {
+			params.OutputConfig.Format = sdk.JSONOutputFormatParam{Schema: def}
+		}
+	}
 	return params, nil
 }
 

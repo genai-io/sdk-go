@@ -15,9 +15,10 @@ you already are, and each step adds one nameable thing:
           │  auth.Config       the credential, and where to send it
           ▼
       ai.Config               APIKey from the vendor's own environment
-          │                   variable, BaseURL, any deployment settings —
-          │                   and a failure here if a key is required and
-          │                   missing, rather than a 401 three calls later
+          │                   variable, the model's BaseURL, any deployment
+          │                   settings — and a failure here if a key is
+          │                   required and missing, rather than a 401 three
+          │                   calls later
           │
           │  <driver>.New      the protocol implementation
           ▼
@@ -110,14 +111,16 @@ when there is none. That store is the only file this library writes.
 
 ```go
 cfg, err := auth.Config("openai/gpt-4.1")
-cfg.BaseURL = "https://gateway.internal/v1"
+cfg.Model.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
 client, err := ai.New(cfg)
 ```
 
 `auth.Config` fills the credential and endpoint and stops, so what it returns
-is an ordinary `ai.Config` you can edit.
+is an ordinary `ai.Config` you can edit. Where requests go and the headers they
+carry are the model's `BaseURL` and `Headers`; what you write there is what is
+sent.
 
 ## Stopping at `ai.New`
 
@@ -128,12 +131,13 @@ state, so two requests cannot pick up each other's credentials.
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
+model.BaseURL = "https://gateway.internal/v1"
+model.Headers = map[string]string{"X-Tenant": tenant}
+
 client, err := ai.New(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
-	BaseURL:    "https://gateway.internal/v1",
 	HTTPClient: httpClient,
-	Headers:    map[string]string{"X-Tenant": tenant},
 })
 ```
 
@@ -155,8 +159,8 @@ driver, err := responses.New(cfg)
 client := ai.NewClientWithDriver(metered{driver}, cfg.Model)
 ```
 
-A decorator embeds the `Driver` and overrides `Stream`; forward `Models` too,
-or the client stops offering it. Every driver disables its
+A decorator embeds the `Driver` and overrides `Stream`; forward `Models` and
+`CountTokens` too, or the client stops offering them. Every driver disables its
 vendor SDK's own retries, so a call is tried once.
 
 ## Stopping at `ai.NewClientWithDriver`

@@ -31,9 +31,12 @@ func init() { ai.RegisterAPI(ai.APIGoogleVertex, New) }
 
 // driver is the Gemini driver minus ai.ModelLister: Vertex publishes no
 // listing of Gemini models, and not claiming one is how a caller learns to
-// show its catalog instead. Embedding the interface rather than the driver is
-// what keeps Models from being promoted along.
-type driver struct{ ai.Driver }
+// show its catalog instead. Embedding the two interfaces rather than the
+// driver is what keeps Models from being promoted along.
+type driver struct {
+	ai.Driver
+	ai.TokenCounter
+}
 
 // New builds a driver from a Config. The GCP project and region come from
 // Config.Vertex; package ai/auth fills it in from the environment.
@@ -66,7 +69,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	cfg.HTTPClient = &authed
 	cfg.APIKey = "" // the credential is the token, and a key header beside it would be refused
 
-	base := strings.TrimSuffix(cfg.EffectiveBaseURL(), "/")
+	base := strings.TrimSuffix(cfg.Model.BaseURL, "/")
 	if base == "" {
 		base = baseURL(region)
 	}
@@ -75,7 +78,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	return driver{d}, nil
+	return driver{d, d.(ai.TokenCounter)}, nil
 }
 
 // baseURL is the host a region is served from. The global endpoint has no

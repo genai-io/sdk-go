@@ -1,5 +1,11 @@
 package ai
 
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
 // StopReason says why the model stopped generating.
 type StopReason string
 
@@ -141,4 +147,67 @@ func (r *Response) Message() Message {
 		return Message{Role: RoleAssistant}
 	}
 	return Message{Role: RoleAssistant, Content: r.Content.Clone()}
+}
+
+// Decoding an answer into a Go value.
+
+// Unmarshal decodes the answer into v.
+func (r *Response) Unmarshal(v any) error {
+	if r == nil {
+		return fmt.Errorf("ai: no response to decode")
+	}
+	text := r.Text()
+	raw, ok := extractJSON(text)
+	if !ok {
+		return fmt.Errorf("ai: response contains no JSON value: %s", truncate(text, 200))
+	}
+	if err := json.Unmarshal([]byte(raw), v); err != nil {
+		return fmt.Errorf("ai: decoding response: %w", err)
+	}
+	return nil
+}
+
+// extractJSON finds the JSON value in a model's answer.
+func extractJSON(s string) (string, bool) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return "", false
+	}
+	if json.Valid([]byte(trimmed)) {
+		return trimmed, true
+	}
+	if fenced, ok := stripFence(trimmed); ok && json.Valid([]byte(fenced)) {
+		return fenced, true
+	}
+	// The first object or array in the prose, if it decodes.
+	if start := strings.IndexAny(trimmed, "{["); start >= 0 {
+		var raw json.RawMessage
+		if json.NewDecoder(strings.NewReader(trimmed[start:])).Decode(&raw) == nil {
+			return string(raw), true
+		}
+	}
+	return "", false
+}
+
+// stripFence unwraps a ```json … ``` block.
+func stripFence(s string) (string, bool) {
+	if !strings.HasPrefix(s, "```") {
+		return "", false
+	}
+	rest := s[3:]
+	if i := strings.IndexByte(rest, '\n'); i >= 0 {
+		rest = rest[i+1:] // drop the language tag
+	}
+	end := strings.LastIndex(rest, "```")
+	if end < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(rest[:end]), true
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

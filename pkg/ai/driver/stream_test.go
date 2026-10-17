@@ -26,7 +26,7 @@ func TestPrematureStreamEndIsAnErrorThroughThePublicClient(t *testing.T) {
 				_, _ = fmt.Fprint(w, tc.payload+"\n\n")
 			}))
 			defer server.Close()
-			client, err := ai.New(ai.Config{BaseURL: server.URL, Model: ai.Model{ID: "test", API: tc.api}})
+			client, err := ai.New(ai.Config{Model: ai.Model{BaseURL: server.URL, ID: "test", API: tc.api}})
 			if err != nil {
 				t.Fatal(err)
 			}

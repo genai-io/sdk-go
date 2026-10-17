@@ -44,6 +44,18 @@ func (d *driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	if choice := toolChoice(req); choice != nil {
 		params.ToolChoice = *choice
 	}
+	if schema := req.Schema; schema != nil {
+		if def := schema.DefinitionMap(); def != nil {
+			params.Text.Format = wire.ResponseFormatTextConfigUnionParam{
+				OfJSONSchema: &wire.ResponseFormatTextJSONSchemaConfigParam{
+					Name:        schema.WireName(),
+					Description: sdk.String(schema.Description),
+					Schema:      def,
+					Strict:      sdk.Bool(schema.Strict),
+				},
+			}
+		}
+	}
 	// A long retention is the caller asking to pay more per write for a cache
 	// that survives between turns; an endpoint that rejects the field falls
 	// back to its default rather than failing.

@@ -142,7 +142,7 @@ func TestReachingEachVendor(t *testing.T) {
 			}))
 			defer server.Close()
 
-			cfg.BaseURL = server.URL
+			cfg.Model.BaseURL = server.URL
 			client, err := ai.New(cfg)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
@@ -226,8 +226,8 @@ func TestAVendorWithNoDefaultHostRequiresItsEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("auth.Config(%q): %v", tc.ref, err)
 			}
-			if cfg.BaseURL != tc.want {
-				t.Errorf("endpoint = %q, want %q", cfg.BaseURL, tc.want)
+			if cfg.Model.BaseURL != tc.want {
+				t.Errorf("endpoint = %q, want %q", cfg.Model.BaseURL, tc.want)
 			}
 		})
 	}
@@ -291,7 +291,7 @@ func TestOnePromptThreeWireShapes(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.New(ai.Config{Model: tc.model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: at(tc.model, server.URL), APIKey: "k"})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -361,7 +361,7 @@ func TestOneRungReachesEachEndpointItsOwnWay(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: at(model, server.URL), APIKey: "k"})
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -420,7 +420,7 @@ func TestAReasoningTurnCanBeReplayedWhereTheEndpointTakesItBack(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := ai.New(ai.Config{Model: model, APIKey: "k", BaseURL: server.URL})
+			client, err := ai.New(ai.Config{Model: at(model, server.URL), APIKey: "k"})
 			if err != nil {
 				t.Fatalf("NewClient: %v", err)
 			}
@@ -538,4 +538,10 @@ func TestReturnedModelsDoNotAliasWhatTheyCameFrom(t *testing.T) {
 	if again.Headers["Editor-Version"] == "tampered" {
 		t.Error("editing a resolved model's headers changed the shared table")
 	}
+}
+
+// at is m served from url.
+func at(m ai.Model, url string) ai.Model {
+	m.BaseURL = url
+	return m
 }

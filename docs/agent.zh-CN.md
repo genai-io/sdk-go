@@ -373,22 +373,45 @@ a, err := agent.New(client, agent.WithTools(tools...))
 
 ## 会话
 
-agent 不知道存储的存在,本 SDK 也不带任何存储。一份对话就是一个能直接编成 JSON 的 `[]ai.Message`:读出来,交给 agent,用完把 agent 手里的那份存回去。
+agent 不知道存储的存在。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，用完把 agent 手里的那份存回去。
 
 ```go
-a.SetMessages(history) // 上次存下的那份
+history, err := store.Load(ctx, id)   // 新会话返回 session.ErrNotFound
+a.SetMessages(history)
 
 for e, err := range a.Run(ctx, msg) {
     render(e)
 }
-save(id, a.Messages()) // 整份对话
+err = store.Save(ctx, id, a.Messages())
 ```
 
-`Messages` 就是整份对话,所以压缩不需要任何额外处理:`SetMessages(summary)`,或者某个 `PreStep` 替换了它,下一次保存存的就是摘要。
+```go
+type Store interface {
+    Save(ctx context.Context, id string, msgs []ai.Message) error
+    Load(ctx context.Context, id string) ([]ai.Message, error)
+}
+```
 
-什么时候存由你决定。通常是每次 `Run` 之后。如果不能接受崩溃时丢掉一长串工具调用,就在每个 `MessageAdded` 时追加那条消息、在每个 `MessagesReplaced` 时从头重写;这两个事件的折叠就是对话。
+`Save` 用整份对话替换会话原来存的内容，所以压缩不需要任何额外处理：`SetMessages(summary)`，或者某个 `PreStep` 替换了它，下一次保存存的就是摘要。`Load` 返回的正是上一次 `Save` 写进去的东西。
 
-一轮花了多少、怎么结束的,在 `InferenceEnd` 和 `TurnEnd` 上。它们不是对话,所以存下的对话里没有;要计费或审计的应用,把它们和自己的其他记录放在一起。
+什么时候存由你决定。通常是每次 `Run` 之后。如果不能接受崩溃时丢掉一长串工具调用，就在每个 `MessageAdded` 时存；用 `jsonl.Store` 的话，每条消息只多追加一行。
+
+`jsonl.Store` 把会话存成一份只追加的日志。store 是一个目录，会话是其中一个文件，每行一条记录：
+
+```
+sessions/                       jsonl.Open("sessions")
+  20261016-101500.jsonl         一个会话；文件名就是它的 id
+    {"type":"message","message":{…}}   ┐
+    {"type":"message","message":{…}}   │ 对话增长时逐条追加
+    {"type":"reset"}                   ← 压缩：对话从这里重新开始
+    {"type":"message","message":{…}}   ┘ 压缩后的对话，以及之后的消息
+```
+
+`Load` 按顺序重放这些行：遇到 message 就追加，遇到 reset 就清空。所以文件记的是发生过的一切，对话是重放到最后的结果。`Save` 只追加文件里还没有的部分——对话只是变长了，就追加新消息；对话被改写了，就追加一行 reset 和整份新对话。写到一半崩溃会留下没写完的最后一行，`Load` 忽略它，下一次 `Save` 把它截掉。
+
+`List` 按文件时间从新到旧列出会话。改名、复制、删除会话，就是对文件做操作。一个会话同一时刻只能有一个写入者：两个写入者往同一个文件追加，行会交错。
+
+一轮花了多少、怎么结束的，在 `InferenceEnd` 和 `TurnEnd` 上。它们不是对话，所以会话不存；要计费或审计的应用，把它们和自己的其他记录放在一起。
 
 ### 给每一轮起名字
 
@@ -412,6 +435,9 @@ pkg/agent/
   hook.go      6 个 hook,以及每条链怎么跑
   tool.go      Tool、Result、ToolFunc、Sequential
   mcp/         MCP 服务器的工具,变成这个包自己的
+pkg/session/  保存与加载对话
+  store.go    Store 接口
+  jsonl/      一个会话一个文件、一行一条消息的 Store
 ```
 
 ## 它不做的事

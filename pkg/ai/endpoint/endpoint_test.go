@@ -272,14 +272,21 @@ func TestConfigForCarriesTheEndpointSettings(t *testing.T) {
 		ID: "acme", APIKey: "the-key", BaseURL: "https://acme.test",
 		Headers: map[string]string{"X-Acme": "1"},
 	})
-	cfg := p.ConfigFor(ai.Model{ID: "acme-pro"})
-	if cfg.APIKey != "the-key" || cfg.BaseURL != "https://acme.test" || cfg.Headers["X-Acme"] != "1" {
-		t.Errorf("ConfigFor = %+v, want the endpoint's credential, endpoint and headers", cfg)
+	// The endpoint's settings win over the model's own.
+	own := ai.Model{ID: "acme-pro", BaseURL: "https://elsewhere.test",
+		Headers: map[string]string{"X-Acme": "0", "X-Model": "kept"}}
+	cfg := p.ConfigFor(own)
+	if cfg.APIKey != "the-key" || cfg.Model.BaseURL != "https://acme.test" ||
+		cfg.Model.Headers["X-Acme"] != "1" || cfg.Model.Headers["X-Model"] != "kept" {
+		t.Errorf("ConfigFor = %+v, want the endpoint's credential, endpoint and headers over the model's", cfg)
+	}
+	if own.Headers["X-Acme"] != "0" {
+		t.Error("ConfigFor wrote through to the caller's model")
 	}
 	// The headers are a copy: a driver that edits them must not rewrite what
 	// every other model on this endpoint sends.
-	cfg.Headers["X-Acme"] = "tampered"
-	if again := p.ConfigFor(ai.Model{ID: "acme-pro"}); again.Headers["X-Acme"] != "1" {
+	cfg.Model.Headers["X-Acme"] = "tampered"
+	if again := p.ConfigFor(ai.Model{ID: "acme-pro"}); again.Model.Headers["X-Acme"] != "1" {
 		t.Error("editing a built Config changed the endpoint's headers")
 	}
 }

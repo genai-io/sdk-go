@@ -152,7 +152,8 @@ func collect(events iter.Seq2[Event, error]) (*Response, error) {
 }
 
 // prepare builds the request for one call, repairs the conversation and
-// validates it.
+// validates it. Counting and generation both go through it, so a prompt cannot
+// be measured differently from how it is sent.
 func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option) (*Request, error) {
 	if err := ctx.Err(); err != nil {
 		// Classified, so IsKind(err, KindCanceled) answers the same whether the
@@ -165,8 +166,9 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 	}
 	// The system prompt travels outside Messages, so Repair never sees it.
 	req.System = sanitizeText(req.System)
-	// History repair is semantic preparation, not wire translation, so it is
-	// done once here rather than in every driver.
+	// History repair is semantic preparation, not wire translation. Doing it
+	// once here makes exact counting, estimated counting and
+	// generation observe the same conversation.
 	req.Messages = Repair(req.Messages)
 	// And then the reasoning state this model cannot replay, which is what
 	// lets one conversation be sent to more than one model.

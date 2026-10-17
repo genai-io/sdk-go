@@ -87,8 +87,9 @@ type Model struct {
 	// is informational: routing keys off API.
 	Vendor string `json:"vendor,omitempty"`
 
-	// BaseURL overrides the driver's default endpoint. Empty means the
-	// protocol's own default host.
+	// BaseURL is where requests for this model go. Empty means the protocol's
+	// own default host. A caller reaching the model through a gateway or a
+	// proxy sets it here.
 	BaseURL string `json:"base_url,omitempty"`
 
 	// ContextWindow is the maximum input tokens, and MaxOutput the maximum
@@ -127,8 +128,8 @@ type Model struct {
 	// min_p, repetition_penalty. Only the OpenAI-family drivers apply them.
 	SamplingParams map[string]any `json:"sampling_params,omitempty"`
 
-	// Headers are added to every request for this model, on top of whatever
-	// the Config carries.
+	// Headers are sent with every request for this model — a gateway token, a
+	// tenant tag, a vendor's required client identification.
 	Headers map[string]string `json:"headers,omitempty"`
 
 	// Compat holds the protocol-specific behavior flags this endpoint needs —
@@ -291,6 +292,12 @@ type Unsupported struct {
 	System bool `json:"system,omitempty"`
 	// Multiturn means the endpoint accepts a single message only.
 	Multiturn bool `json:"multiturn,omitempty"`
+	// Schema means the endpoint cannot constrain output to a JSON schema; the
+	// shape has to be asked for in the prompt.
+	Schema bool `json:"schema,omitempty"`
+	// SchemaWithTools means it can constrain output, but not in the same
+	// request that offers tools.
+	SchemaWithTools bool `json:"schema_with_tools,omitempty"`
 }
 
 // Stage is where a model sits in its vendor's lifecycle.

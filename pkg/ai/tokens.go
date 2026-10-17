@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -10,6 +11,38 @@ import (
 	"strings"
 	"unicode"
 )
+
+// TokenCount is how large a prompt is, and how much that number can be
+// trusted.
+type TokenCount struct {
+	// Tokens is the prompt size.
+	Tokens int
+	// Exact is true when the provider counted, false when this package
+	// estimated.
+	Exact bool
+}
+
+// CountTokens reports how large a prompt is before it is sent.
+func (c *Client) CountTokens(ctx context.Context, messages []Message, opts ...Option) (TokenCount, error) {
+	req, err := c.prepare(ctx, messages, opts)
+	if err != nil {
+		return TokenCount{}, err
+	}
+	if counter, ok := c.driver.(TokenCounter); ok {
+		n, err := counter.CountTokens(ctx, req)
+		if err == nil {
+			return TokenCount{Tokens: n, Exact: true}, nil
+		}
+		// A counting endpoint that is down should not stop a caller sizing a
+		// prompt. Auth, malformed requests and cancellation are different:
+		// estimating would hide a failure generation will hit too.
+		if IsKind(err, KindUnsupported) || IsRetryable(err) {
+			return TokenCount{Tokens: req.EstimateTokens()}, nil
+		}
+		return TokenCount{}, err
+	}
+	return TokenCount{Tokens: req.EstimateTokens()}, nil
+}
 
 // Token-estimation constants, leaning towards over-counting: compacting early
 // costs some context, discovering the prompt was too large costs a request.

@@ -79,7 +79,8 @@ func jsonEndpoint(t *testing.T, status int, body string) *stub {
 
 func open(t *testing.T, url string, m ai.Model) *ai.Client {
 	t.Helper()
-	c, err := ai.New(ai.Config{Model: m, APIKey: "k", BaseURL: url})
+	m.BaseURL = url
+	c, err := ai.New(ai.Config{Model: m, APIKey: "k"})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -179,8 +180,8 @@ func TestEveryProtocolCompletesAPrompt(t *testing.T) {
 	}
 }
 
-// A header the Config names reaches the endpoint on every protocol.
-func TestEveryProtocolCarriesTheConfigHeaders(t *testing.T) {
+// A header the model names reaches the endpoint on every protocol.
+func TestEveryProtocolCarriesTheModelHeaders(t *testing.T) {
 	tests := map[string]struct {
 		model ai.Model
 		serve func(*testing.T) *stub
@@ -225,10 +226,10 @@ func TestEveryProtocolCarriesTheConfigHeaders(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			e := tc.serve(t)
-			client, err := ai.New(ai.Config{
-				Model: tc.model, APIKey: "k", BaseURL: e.server.URL,
-				Headers: map[string]string{"X-Tenant": "endpoint"},
-			})
+			model := tc.model
+			model.BaseURL = e.server.URL
+			model.Headers = map[string]string{"X-Tenant": "endpoint"}
+			client, err := ai.New(ai.Config{Model: model, APIKey: "k"})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -394,6 +395,26 @@ func TestCatalogResolvesAReference(t *testing.T) {
 	}
 }
 
+// Sizing a prompt before sending it is what makes it possible to compact
+// first, and the answer says whether it can be trusted.
+func TestPromptsCanBeSizedBeforeSending(t *testing.T) {
+	e := sse(t, false, [2]string{"", `{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},` +
+		`"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}`})
+	client := open(t, e.server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat, ContextWindow: 1000})
+
+	messages := []ai.Message{ai.UserMessage(strings.Repeat("word ", 200))}
+	count, err := client.CountTokens(context.Background(), messages)
+	if err != nil {
+		t.Fatalf("CountTokens: %v", err)
+	}
+	if count.Tokens == 0 {
+		t.Error("a prompt with a thousand characters cannot be zero tokens")
+	}
+	if count.Exact {
+		t.Error("Chat Completions publishes no counting endpoint; the answer must say it is an estimate")
+	}
+}
+
 // A turn that failed partway still produced text and still cost tokens, and a
 // caller needs both.
 func TestAFailedTurnHandsBackWhatItProduced(t *testing.T) {
@@ -521,6 +542,45 @@ func toolResultContent(b ai.Block) string {
 		return ""
 	}
 	return b.ToolResult.Text()
+}
+
+// Structured output is one call and one mention of the type. The schema that
+// goes out and the value that comes back are derived from the same T, which is
+// what SchemaOf and Parse spelled separately cannot guarantee.
+func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
+	// The jsonschema tag is the field's description. It is prompt text: the
+	// model reads it, so it has to reach the wire.
+	type Person struct {
+		Name string `json:"name" description:"full legal name, family name last"`
+		Age  int    `json:"age" description:"age in whole years" minimum:"0"`
+	}
+
+	// Chat Completions streams, so the answer arrives as SSE like any other.
+	e := sse(t, false,
+		[2]string{"", `{"id":"1","model":"m","choices":[{"index":0,` +
+			`"delta":{"content":"{\"name\":\"Ada\",\"age\":36}"},"finish_reason":"stop"}]}`})
+
+	client := open(t, e.server.URL, ai.Model{ID: "m", API: ai.APIOpenAIChat})
+	person, err := ai.CompleteAs[Person](context.Background(), client,
+		[]ai.Message{ai.UserMessage("who wrote the first algorithm?")})
+	if err != nil {
+		t.Fatalf("CompleteAs: %v", err)
+	}
+	if person.Name != "Ada" || person.Age != 36 {
+		t.Errorf("person = %+v, want the decoded answer", person)
+	}
+
+	// The schema reached the endpoint, named after the Go type, carrying the
+	// field descriptions the model is meant to read.
+	sent, _ := json.Marshal(e.body["response_format"])
+	for _, want := range []string{
+		"Person", "json_schema", "age",
+		"full legal name, family name last", "age in whole years",
+	} {
+		if !strings.Contains(string(sent), want) {
+			t.Errorf("response_format = %s\nwant it to contain %q", sent, want)
+		}
+	}
 }
 
 // Go ignores an unrecognised struct tag without a word. For this package's

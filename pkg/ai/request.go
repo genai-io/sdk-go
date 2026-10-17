@@ -35,6 +35,10 @@ type Request struct {
 	// CacheRetention asks for a prompt-cache lifetime.
 	CacheRetention CacheRetention
 
+	// Schema constrains the answer to a JSON shape. Nil leaves the model free
+	// to answer in prose.
+	Schema *Schema
+
 	// SamplingParams are merged into the request body verbatim, over the named
 	// fields above and over the model's own SamplingParams, so a caller can
 	// reach a parameter this SDK does not model. Only the OpenAI-family
@@ -89,6 +93,11 @@ func WithStopSequences(stop ...string) Option {
 // WithCacheRetention asks the provider for a prompt-cache lifetime.
 func WithCacheRetention(c CacheRetention) Option {
 	return func(r *Request) { r.CacheRetention = c }
+}
+
+// WithSchema constrains the answer to a JSON shape.
+func WithSchema(s *Schema) Option {
+	return func(r *Request) { r.Schema = cloneSchema(s) }
 }
 
 // newRequest builds the request for one call: the model's own defaults first,

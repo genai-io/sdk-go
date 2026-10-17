@@ -54,6 +54,14 @@ func (d *driver) generationConfig(req *ai.Request) *generationConfig {
 			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: new(int32(0))}
 		}
 	}
+	// Gemini takes the schema as raw JSON Schema alongside a JSON mime type;
+	// the mime type alone would only promise valid JSON, not the shape.
+	if req.Schema != nil {
+		if definition := req.Schema.DefinitionMap(); definition != nil {
+			cfg.ResponseMIMEType = "application/json"
+			cfg.ResponseJSONSchema = definition
+		}
+	}
 	return cfg
 }
 

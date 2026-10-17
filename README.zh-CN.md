@@ -12,6 +12,7 @@
 - **一套 API，六种协议** —— 不管哪家服务，拿到的都是同样的类型。
 - **流式** —— 文本、thinking、工具调用、图片共用一套 start/delta/end 生命周期。
 - **工具调用** —— schema 从你的参数 struct 推导，调用再解码回同一个 struct。
+- **结构化输出** —— `CompleteAs[T]` 推导 schema、约束生成、解码答案。
 - **带类型的错误** —— 认证、限流、超上下文、不支持，不是要去匹配的子串。
 - **厂商目录** —— 28 家厂商：怎么连上每一家、说它的协议，都是数据。有哪些模型、它们的限额、价格、模态和推理档位由应用提供；SDK 按协议把每一档拼成线上的写法。
 - **不会顺手读凭证** —— `pkg/ai` 不读任何环境变量、不读任何文件。
@@ -22,7 +23,7 @@
 - **一切皆事件** —— 一段序列上 12 种类型，而对话就是其中两种的折叠。
 - **四种 hook** —— 拦下一次工具调用、改写发出去的东西、抹掉返回来的东西。
 - **并行工具** —— 一批默认并发，除非某个工具说它不能。
-- **对话是普通数据** —— agent 手里的就是一个 `[]ai.Message`，你平时怎么存东西就怎么存它。
+- **会话** —— 保存 agent 的对话，并把它加载回来。
 - **MCP** —— MCP 服务器的工具直接变成 agent 自己的工具，`WithTools` 直接收。
 
 [安装](#安装) · [English](README.md)
@@ -31,6 +32,7 @@
 [快速开始](#快速开始) ·
 [流式](#流式) ·
 [工具调用](#工具调用) ·
+[结构化输出](#结构化输出) ·
 [请求选项](#请求选项) ·
 [消息与内容](#消息与内容) ·
 [错误](#错误与执行策略) ·
@@ -41,7 +43,7 @@
 [循环](#循环) ·
 [事件](#一切皆事件) ·
 [Hook](#hook) ·
-[保存对话](#保存对话)
+[会话](#会话)
 
 ## 安装
 
@@ -103,7 +105,7 @@ client, err := auth.Client(ref)
 
 `catalog.All()` **不联网**就能列出全部厂商；某家有哪些模型，来自它的实时列表或你自己的数据。
 
-可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加四个 agent 例子。
+可直接运行的例子在 [`examples/`](examples)——每家厂商一个，外加 [`structured/`](examples/structured) 和五个 agent 例子。
 
 ### 流式
 
@@ -173,8 +175,6 @@ for _, call := range response.ToolCalls() {
 }
 ```
 
-**标签的 key 就是它要设的那个 JSON Schema 关键字**——共 11 个——而且每一个字都是 prompt 文本。schema 是按**"能被接受"**推导的，不只是"合法"，这比规范本身更严。见 [`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema)。
-
 `UnmarshalArgs` 把 **schema 里没有的参数当错误，不是静默丢弃**——模型编出来的东西该被告知，而不是被执行一半；空文档则按空对象读，那正是**无参数的工具，这里每个协议都会发的东西**。
 
 约束模型调哪个，是**一个值、四种状态**，正好是每个协议都能表达的那四种：
@@ -186,6 +186,21 @@ ai.WithToolChoice(ai.ToolChoiceNamed("search")) // 必须调这个
 ```
 
 `pkg/ai` 只做一次调用。跑工具、再问一次、直到模型不再要东西，是 [agent](#agent--pkgagent) 的事。
+
+### 结构化输出
+
+```go
+type Person struct {
+	Name string `json:"name" description:"完整法定姓名，姓在后"`
+	Age  int    `json:"age" description:"周岁" minimum:"0"`
+}
+
+person, err := ai.CompleteAs[Person](ctx, client, messages)
+```
+
+**类型只写一次**：`CompleteAs` 从它推导 schema、原生约束生成、再把答案解码回它。手里已经有 schema 时，`WithSchema` 和 `Response.Unmarshal` 就是同样的两半。
+
+**标签的 key 就是它要设的那个 JSON Schema 关键字**——共 11 个——而且每一个字都是 prompt 文本。schema 是按**"能被接受"**推导的，不只是"合法"，这比规范本身更严。见 [`pkg/ai/jsonschema`](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai/jsonschema)。
 
 ### 请求选项
 
@@ -246,11 +261,12 @@ case ai.IsKind(err, ai.KindUnsupported): // 这个模型做不了要求它做的
 **`pkg/ai` 永远不读环境变量、不读文件。**正是这一点让它在一台握着多个租户密钥的服务器上是安全的：
 
 ```go
-client, err := ai.New(ai.Config{
-	Model: model, APIKey: key, BaseURL: "https://gateway.internal/v1",
-	HTTPClient: httpClient, Headers: map[string]string{"X-Tenant": tenant},
-})
+model.BaseURL = "https://gateway.internal/v1"
+model.Headers = map[string]string{"X-Tenant": tenant}
+client, err := ai.New(ai.Config{Model: model, APIKey: key, HTTPClient: httpClient})
 ```
+
+请求发到哪、带什么头，都是**模型的事**：`Model.BaseURL` 和 `Model.Headers` 就是最终值，所以要覆盖，由构造 Config 的那一方写到模型上。
 
 `pkg/ai/auth` 是那个**选择性开启**、确实会读环境的入口。`pkg/ai/endpoint` 夹在目录行和客户端之间：一个配好的 host 加上它上面的模型，其中**"读列表"和"拉列表"是两个动词**。
 
@@ -347,23 +363,26 @@ flowchart LR
 
 重试默认关闭，`WithRetry` 打开它。重放救不回来的那些——prompt 超过窗口、密钥配额用完——是 `OnInferError`：它用一份更短的对话回答一次失败的调用，并要求这一步再来一次。
 
-### 保存对话
+### 会话
 
-agent 从头到尾不知道有存储这回事。一份对话就是一个 `[]ai.Message`，能直接编码成 JSON 的普通数据：读出来，交给 agent，用完把 agent 手里的那份存回去。
+agent 从头到尾不知道有存储这回事。一份对话就是一个 `[]ai.Message`：读出来，交给 agent，用完把 agent 手里的那份存回去。
 
 ```go
-a.SetMessages(history)                   // 上次存下的那份
+history, _ := store.Load(ctx, id)        // 新会话返回 session.ErrNotFound
+a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
     render(e)
 }
-save(id, a.Messages())                   // 整份对话
+store.Save(ctx, id, a.Messages())        // 整份对话
 ```
+
+`pkg/session` 就是那个 `Store`，`pkg/session/jsonl` 给每份对话一个只追加的文件。
 
 压缩不需要任何额外处理：下一次保存存的就是压缩后的对话。
 
-事件契约、hook 的组合规则与工具，见 [Agent SDK](docs/agent.zh-CN.md)；
+事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；
 能直接跑的程序见 [`examples/agent-chat`](examples/agent-chat)、[`examples/agent-progress`](examples/agent-progress)、
-[`examples/agent`](examples/agent) 和 [`examples/mcp`](examples/mcp)。
+[`examples/agent-session`](examples/agent-session)、[`examples/agent`](examples/agent) 和 [`examples/mcp`](examples/mcp)。
 
 ## 文档
 
@@ -372,10 +391,10 @@ save(id, a.Messages())                   // 整份对话
 | [API 参考](https://pkg.go.dev/github.com/genai-io/sdk-go/pkg/ai) | 每个类型和函数，设计理由就写在它管辖的代码旁边 |
 | [构造客户端](docs/clients.zh-CN.md) | 从模型引用到 `ai.Client` 的一条链，以及在哪里停下（[English](docs/clients.md)） |
 | [架构](docs/architecture.zh-CN.md) | 各部分如何拼合，一个请求要经过什么（[English](docs/architecture.md)） |
-| [Agent SDK](docs/agent.zh-CN.md) | 结构、事件契约、hook 与工具（[English](docs/agent.md)） |
+| [Agent SDK](docs/agent.zh-CN.md) | 结构、事件契约、hook、工具与会话（[English](docs/agent.md)） |
 | [贡献指南](CONTRIBUTING.md) | 开发环境、实现一套协议、测试套件 |
 | [更新日志](CHANGELOG.md) | 每个版本改了什么 |
-| [`examples/`](examples) | 可运行的程序：每家厂商一个，外加四个 agent |
+| [`examples/`](examples) | 可运行的程序：每家厂商一个，外加结构化输出和五个 agent |
 
 ## 版本
 

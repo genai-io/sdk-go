@@ -24,11 +24,25 @@ func TestConfigResolvesCredentialAndEndpoint(t *testing.T) {
 	if cfg.APIKey != "sk-deepseek" {
 		t.Errorf("APIKey = %q, want the one in the environment", cfg.APIKey)
 	}
-	if cfg.BaseURL != "https://api.deepseek.com" {
-		t.Errorf("BaseURL = %q, want the vendor's own host", cfg.BaseURL)
+	if cfg.Model.BaseURL != "https://api.deepseek.com" {
+		t.Errorf("BaseURL = %q, want the vendor's own host", cfg.Model.BaseURL)
 	}
 	if cfg.Model.API != ai.APIOpenAIChat {
 		t.Error("the model arrived without its protocol")
+	}
+}
+
+// An override in the environment replaces the host the catalog model carries.
+func TestABaseURLOverrideReplacesTheVendorDefault(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+	t.Setenv("DEEPSEEK_BASE_URL", "https://proxy.test/")
+
+	cfg, err := Config("deepseek/deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if cfg.Model.BaseURL != "https://proxy.test" {
+		t.Errorf("BaseURL = %q, want the override", cfg.Model.BaseURL)
 	}
 }
 
@@ -77,8 +91,8 @@ func TestConfigForAnInteractiveVendorNeedsASignIn(t *testing.T) {
 	}
 	// The endpoint recorded at sign-in wins: an enterprise account's is not
 	// the one in the table.
-	if cfg.BaseURL != "https://api.enterprise.githubcopilot.com" {
-		t.Errorf("BaseURL = %q, want the endpoint the sign-in resolved to", cfg.BaseURL)
+	if cfg.Model.BaseURL != "https://api.enterprise.githubcopilot.com" {
+		t.Errorf("BaseURL = %q, want the endpoint the sign-in resolved to", cfg.Model.BaseURL)
 	}
 	if cfg.APIKey != "" {
 		t.Error("a static token was baked into the config; it would go stale mid-session")

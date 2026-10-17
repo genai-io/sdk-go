@@ -48,8 +48,9 @@ type Driver interface {
 
 Everything a caller also needs — aggregating deltas into a `Response`, applying
 defaults, repairing history, validating — belongs to `Client` and is written
-once for every protocol. Model listing is an optional interface, discovered by
-type assertion; a driver that omits it is never an error.
+once for every protocol. Model listing and token counting are optional
+interfaces, discovered by type assertion; a driver that omits one is never an
+error.
 
 Register from `init` so a blank import is enough to make the protocol
 reachable.

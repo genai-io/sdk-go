@@ -68,6 +68,13 @@
 // Running the calls and looping until the model stops asking is package
 // agent's job.
 //
+// # Typed answers
+//
+// CompleteAs derives a JSON schema from a Go type, constrains generation to it
+// and decodes the answer, so the type is named once:
+//
+//	person, err := ai.CompleteAs[Person](ctx, client, messages)
+//
 // # Stream blocks
 //
 // Every content kind uses one start/delta/end lifecycle. Textual Delta blocks
@@ -100,10 +107,10 @@
 //
 //	request.go     one call: what is asked, under what settings, and how they layer
 //	message.go     a turn, and the ordered blocks it carries
-//	schema.go      a tool: its name, purpose and arguments, derived from a Go
-//	               type, and checking a call against them
+//	schema.go      a JSON shape — a tool's arguments or an answer's — derived
+//	               from a Go type, and checking a document against it
 //
-//	response.go    what one call produced, and what it cost
+//	response.go    what one call produced, what it cost, and decoding it
 //	errors.go      the failure categories a caller decides on
 //
 //	model.go       what a model is, including what it cannot do
@@ -114,7 +121,7 @@
 //	repair.go      the repairs every protocol needs, and the reasoning state
 //	               a model cannot replay
 //	validate.go    everything caught before the network
-//	tokens.go      how large a prompt is, and whether it fit
+//	tokens.go      how large a prompt is — counted or estimated — and whether it fit
 //
 //	driver.go      the protocol seam: what a driver is, is given, and how one is found
 //

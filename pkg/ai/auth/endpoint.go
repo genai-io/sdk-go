@@ -19,18 +19,18 @@ func Endpoint(vendorID string) (*endpoint.Endpoint, error) {
 			return nil, err
 		}
 		return v.Endpoint(endpoint.Config{
-			BaseURL:    cfg.BaseURL,
+			BaseURL:    cfg.Model.BaseURL,
 			HTTPClient: cfg.HTTPClient,
 		}), nil
 	}
 
-	cfg, err := envConfig(v)
+	cfg, err := envConfig(v, ai.Model{})
 	if err != nil {
 		return nil, err
 	}
 	return v.Endpoint(endpoint.Config{
 		APIKey:  cfg.APIKey,
-		BaseURL: cfg.BaseURL,
+		BaseURL: cfg.Model.BaseURL,
 		Vertex:  cfg.Vertex,
 	}), nil
 }

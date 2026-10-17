@@ -54,7 +54,7 @@ func (s *stub) seen() (http.Header, string, string) {
 func driverFor(t *testing.T, cfg ai.Config) ai.Driver {
 	t.Helper()
 	if cfg.Model.ID == "" {
-		cfg.Model = ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses}
+		cfg.Model.ID, cfg.Model.API = "gpt-5", ai.APIOpenAIResponses
 	}
 	d, err := New(cfg)
 	if err != nil {
@@ -123,7 +123,7 @@ func TestATruncatedAnswerSaysSoAndCostsWhatItCost(t *testing.T) {
 			`"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":40},`+
 			`"output_tokens":64,"output_tokens_details":{"reasoning_tokens":16},"total_tokens":164}}}`,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestAFailedResponseIsAnError(t *testing.T) {
 		`{"type":"response.failed","response":{"id":"resp_2","model":"gpt-5","status":"failed",`+
 			`"error":{"code":"server_error","message":"the model is having a bad day"}}}`,
 	)
-	_, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	_, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err == nil {
 		t.Fatal("a failed response ended the stream without an error")
 	}
@@ -171,7 +171,7 @@ func TestFailedTerminalEventsPreserveUsageThroughThePublicClient(t *testing.T) {
 				`{"type":"response.output_text.delta","delta":"half"}`,
 				`{"type":"`+event+`","response":{"id":"failed-id","model":"actual-model","status":"failed","error":{"code":"server_error","message":"failed"},"usage":{"input_tokens":20,"output_tokens":10}}}`,
 			)
-			client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: s.URL}), ai.Model{ID: "test", API: ai.APIOpenAIResponses})
+			client := ai.NewClientWithDriver(driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), ai.Model{ID: "test", API: ai.APIOpenAIResponses})
 			response, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("hi")})
 			if !ai.IsKind(err, ai.KindOverloaded) {
 				t.Fatalf("error = %v, want overloaded", err)
@@ -192,7 +192,7 @@ func TestARefusalIsAnAnswerAndSaysSo(t *testing.T) {
 			`"usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":0},`+
 			`"output_tokens":8,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":18}}}`,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestReasoningTokensAreReportedAndStillCountedAsOutput(t *testing.T) {
 			`"usage":{"input_tokens":7,"input_tokens_details":{"cached_tokens":0},`+
 			`"output_tokens":900,"output_tokens_details":{"reasoning_tokens":850},"total_tokens":907}}}`,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestAnAmbientCredentialIsNeverUsed(t *testing.T) {
 		`"usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},`+
 		`"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}}`)
 
-	if _, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL})); err != nil {
+	if _, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}})); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	header, _, path := s.seen()
@@ -262,7 +262,7 @@ func TestTheConfigsCredentialIsWhatTravels(t *testing.T) {
 		`"usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},`+
 		`"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}}`)
 
-	cfg := ai.Config{BaseURL: s.URL, APIKey: "sk-this-tenant"}
+	cfg := ai.Config{Model: ai.Model{BaseURL: s.URL}, APIKey: "sk-this-tenant"}
 	if _, err := collect(t, driverFor(t, cfg)); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestAToolCallIsAssembledFromItsArgumentStream(t *testing.T) {
 		`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":"{\"file_path\":\"a.py\"}"}}`,
 		completed,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestACallWhoseItemIDChangesBetweenEventsIsStillOneCall(t *testing.T) {
 		`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_done","call_id":"call_1","name":"Read","arguments":"{\"file_path\":\"a.py\"}"}}`,
 		completed,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestUnfinishedToolCallsSurviveStreamFailures(t *testing.T) {
 				events = append(events, tc.terminal)
 			}
 			s := sse(t, events...)
-			client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: s.URL}), ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses})
+			client := ai.NewClientWithDriver(driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses})
 			resp, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("go")})
 			if (err != nil) != tc.wantErr || tc.terminal == "" && !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("err=%v, wantErr=%v", err, tc.wantErr)
@@ -393,7 +393,7 @@ func TestToolCallsSurviveATransportReadError(t *testing.T) {
 		_, _ = io.WriteString(w, payload)
 	}))
 	t.Cleanup(s.Close)
-	client := ai.NewClientWithDriver(driverFor(t, ai.Config{BaseURL: s.URL}), ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses})
+	client := ai.NewClientWithDriver(driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}), ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses})
 	resp, err := client.Complete(t.Context(), []ai.Message{ai.UserMessage("go")})
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("err=%v, want a transport read error", err)
@@ -411,7 +411,7 @@ var reasoner = ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses, Reasoning: []ai
 // server and a reasoning model is asked for the reasoning it will need back.
 func TestEveryRequestIsStatelessAndAReasonerAsksForItsReasoningBack(t *testing.T) {
 	s := sse(t, completed)
-	if _, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL, Model: reasoner})); err != nil {
+	if _, err := collect(t, driverFor(t, ai.Config{Model: at(reasoner, s.URL)})); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	_, body, _ := s.seen()
@@ -426,7 +426,7 @@ func TestEveryRequestIsStatelessAndAReasonerAsksForItsReasoningBack(t *testing.T
 // A model that cannot reason is not asked for reasoning it will never produce.
 func TestAModelThatCannotReasonIsStatelessWithoutAskingForReasoning(t *testing.T) {
 	s := sse(t, completed)
-	if _, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL})); err != nil {
+	if _, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}})); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	_, body, _ := s.seen()
@@ -445,7 +445,7 @@ func TestReasoningItemsAreKeptForReplayOnTheRegularAPI(t *testing.T) {
 		`{"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","encrypted_content":"opaque","summary":[{"type":"summary_text","text":"thought"}]}}`,
 		completed,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL, Model: reasoner}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: at(reasoner, s.URL)}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestNoMaxOutputTokensLeavesTheCapOff(t *testing.T) {
 		s := sse(t, completed)
 		model := ai.Model{ID: "gpt-5", API: ai.APIOpenAIResponses, Compat: tc.compat}
 		req := &ai.Request{Messages: []ai.Message{ai.UserMessage("hello")}, MaxTokens: 100}
-		if _, err := collectReq(t, driverFor(t, ai.Config{BaseURL: s.URL, Model: model}), req); err != nil {
+		if _, err := collectReq(t, driverFor(t, ai.Config{Model: at(model, s.URL)}), req); err != nil {
 			t.Fatalf("stream: %v", err)
 		}
 		_, body, _ := s.seen()
@@ -490,7 +490,7 @@ func TestAContentFilteredAnswerIsARefusal(t *testing.T) {
 		`{"type":"response.incomplete","response":{"id":"resp_5","model":"gpt-5","status":"incomplete",`+
 			`"incomplete_details":{"reason":"content_filter"}}}`,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestCacheWritesAreReportedApartFromFreshInput(t *testing.T) {
 			`"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":40,"cache_write_tokens":30},`+
 			`"output_tokens":5,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":105}}}`,
 	)
-	deltas, err := collect(t, driverFor(t, ai.Config{BaseURL: s.URL}))
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: ai.Model{BaseURL: s.URL}}))
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestACodexBackendIsListedFromItsOwnCatalog(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	lister := driverFor(t, ai.Config{BaseURL: srv.URL + "/backend-api/codex", Model: ai.Model{
+	lister := driverFor(t, ai.Config{Model: ai.Model{BaseURL: srv.URL + "/backend-api/codex",
 		ID: "-", API: ai.APIOpenAIResponses, Compat: ai.OpenAIResponsesCompat{CodexModelListing: true},
 	}}).(ai.ModelLister)
 
@@ -559,4 +559,10 @@ func TestACodexBackendIsListedFromItsOwnCatalog(t *testing.T) {
 	if !errors.As(err, &aiErr) || aiErr.Kind != ai.KindAuth {
 		t.Errorf("err = %v, want KindAuth", err)
 	}
+}
+
+// at is m served from url.
+func at(m ai.Model, url string) ai.Model {
+	m.BaseURL = url
+	return m
 }

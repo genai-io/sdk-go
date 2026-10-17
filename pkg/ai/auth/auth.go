@@ -25,7 +25,7 @@ func Available() []catalog.Vendor {
 			}
 			continue
 		}
-		if _, err := envConfig(v); err == nil {
+		if _, err := envConfig(v, ai.Model{}); err == nil {
 			out = append(out, v)
 		}
 	}
@@ -50,17 +50,13 @@ func Config(ref string) (ai.Config, error) {
 		return interactiveConfig(v, model, nil)
 	}
 
-	cfg, err := envConfig(v)
-	if err != nil {
-		return ai.Config{}, err
-	}
-	cfg.Model = model
-	return cfg, nil
+	return envConfig(v, model)
 }
 
 // envConfig resolves a key-based vendor's credential, base URL and deployment
-// from the environment.
-func envConfig(v catalog.Vendor) (ai.Config, error) {
+// from the environment. The base URL is written onto the model, replacing the
+// one it carries: an override in the environment is the caller redirecting it.
+func envConfig(v catalog.Vendor, model ai.Model) (ai.Config, error) {
 	key, err := v.KeyFromEnv(os.Getenv)
 	if err != nil {
 		return ai.Config{}, err
@@ -73,7 +69,10 @@ func envConfig(v catalog.Vendor) (ai.Config, error) {
 	if err != nil {
 		return ai.Config{}, err
 	}
-	return ai.Config{APIKey: key, BaseURL: baseURL, Vertex: vertex}, nil
+	if baseURL != "" {
+		model.BaseURL = baseURL
+	}
+	return ai.Config{Model: model, APIKey: key, Vertex: vertex}, nil
 }
 
 // interactiveConfig builds a Config for a vendor that signs in through a
@@ -97,7 +96,12 @@ func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config
 	}
 	// APIKey stays empty: the transport supplies a fresh token per request,
 	// and a static one here would go stale mid-session.
-	return ai.Config{Model: model, BaseURL: cmp.Or(cred.BaseURL, v.BaseURL), HTTPClient: client}, nil
+	// The base URL the sign-in resolved to replaces the vendor's default the
+	// model carries.
+	if baseURL := cmp.Or(cred.BaseURL, v.BaseURL); baseURL != "" {
+		model.BaseURL = baseURL
+	}
+	return ai.Config{Model: model, HTTPClient: client}, nil
 }
 
 // Client returns a client for a model reference, with the credential and

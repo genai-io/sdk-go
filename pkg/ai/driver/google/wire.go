@@ -73,10 +73,12 @@ const (
 )
 
 type generationConfig struct {
-	MaxOutputTokens int32           `json:"maxOutputTokens,omitempty"`
-	Temperature     *float32        `json:"temperature,omitempty"`
-	StopSequences   []string        `json:"stopSequences,omitempty"`
-	ThinkingConfig  *thinkingConfig `json:"thinkingConfig,omitempty"`
+	MaxOutputTokens    int32           `json:"maxOutputTokens,omitempty"`
+	Temperature        *float32        `json:"temperature,omitempty"`
+	StopSequences      []string        `json:"stopSequences,omitempty"`
+	ThinkingConfig     *thinkingConfig `json:"thinkingConfig,omitempty"`
+	ResponseMIMEType   string          `json:"responseMimeType,omitempty"`
+	ResponseJSONSchema any             `json:"responseJsonSchema,omitempty"`
 }
 
 type thinkingConfig struct {
@@ -113,6 +115,27 @@ type usageMetadata struct {
 	// candidatesTokenCount, so a thinking turn is under-reported without it.
 	ThoughtsTokenCount      int32 `json:"thoughtsTokenCount,omitempty"`
 	CachedContentTokenCount int32 `json:"cachedContentTokenCount,omitempty"`
+}
+
+// countTokensRequest is the Gemini API's wrapper around a count: the system
+// instruction and the tool declarations count against the window too, and the
+// wrapper is the only form that endpoint accepts them in. Vertex takes the
+// inner form flat.
+type countTokensRequest struct {
+	GenerateContentRequest *countTokensInner `json:"generateContentRequest,omitempty"`
+}
+
+type countTokensInner struct {
+	// Model is required inside the wrapper, in "models/{id}" form, and has no
+	// place in the flat form.
+	Model             string     `json:"model,omitempty"`
+	Contents          []*content `json:"contents,omitempty"`
+	SystemInstruction *content   `json:"systemInstruction,omitempty"`
+	Tools             []*tool    `json:"tools,omitempty"`
+}
+
+type countTokensResponse struct {
+	TotalTokens int32 `json:"totalTokens,omitempty"`
 }
 
 type modelList struct {

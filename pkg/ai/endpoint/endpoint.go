@@ -32,7 +32,9 @@ type Config struct {
 	Name string
 
 	// BaseURL, APIKey, HTTPClient and Headers are applied to every model this
-	// endpoint opens. A model's own BaseURL and Headers layer underneath.
+	// endpoint opens. A model's own BaseURL and Headers layer underneath: the
+	// endpoint's base URL, when set, replaces the model's, and its headers
+	// override any of the model's with the same name.
 	BaseURL    string
 	APIKey     string
 	HTTPClient *http.Client
@@ -174,14 +176,23 @@ func defaultFetch(ctx context.Context, e *Endpoint) ([]ai.Model, error) {
 	return client.Models(ctx)
 }
 
-// ConfigFor builds the ai.Config for opening one of this endpoint's models.
+// ConfigFor builds the ai.Config for opening one of this endpoint's models,
+// with the endpoint's base URL and headers stamped onto the model.
 func (e *Endpoint) ConfigFor(m ai.Model) ai.Config {
+	m = m.Clone()
+	if e.cfg.BaseURL != "" {
+		m.BaseURL = e.cfg.BaseURL
+	}
+	if len(e.cfg.Headers) > 0 {
+		if m.Headers == nil {
+			m.Headers = make(map[string]string, len(e.cfg.Headers))
+		}
+		maps.Copy(m.Headers, e.cfg.Headers)
+	}
 	return ai.Config{
-		Model:      m.Clone(),
+		Model:      m,
 		APIKey:     e.cfg.APIKey,
-		BaseURL:    e.cfg.BaseURL,
 		HTTPClient: e.cfg.HTTPClient,
-		Headers:    maps.Clone(e.cfg.Headers),
 		Vertex:     e.cfg.Vertex,
 	}
 }

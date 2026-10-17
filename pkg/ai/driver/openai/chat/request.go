@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	sdk "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
@@ -28,6 +29,20 @@ func (d *driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatC
 		params.Tools = convertTools(req.Tools)
 		if choice := toolChoice(req); choice != nil {
 			params.ToolChoice = *choice
+		}
+	}
+	if schema := req.Schema; schema != nil {
+		if def := schema.DefinitionMap(); def != nil {
+			params.ResponseFormat = sdk.ChatCompletionNewParamsResponseFormatUnion{
+				OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
+					JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+						Name:        schema.WireName(),
+						Description: sdk.String(schema.Description),
+						Schema:      def,
+						Strict:      sdk.Bool(schema.Strict),
+					},
+				},
+			}
 		}
 	}
 	d.applyReasoning(&params, level)

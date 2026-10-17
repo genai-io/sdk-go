@@ -10,22 +10,29 @@ same everywhere.
 | | What it shows |
 | --- | --- |
 | [`quickstart/`](quickstart) | The smallest thing that works: one prompt, streamed, against any model the catalog can name |
+| [`structured/`](structured) | Asking for an answer shaped like a Go type and getting one back decoded, in a single call — with the struct tags that tell the model what each field means and what it may contain |
+
+Run `go run ./examples/structured -schema` to see what a Go type actually
+becomes on the wire.
 
 ## Agents
 
-`pkg/agent` runs the loop around a model call. The first three each isolate one
+`pkg/agent` runs the loop around a model call. The first four each isolate one
 idea; `agent/` is a working assistant with them in it.
 
 | | What it shows |
 | --- | --- |
 | [`agent-chat/`](agent-chat) | One turn per line you type: `Run` advances the conversation one turn and returns, so repeating it is your `for` loop rather than a mode the agent is in. Ctrl-C ends the turn in flight and hands the prompt back |
 | [`agent-progress/`](agent-progress) | A tool that takes a while and shows its work — `agent.Report` from inside the tool arriving as `ToolUpdate` — and the split between `Result.Content`, which the model reads, and `Result.Details`, which only your interface does |
+| [`agent-session/`](agent-session) | Save and resume: run it twice and the second run continues the first. The agent is handed a plain `[]ai.Message` and never learns where it came from; `-keep` compacts, and the next save is the compacted conversation |
 | [`mcp/`](mcp) | Giving an agent the tools an MCP server advertises, over stdio or HTTP — here npm's filesystem server run as a child process |
 | [`agent/`](agent) | A coding assistant: a system prompt built from the environment, and a `PreTool` gate that refuses anything that writes |
 
 ```sh
 go run ./examples/agent-chat
 go run ./examples/agent-progress "how many Go files are here, and how many Markdown ones?"
+go run ./examples/agent-session "what is a goroutine?"
+go run ./examples/agent-session "and how do they leak?"   # remembers the first
 go run ./examples/mcp -dir . "how big is the largest file here?"
 go run ./examples/agent "how many Go files are in this directory?"
 ```

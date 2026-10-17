@@ -43,7 +43,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 		return nil, err
 	}
 
-	// The auth option goes first so the Config's endpoint and headers land over
+	// The auth option goes first so the model's base URL and headers land over
 	// it. Its http.Client is the one part that cannot be layered — the Google
 	// token rides that transport — so a Config.HTTPClient is dropped instead.
 	cfg.HTTPClient = nil

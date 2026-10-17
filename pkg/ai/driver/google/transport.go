@@ -15,7 +15,7 @@ import (
 // request/response mechanics — URL construction, headers, and reading a
 // server-sent-event stream — live here rather than in a vendor library.
 
-// methodURL builds the URL for a model method, e.g. ":streamGenerateContent".
+// methodURL builds the URL for a model method, e.g. ":countTokens".
 func (d *driver) methodURL(method, query string) string {
 	u := fmt.Sprintf("%s/%s:%s", d.modelsURL, d.model.ID, method)
 	if query != "" {

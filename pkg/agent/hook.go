@@ -121,7 +121,8 @@ type PreStepContext struct {
 	// Tokens estimates the whole prompt — the conversation, the system prompt
 	// and the tool schemas, which are easy to forget and can outweigh it.
 	// Measured at every boundary rather than remembered, so a conversation
-	// that was just replaced does not still read as full.
+	// that was just replaced does not still read as full. Client.CountTokens
+	// is the provider's own count, for a caller who will pay a round trip.
 	Tokens int
 
 	// Client is the handle this step will call. Model().ContextWindow is what

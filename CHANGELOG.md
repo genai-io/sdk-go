@@ -19,6 +19,29 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Changed
 
+- **A session is a saved conversation.** It moves to `pkg/session`, and
+  `session.Store` is `Save(ctx, id, msgs)` and `Load(ctx, id)`. Replace the
+  recorder with a load before the run and a save after it:
+
+  ```go
+  history, err := store.Load(ctx, id)   // session.ErrNotFound if new
+  a.SetMessages(history)
+  // run the agent
+  err = store.Save(ctx, id, a.Messages())
+  ```
+
+  Compaction needs nothing extra: the next save holds the compacted
+  conversation. `pkg/agent/session/jsonl` becomes `pkg/session/jsonl`: one
+  append-only `<id>.jsonl` per session. A save appends only what is new, and a
+  rewritten conversation is appended after a `reset` line. `List` returns
+  `jsonl.Session{ID, SavedAt}`. The application chooses the id.
+- **The base URL and headers live on the model.** `ai.Config.BaseURL`,
+  `Config.Headers`, `Config.URL()` and `Config.MergedHeaders()` are gone; a
+  driver sends to `Model.BaseURL` with `Model.Headers`. Write an override onto
+  the model: `cfg.Model.BaseURL = url`, and add a header to
+  `cfg.Model.Headers` rather than to `cfg.Headers`. `auth.Config` and
+  `endpoint.ConfigFor` already stamp the environment's, the sign-in's and the
+  endpoint's base URL and headers onto the model they return.
 - **`pkg/ai` makes one call.** The tool loop is gone: a tool is an
   `ai.Schema`, and `WithTools` takes `...Schema`. Build one with
   `ai.ToolSchema[T]`, check a call with `Schema.Validate`, decode it with
@@ -42,7 +65,6 @@ Each such change is listed under **Changed** with what to write instead.
   internal. `Credential.Endpoint` is `Credential.BaseURL` (json `base_url`).
 - `anthropic.NewWithOptions` and `google.NewAt` are `NewDeployment`, and
   return an `ai.Driver`.
-- `ai.Config.URL()` is `EffectiveBaseURL()`, and `MergedHeaders()` is `EffectiveHeaders()`.
 - `Usage.CacheWrite1h` is `CacheWriteLong` (json `cache_write_long`).
 - **Agent events are named for what they time.** `MessageStart`,
   `MessageUpdate` and `MessageEnd` are `InferenceStart`, `InferenceUpdate` and
@@ -56,18 +78,13 @@ Each such change is listed under **Changed** with what to write instead.
 
 ### Removed
 
-- **`pkg/agent/session` and its `jsonl` store.** A conversation is a
-  `[]ai.Message`: restore it with `SetMessages`, save `a.Messages()` after the
-  run however you save things. Read cost and outcome from `InferenceEnd` and
-  `TurnEnd`.
+- From sessions: `Recorder` (`Handle`, `Record`, `Err`), `session.Open`,
+  `Entry` with all its types, `Store.Create`, `Append`, `Entries` and `Meta`,
+  `session.Meta`, `Meta.Created`, `ByRecency`, `session.Read`, and
+  `jsonl.Store.Close`. Read cost and outcome from `InferenceEnd` and `TurnEnd`
+  in your event loop, and keep them with your own records.
 - **The tool loop:** `ai.Tool`, `ai.ToolFunc`, `ai.RunTools` and `Client.Run`.
   Use `agent.ToolFunc` and `agent.New`.
-- **Structured output:** `ai.SchemaOf`, `ai.CompleteAs`, `ai.WithSchema`,
-  `Request.Schema`, `Response.Unmarshal`, `Schema.WireName`, and
-  `Unsupported.Schema` and `SchemaWithTools`. Ask for JSON in the prompt, or
-  offer a tool whose arguments are the shape you want.
-- **Exact token counting:** `Client.CountTokens`, `ai.TokenCount` and
-  `ai.TokenCounter`. `ai.EstimateTokens` remains.
 - `ai.ProtocolConfig`, `ai.RejectProtocolConfig` and `ai.VertexDeployment`.
 - `ai.Classify`, `ai.StreamError` and `ai.ClassifyMessage`; classification is
   internal to the drivers.
@@ -102,13 +119,13 @@ Each such change is listed under **Changed** with what to write instead.
 - `agent.Agent.System`.
 - `ai.ProtocolOptions`, `ai.WithProtocolOptions`, `ai.ProtocolOptionsAs`,
   `ai.RejectProtocolOptions`, `Request.ProtocolOptions`, `anthropic.Options` and
-  `responses.Options`. Send an `anthropic-beta` header through `Config.Headers`;
+  `responses.Options`. Send an `anthropic-beta` header through `Model.Headers`;
   put a Responses field such as `prompt_cache_key` in `SamplingParams`.
 - `AnthropicCompat.NoPromptCache` and `NoLongCacheRetention`;
   `OpenAIChatCompat.MaxTokensField`, `NoUsageInStream` and `NoFinishReason`.
 - `catalog.Vendor.SamplingParams`; set `Model.SamplingParams`.
 - `ai.ToolChoice.String`.
-- The `tools`, `structured` and `agent-session` examples.
+- The `tools` example.
 
 ### Fixed
 

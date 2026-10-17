@@ -89,6 +89,15 @@ func (m Model) validateCapabilities(req *Request) error {
 	if m.Unsupported.Multiturn && len(req.Messages) > 1 {
 		return m.unsupported("accepts a single message, but %d were provided", len(req.Messages))
 	}
+	if req.Schema != nil {
+		switch {
+		case m.Unsupported.Schema:
+			return m.unsupported("cannot constrain output to a schema; " +
+				"ask for the shape in the prompt and decode with Response.Unmarshal, which tolerates a fenced or prefaced answer")
+		case m.Unsupported.SchemaWithTools && len(req.Tools) > 0:
+			return m.unsupported("cannot constrain output and offer tools in the same request")
+		}
+	}
 	return nil
 }
 
@@ -156,6 +165,9 @@ func validateSettings(req *Request) error {
 	}
 	if req.ToolChoice == ToolChoiceRequired && len(req.Tools) == 0 {
 		return invalidRequest("required tool choice needs at least one tool")
+	}
+	if req.Schema != nil && req.Schema.DefinitionMap() == nil {
+		return invalidRequest("response schema has no object definition")
 	}
 	return nil
 }

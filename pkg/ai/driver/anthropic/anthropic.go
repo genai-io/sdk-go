@@ -4,7 +4,7 @@
 //
 // # Where things live
 //
-//	anthropic.go  construction, Stream and Models
+//	anthropic.go  construction, Stream, Models and CountTokens
 //	request.go    an ai.Request translated into Messages params
 //	errors.go     this protocol's failures classified into ai.Error kinds
 //	vertex/       the same protocol served through Google Cloud Vertex AI,
@@ -20,6 +20,7 @@ import (
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
@@ -54,7 +55,7 @@ func New(cfg ai.Config) (ai.Driver, error) {
 // this wire format from a different host under different credentials, and an
 // error or a model listing labelled with the direct API would send a caller to
 // the wrong console. opts — the Vertex auth option is the only one — are
-// applied ahead of the Config's own, so a Config's endpoint still wins over
+// applied ahead of the Config's own, so the model's base URL still wins over
 // the host such an option carries with it.
 //
 // The SDK client is assembled here rather than by sdk.NewClient, which
@@ -70,7 +71,7 @@ func NewDeployment(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.
 		// whole turn. An SDK retrying underneath would multiply it silently.
 		option.WithMaxRetries(0),
 	}, opts...)
-	if url := cfg.EffectiveBaseURL(); url != "" {
+	if url := cfg.Model.BaseURL; url != "" {
 		opts = append(opts, option.WithBaseURL(url))
 	}
 	if cfg.APIKey != "" {
@@ -85,7 +86,7 @@ func NewDeployment(cfg ai.Config, api ai.API, opts ...option.RequestOption) (ai.
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	for k, v := range cfg.EffectiveHeaders() {
+	for k, v := range cfg.Model.Headers {
 		opts = append(opts, option.WithHeader(k, v))
 	}
 
@@ -257,6 +258,44 @@ func mapStopReason(reason string) ai.StopReason {
 	}
 }
 
+// CountTokens asks the endpoint how large a prompt is, without generating
+// from it. Anthropic publishes this, so a caller never has to estimate.
+func (d *driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) {
+	params, err := d.buildParams(req)
+	if err != nil {
+		return 0, err
+	}
+	count := sdk.MessageCountTokensParams{
+		Model:    params.Model,
+		Messages: params.Messages,
+		System: sdk.MessageCountTokensParamsSystemUnion{
+			OfTextBlockArray: params.System,
+		},
+		Tools: countTokenTools(params.Tools),
+	}
+	if !param.IsOmitted(params.Thinking) {
+		count.Thinking = params.Thinking
+	}
+	res, err := d.client.Messages.CountTokens(ctx, count)
+	if err != nil {
+		return 0, d.fail.Wrap(err)
+	}
+	return int(res.InputTokens), nil
+}
+
+// countTokenTools re-types the tool params for the counting endpoint, which
+// takes the same shapes under its own union.
+func countTokenTools(tools []sdk.ToolUnionParam) []sdk.MessageCountTokensToolUnionParam {
+	out := make([]sdk.MessageCountTokensToolUnionParam, 0, len(tools))
+	for _, t := range tools {
+		if t.OfTool == nil {
+			continue
+		}
+		out = append(out, sdk.MessageCountTokensToolUnionParam{OfTool: t.OfTool})
+	}
+	return out
+}
+
 // Models lists the models the endpoint serves. Anthropic's listing carries IDs
 // and display names only — no limits — so callers wanting context windows
 // should merge catalog data over the result (see endpoint.Endpoint, which
@@ -281,6 +320,7 @@ func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 var (
-	_ ai.Driver      = (*driver)(nil)
-	_ ai.ModelLister = (*driver)(nil)
+	_ ai.Driver       = (*driver)(nil)
+	_ ai.ModelLister  = (*driver)(nil)
+	_ ai.TokenCounter = (*driver)(nil)
 )

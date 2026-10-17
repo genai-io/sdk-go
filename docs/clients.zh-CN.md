@@ -13,8 +13,8 @@
           │
           │  auth.Config       凭证，以及发到哪里
           ▼
-      ai.Config               从厂商自己的环境变量读到的 APIKey、BaseURL、
-          │                   部署相关设置——而且需要 key 却没有时
+      ai.Config               从厂商自己的环境变量读到的 APIKey、模型的
+          │                   BaseURL、部署相关设置——而且需要 key 却没有时
           │                   **就在这里失败**，而不是三次调用之后甩你一个 401
           │
           │  <driver>.New      协议的具体实现
@@ -96,13 +96,13 @@ client, err := auth.Client("anthropic/claude-opus-5", ai.WithEffort(ai.EffortHig
 
 ```go
 cfg, err := auth.Config("openai/gpt-4.1")
-cfg.BaseURL = "https://gateway.internal/v1"
+cfg.Model.BaseURL = "https://gateway.internal/v1"
 cfg.HTTPClient = instrumented
 
 client, err := ai.New(cfg)
 ```
 
-`auth.Config` 填好凭证和端点就停下，所以它返回的是一个**你可以随便改的普通 `ai.Config`**。
+`auth.Config` 填好凭证和端点就停下，所以它返回的是一个**你可以随便改的普通 `ai.Config`**。请求发到哪、带什么头，就是模型的 `BaseURL` 和 `Headers`；你在那里写什么，发出去的就是什么。
 
 ## 停在 `ai.New`
 
@@ -111,12 +111,13 @@ client, err := ai.New(cfg)
 ```go
 model, err := catalog.Model("anthropic/claude-opus-5")
 
+model.BaseURL = "https://gateway.internal/v1"
+model.Headers = map[string]string{"X-Tenant": tenant}
+
 client, err := ai.New(ai.Config{
 	Model:      model,
 	APIKey:     tenantKey,
-	BaseURL:    "https://gateway.internal/v1",
 	HTTPClient: httpClient,
-	Headers:    map[string]string{"X-Tenant": tenant},
 })
 ```
 
@@ -131,7 +132,7 @@ driver, err := responses.New(cfg)
 client := ai.NewClientWithDriver(metered{driver}, cfg.Model)
 ```
 
-装饰器嵌入 `Driver`、覆盖 `Stream`；`Models` 也要转发，否则 client 就不再提供它。**每个 driver 都关掉了厂商 SDK 自己的重试**，所以一次调用只试一次。
+装饰器嵌入 `Driver`、覆盖 `Stream`；`Models` 和 `CountTokens` 也要转发，否则 client 就不再提供它们。**每个 driver 都关掉了厂商 SDK 自己的重试**，所以一次调用只试一次。
 
 ## 停在 `ai.NewClientWithDriver`
 

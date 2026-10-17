@@ -42,7 +42,7 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	}))
 	defer s.Close()
 
-	cfg := ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}}
+	cfg := ai.Config{Model: ai.Model{BaseURL: s.URL, ID: "claude-test", API: ai.APIAnthropicVertex}}
 	d, err := anthropic.NewDeployment(cfg, ai.APIAnthropicVertex)
 	if err != nil {
 		t.Fatalf("NewDeployment: %v", err)
@@ -83,7 +83,7 @@ func TestTheCallersEndpointOutranksTheDeploymentsOwn(t *testing.T) {
 	// the deployment's own.
 	deployment := option.WithBaseURL("https://global-aiplatform.googleapis.com/")
 
-	cfg := ai.Config{BaseURL: s.URL, Model: ai.Model{ID: "claude-test", API: ai.APIAnthropicVertex}}
+	cfg := ai.Config{Model: ai.Model{BaseURL: s.URL, ID: "claude-test", API: ai.APIAnthropicVertex}}
 	d, err := anthropic.NewDeployment(cfg, ai.APIAnthropicVertex, deployment)
 	if err != nil {
 		t.Fatalf("NewDeployment: %v", err)

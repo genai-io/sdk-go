@@ -2,6 +2,7 @@ package vertex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,36 +40,48 @@ func TestNewRefusesWhatItCannotDeploy(t *testing.T) {
 	})
 }
 
-// The project and location go in the path, and the token in the header.
+// The project and location go in the path, the token in the header, and the
+// countTokens body is Vertex's flat shape rather than the Gemini API's wrapper.
 func TestRequestsCarryTheDeploymentAndTheToken(t *testing.T) {
-	var got struct{ path, auth string }
+	var got struct {
+		path, auth string
+		body       map[string]any
+	}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.path = r.URL.Path
 		got.auth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n")
+		_ = json.NewDecoder(r.Body).Decode(&got.body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"totalTokens":7}`)
 	}))
 	defer s.Close()
 	stubCredentials(t)
 
 	d, err := New(ai.Config{
-		Model:   ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL: s.URL + "/",
-		Vertex:  &ai.VertexConfig{Project: "my-project", Region: "us-central1"},
+		Model:  ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex, BaseURL: s.URL + "/"},
+		Vertex: &ai.VertexConfig{Project: "my-project", Region: "us-central1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, err := range d.Stream(context.Background(), &ai.Request{Messages: []ai.Message{ai.UserMessage("hi")}}) {
-		if err != nil {
-			t.Fatalf("Stream: %v", err)
-		}
+	n, err := d.(ai.TokenCounter).CountTokens(context.Background(), &ai.Request{
+		System:   "be brief",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: ai.TextContent("hi")}},
+	})
+	if err != nil || n != 7 {
+		t.Fatalf("CountTokens = %d, %v", n, err)
 	}
-	if want := "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-test:streamGenerateContent"; got.path != want {
+	if want := "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-test:countTokens"; got.path != want {
 		t.Errorf("path = %q, want %q", got.path, want)
 	}
 	if got.auth != "Bearer stub-token" {
 		t.Errorf("Authorization = %q, want the ADC token", got.auth)
+	}
+	if _, wrapped := got.body["generateContentRequest"]; wrapped {
+		t.Errorf("body = %v, want the flat shape Vertex takes", got.body)
+	}
+	if _, ok := got.body["systemInstruction"]; !ok {
+		t.Errorf("body = %v, want the system instruction counted", got.body)
 	}
 }
 
@@ -87,9 +100,8 @@ func TestTheDeploymentReportsItsOwnName(t *testing.T) {
 	stubCredentials(t)
 
 	d, err := New(ai.Config{
-		Model:   ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex},
-		BaseURL: s.URL,
-		Vertex:  &ai.VertexConfig{Project: "p"},
+		Model:  ai.Model{ID: "gemini-test", API: ai.APIGoogleVertex, BaseURL: s.URL},
+		Vertex: &ai.VertexConfig{Project: "p"},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -35,6 +35,7 @@
 // What the agent holds is what the model sees; there is no separate message
 // type. WithMessageIDs gives every message an ID an application can point at;
 // IDs are never sent.
+// Saving a conversation and loading it back is pkg/session.
 //
 // # Events
 //

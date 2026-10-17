@@ -12,7 +12,7 @@
 //	the credential     what to present
 //	the quirks         which field carries reasoning, whether a TTL is accepted
 //
-// Only the first needs code. A host is ai.Config.BaseURL, a credential is
+// Only the first needs code. A host is ai.Model.BaseURL, a credential is
 // ai.Config.APIKey, and the quirks are ai.Model.Compat — all of them values
 // a caller supplies, none of them a reason to compile anything new.
 //

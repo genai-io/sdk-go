@@ -160,7 +160,7 @@ client.Complete(ctx, messages, ai.WithSystem(s), ai.WithEffort(ai.EffortHigh))
 | | 去哪 |
 | --- | --- |
 | 每个协议都能表达，只是拼写不同 | 一个 `With*` 选项，由 driver 翻译 |
-| 只有一个协议有 | 不建模；`SamplingParams`（OpenAI 一族）或 `Config.Headers` 原样送达 |
+| 只有一个协议有 | 不建模；`SamplingParams`（OpenAI 一族）或 `Model.Headers` 原样送达 |
 
 reasoning 档位是第一类最清楚的例子。"该想多久"这个概念到处都有，而每家拼写都不同——Anthropic 要 `thinking.budget_tokens` 或 `output_config.effort`，Gemini 要 `thinkingLevel`，DashScope 要 `enable_thinking` 加 `thinking_budget`。所以它是 `ai.WithEffort(ai.EffortHigh)`，每个 `Model` 自带一份 `[]ReasoningLevel` 梯子，写明它提供哪几档。
 
@@ -191,7 +191,7 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 
 **不压缩。** 判断一段对话太长、总结它、丢掉最老的几轮，都是应用层拿着这个包没有的信息去做的决定。它做的是**修复**：`Repair` 只删协议本身会拒绝的东西——Ctrl-C 留下的没人应答的工具调用、经过 JavaScript 运行时的对话带来的非法 UTF-8。**修复不是策略。**
 
-**不改写你的请求去让它能跑通。** 一个没有 system 角色的模型会得到一个点名该模型的错误。把指令挪进 user 轮是关于你产品的决定，不是关于线格式的。
+**不改写你的请求去让它能跑通。** 一个没有 system 角色的模型、或者一个不能约束输出为 schema 的模型，会得到一个点名该模型的错误。把指令挪进 user 轮、或者用文字要求 JSON，是关于你产品的决定，不是关于线格式的。
 
 **不猜。** 一个上下文窗口未知的模型就是没有窗口，不会拿一个数字顶上——因为按猜出来的上限行事，两个方向上都会静默出错。
 
@@ -224,6 +224,8 @@ Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在�
 ```
 
 **框里的一切，对每个协议只发生一次。** 那就是 driver 待在后面的那条线：它翻译、它流式吐出，别的什么都不做。这也是为什么 `Client.Complete` 不是第二条代码路径——它抽干 `Stream`，所以一个请求到达端点的方式**有且只有一种**。
+
+`CountTokens` 量的是同一个 `*ai.Request`，所以一个 prompt 不可能"量的时候是一个样、发出去是另一个样"。
 
 ## 在到达网络之前失败
 

@@ -19,6 +19,17 @@ define it.
   flexibility nobody asked for — and check san's callers before calling
   anything unused.
 
+Generic pieces that still live in san move here one at a time, each in a
+change of its own. Not here yet:
+
+- [ ] Compaction: the summary flow, the budget trigger and context-exceeded
+  recovery, as a package over `Hook.PreStep` and `Hook.OnInferError`.
+- [ ] `PreStepContext.Tokens` anchored on the last call's usage, not a fresh
+  estimate.
+- [ ] Retry for a single `Complete`, sharing `agent.WithRetry`'s policy.
+- [ ] Copilot's per-turn headers and DashScope's per-model limits.
+- [ ] Dropping images from history for a model that cannot read them.
+
 ## Development
 
 ```sh

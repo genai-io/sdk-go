@@ -48,6 +48,9 @@ func types(t *testing.T, s *session.Store, id string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if r.Type == session.TypeCustom {
+			r.Type = r.Name
+		}
 		out = append(out, r.Type)
 	}
 	return out
@@ -206,16 +209,14 @@ func TestRefused(t *testing.T) {
 		}
 	}
 	w := write(t, s, "a")
-	for _, typ := range []string{"", "message", "truncate"} {
-		if err := w.Append(typ, nil); err == nil {
-			t.Errorf("Append(%q) accepted", typ)
-		}
+	if err := w.Append("", nil); err == nil {
+		t.Error("Append without a name accepted")
 	}
 }
 
 func TestConversation(t *testing.T) {
 	a := msg("1", "a")
-	recs := []session.Record{{Type: "message", Message: &a}, {Type: "note"}, {Type: "truncate"}, {Type: "message", Message: &a}, {Type: "message", Message: &a}}
+	recs := []session.Record{{Type: "message", Message: &a}, {Type: "custom", Name: "note"}, {Type: "truncate"}, {Type: "message", Message: &a}, {Type: "message", Message: &a}}
 	got, err := session.Conversation(func(yield func(session.Record, error) bool) {
 		for _, r := range recs {
 			if !yield(r, nil) {
@@ -296,17 +297,14 @@ func TestResumingRewritesNothing(t *testing.T) {
 	}
 }
 
-func TestATruncateBeyondTheConversationIsAnError(t *testing.T) {
+func TestARecordTheConversationCannotTakeIsAnError(t *testing.T) {
 	a := msg("1", "a")
-	recs := []session.Record{{Type: "message", Message: &a}, {Type: "truncate", Keep: 2}}
-	seq := func(yield func(session.Record, error) bool) {
-		for _, r := range recs {
-			if !yield(r, nil) {
-				return
-			}
+	for name, r := range map[string]session.Record{
+		"a truncate beyond the conversation": {Type: "truncate", Keep: 2},
+		"a type from a newer version":        {Type: "label"},
+	} {
+		if _, err := r.Apply([]ai.Message{a}); err == nil {
+			t.Errorf("%s was applied", name)
 		}
-	}
-	if _, err := session.Conversation(seq); err == nil {
-		t.Fatal("a truncate keeping more than there is read as a conversation")
 	}
 }

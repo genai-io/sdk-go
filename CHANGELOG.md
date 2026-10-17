@@ -36,9 +36,11 @@ Each such change is listed under **Changed** with what to write instead.
   Compaction needs nothing extra: the next save holds the compacted
   conversation. A save appends only what differs: the messages after the
   longest unchanged prefix, behind a `truncate` to that prefix when anything
-  after it changed — an edit or a rewind costs only what changed. `w.Append(typ, v)` keeps an application's
-  own records in the same log, and `Records` with `session.Conversation` reads
-  them back. `List` returns `session.Info{ID, ModTime}`; `Fork` and `Delete`
+  after it changed — an edit or a rewind costs only what changed. `w.Append(name, v)` keeps an application's
+  own records in the same log as `custom` records, so the record types stay
+  the package's to extend; `Records` reads them back, and `Record.Apply` takes
+  the conversation one record further. A type a reader does not know is an
+  error, not skipped. `List` returns `session.Info{ID, ModTime}`; `Fork` and `Delete`
   copy and remove one. The application chooses the id.
 - **The base URL and headers live on the model.** `ai.Config.BaseURL`,
   `Config.Headers`, `Config.URL()` and `Config.MergedHeaders()` are gone; a

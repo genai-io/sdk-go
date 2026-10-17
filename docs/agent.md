@@ -589,16 +589,20 @@ record:
 ```
 sessions/                       session.Open("sessions")
   20261016-101500.jsonl         one session; the file name is its id
-    {"type":"message","time":…,"message":{…}}   ┐ appended as the conversation grew
-    {"type":"title","time":…,"data":{…}}        │ w.Append("title", v): the application's own
-    {"type":"truncate","time":…}                ← compaction: the conversation is cut to nothing
-    {"type":"message","time":…,"message":{…}}   ┘ the compacted conversation, then what followed
+    {"type":"message","time":…,"message":{…}}              ┐ appended as the conversation grew
+    {"type":"custom","time":…,"name":"title","data":{…}}   │ w.Append("title", v): the application's own
+    {"type":"truncate","time":…}                           ← compaction: the conversation is cut to nothing
+    {"type":"message","time":…,"message":{…}}              ┘ the compacted conversation, then what followed
 ```
 
 `Load` replays the lines: a message appends, a truncate cuts the
-conversation to its first `keep` messages, anything else is passed over. `Records` returns every line in
-order — what an application folds its own records from, and
-`session.Conversation` folds the conversation from the same records. `Save`
+conversation to its first `keep` messages, a custom record is passed over.
+`Records` returns every line in order — what an application folds its own
+records from — and `Record.Apply` takes the conversation one record further,
+for a reader that needs it as of each line. The application's records are all
+`custom`, told apart by name, so a later version can add a type of its own
+without meeting one of the application's; a reader that meets a type it does
+not know fails rather than replay the conversation wrong. `Save`
 appends only what differs from what the file holds — the messages after the
 longest unchanged prefix, behind a truncate to that prefix when anything after
 it changed — so an edit, a rewind or cleared tool output costs only what
@@ -608,7 +612,7 @@ writes an application record and leaves the flush to the next `Save` or
 `Close`. A crash mid-write leaves an unterminated last line, which reading
 ignores and the next writer cuts off.
 
-`Write` is a lease: one writer per session, across processes, until `Close`.
+`Writer` is a lease: one writer per session, across processes, until `Close`.
 `List` returns the sessions newest first, by file time; `Fork` copies one to a
 new id, and `Delete` removes one no writer holds.
 

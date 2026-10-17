@@ -3,13 +3,18 @@
 // A store is a directory, and a session is one file in it, <id>.jsonl, with
 // one Record per line:
 //
-//	{"type":"message","time":…,"message":{…}}   a message joined the conversation
-//	{"type":"truncate","time":…,"keep":3}       the conversation is cut to its first 3 messages
-//	{"type":"title","time":…,"data":{…}}        anything the application keeps
+//	{"type":"message","time":…,"message":{…}}               a message joined the conversation
+//	{"type":"truncate","time":…,"keep":3}                   the conversation is cut to its first 3 messages
+//	{"type":"custom","time":…,"name":"title","data":{…}}    anything the application keeps
 //
 // The conversation is what the messages and truncations replay to, and Load
 // returns it. Records returns every record, in the order written, for
 // whatever else the application keeps beside the conversation.
+//
+// The application's records are all of type "custom", told apart by name, so
+// the types are the package's alone: a later version can add one without
+// meeting an application's, and a reader that meets a type it does not know
+// fails rather than replaying the conversation wrong.
 //
 // A session has one writer at a time, across processes too. Save it on every
 // change to the conversation:
@@ -64,33 +69,49 @@ var (
 	ErrBusy = errors.New("session: in use by another writer")
 )
 
-// Record is one line of a session. Type "message" carries Message,
-// "truncate" carries Keep, and any other type is the application's, carrying
-// Data.
+// The types of Record.
+const (
+	TypeMessage  = "message"  // a message joined the conversation
+	TypeTruncate = "truncate" // the conversation was cut to its first Keep messages
+	TypeCustom   = "custom"   // the application's record, called Name, carrying Data
+)
+
+// Record is one line of a session.
 type Record struct {
 	Type    string          `json:"type"`
 	Time    time.Time       `json:"time"`
-	Message *ai.Message     `json:"message,omitempty"`
-	Keep    int             `json:"keep,omitempty"` // how many messages a truncate keeps
-	Data    json.RawMessage `json:"data,omitempty"`
+	Message *ai.Message     `json:"message,omitempty"` // TypeMessage
+	Keep    int             `json:"keep,omitempty"`    // TypeTruncate
+	Name    string          `json:"name,omitempty"`    // TypeCustom
+	Data    json.RawMessage `json:"data,omitempty"`    // TypeCustom
 }
 
-// Conversation replays records into the conversation they end with: a
-// message appends, a truncate cuts, and any other record is passed over.
+// Apply returns the conversation msgs becomes after r: a message is appended,
+// a truncate cuts, and a custom record leaves it as it is.
+func (r Record) Apply(msgs []ai.Message) ([]ai.Message, error) {
+	switch r.Type {
+	case TypeMessage:
+		return append(msgs, *r.Message), nil
+	case TypeTruncate:
+		if r.Keep > len(msgs) {
+			return nil, fmt.Errorf("session: truncate keeps %d of %d messages", r.Keep, len(msgs))
+		}
+		return msgs[:r.Keep], nil
+	case TypeCustom:
+		return msgs, nil
+	}
+	return nil, fmt.Errorf("session: record type %q is from a newer version", r.Type)
+}
+
+// Conversation replays records into the conversation they end with.
 func Conversation(records iter.Seq2[Record, error]) ([]ai.Message, error) {
 	var msgs []ai.Message
 	for r, err := range records {
+		if err == nil {
+			msgs, err = r.Apply(msgs)
+		}
 		if err != nil {
 			return nil, err
-		}
-		switch r.Type {
-		case "message":
-			msgs = append(msgs, *r.Message)
-		case "truncate":
-			if r.Keep > len(msgs) {
-				return nil, fmt.Errorf("session: truncate keeps %d of %d messages", r.Keep, len(msgs))
-			}
-			msgs = msgs[:r.Keep]
 		}
 	}
 	return msgs, nil
@@ -155,7 +176,7 @@ func read(f io.Reader, id string) iter.Seq2[Record, error] {
 				yield(Record{}, fmt.Errorf("session: %s line %d: %w", id, n, err))
 				return
 			}
-			if r.Type == "" || r.Type == "message" && r.Message == nil || r.Keep < 0 {
+			if r.Type == "" || r.Type == TypeMessage && r.Message == nil || r.Keep < 0 || r.Type == TypeCustom && r.Name == "" {
 				yield(Record{}, fmt.Errorf("session: %s line %d: not a session record", id, n))
 				return
 			}
@@ -321,10 +342,10 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	}
 	var lines []Record
 	if keep < len(w.saved) {
-		lines = append(lines, Record{Type: "truncate", Time: now, Keep: keep})
+		lines = append(lines, Record{Type: TypeTruncate, Time: now, Keep: keep})
 	}
 	for i := range msgs[keep:] {
-		lines = append(lines, Record{Type: "message", Time: now, Message: &msgs[keep+i]})
+		lines = append(lines, Record{Type: TypeMessage, Time: now, Message: &msgs[keep+i]})
 	}
 	if lines == nil {
 		return w.err
@@ -359,20 +380,19 @@ func clone(msgs []ai.Message) []ai.Message {
 	return out
 }
 
-// Append adds an application record of type typ carrying data as JSON. The
-// types "message" and "truncate" are the conversation's. It is on disk once a
-// Save or Close follows.
-func (w *Writer) Append(typ string, data any) error {
-	if typ == "" || typ == "message" || typ == "truncate" {
-		return fmt.Errorf("session: %q is not an application record type", typ)
+// Append adds a custom record called name, carrying data as JSON. It is on
+// disk once a Save or Close follows.
+func (w *Writer) Append(name string, data any) error {
+	if name == "" {
+		return errors.New("session: a custom record needs a name")
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("session: encoding %s: %w", typ, err)
+		return fmt.Errorf("session: encoding %s: %w", name, err)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.write(Record{Type: typ, Time: time.Now(), Data: raw})
+	return w.write(Record{Type: TypeCustom, Time: time.Now(), Name: name, Data: raw})
 }
 
 func (w *Writer) write(records ...Record) error {

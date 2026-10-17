@@ -299,8 +299,8 @@ type Writer struct {
 
 // Save appends what msgs adds to the conversation the session holds, or a
 // reset and all of msgs when it is not an extension of it, and flushes the
-// session to disk. Messages are matched by ID, or compared whole when they
-// have none; give a changed message a new ID, or none.
+// session to disk. Messages are compared whole, so an edited message is
+// saved even when it keeps its ID.
 func (w *Writer) Save(msgs []ai.Message) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -320,15 +320,20 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	if err := w.write(lines...); err != nil {
 		return err
 	}
-	w.saved = slices.Clone(msgs)
+	w.saved = clone(msgs)
 	return w.sync()
 }
 
-func same(a, b ai.Message) bool {
-	if a.ID != "" || b.ID != "" {
-		return a.ID == b.ID
+func same(a, b ai.Message) bool { return reflect.DeepEqual(a, b) }
+
+// clone copies msgs deep enough that an edit the caller makes in place still
+// differs from what was saved.
+func clone(msgs []ai.Message) []ai.Message {
+	out := slices.Clone(msgs)
+	for i := range out {
+		out[i].Content = out[i].Content.Clone()
 	}
-	return reflect.DeepEqual(a, b)
+	return out
 }
 
 // Append adds an application record of type typ carrying data as JSON. The

@@ -227,3 +227,20 @@ func TestConversation(t *testing.T) {
 		t.Fatalf("Conversation = %v, %v", got, err)
 	}
 }
+
+func TestSaveKeepsAnEditThatKeepsItsID(t *testing.T) {
+	s, _ := open(t)
+	w := write(t, s, "a")
+	conv := []ai.Message{msg("1", "draft")}
+	if err := w.Save(conv); err != nil {
+		t.Fatal(err)
+	}
+	conv[0].Content[0].Text = "edited" // in place, same ID
+	if err := w.Save(conv); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.Load(ctx, "a")
+	if err != nil || len(loaded) != 1 || loaded[0].Text() != "edited" {
+		t.Fatalf("Load = %v, %v; want the edit", ids(loaded), err)
+	}
+}

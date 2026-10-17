@@ -561,56 +561,60 @@ the same way with `Decision.Terminate`.
 ## Sessions
 
 The agent knows nothing about storage. A conversation is a `[]ai.Message`:
-load one, hand it to the agent, and save what the agent holds afterwards.
+load one, hand it to the agent, and save what the agent holds whenever it
+changes.
 
 ```go
-history, err := store.Load(ctx, id)   // session.ErrNotFound for a new one
+store, err := session.Open("sessions")
+w, err := store.Writer(ctx, id)        // the session's one writer; session.ErrBusy if taken
+defer w.Close()
+
+history, err := store.Load(ctx, id)
 a.SetMessages(history)
-
 for e, err := range a.Run(ctx, msg) {
-    render(e)
-}
-err = store.Save(ctx, id, a.Messages())
-```
-
-```go
-type Store interface {
-    Save(ctx context.Context, id string, msgs []ai.Message) error
-    Load(ctx context.Context, id string) ([]ai.Message, error)
+    switch e.(type) {
+    case agent.MessageAdded, agent.MessagesReplaced:
+        err = w.Save(a.Messages())
+    }
 }
 ```
 
-`Save` replaces what the session held with the whole conversation, so
-compaction needs nothing of its own: `SetMessages(summary)`, or a `PreStep`
-that replaced it, and the next save is the summary. `Load` returns exactly what
-the last save wrote.
+`Save` is handed the whole conversation, so compaction needs nothing of its
+own: `SetMessages(summary)`, or a `PreStep` that replaced it, and the next save
+is the summary.
 
-When to save is yours. After each `Run` is the usual answer. A program that
-must not lose a long run of tools to a crash saves on every `MessageAdded`;
-with `jsonl.Store` that costs one appended line per message.
-
-`jsonl.Store` keeps a session as an append-only log. The store is a directory,
-the session is one file in it, and each line is one record:
+A store is a directory, a session is one file in it, and each line is one
+record:
 
 ```
-sessions/                       jsonl.Open("sessions")
+sessions/                       session.Open("sessions")
   20261016-101500.jsonl         one session; the file name is its id
-    {"type":"message","message":{…}}   ┐
-    {"type":"message","message":{…}}   │ appended as the conversation grew
-    {"type":"reset"}                   ← compaction: the conversation starts over
-    {"type":"message","message":{…}}   ┘ the compacted conversation, then what followed
+    {"type":"message","time":…,"message":{…}}              ┐ appended as the conversation grew
+    {"type":"app","time":…,"name":"title","data":{…}}      │ w.Append("title", v): the application's own
+    {"type":"truncate","time":…}                           ← compaction: the conversation is cut to nothing
+    {"type":"message","time":…,"message":{…}}              ┘ the compacted conversation, then what followed
 ```
 
-`Load` replays the lines: a message appends, a reset empties the
-conversation. So the file is everything that happened, and the conversation
-is what the replay ends with. `Save` appends only what the file does not hold
-yet — new messages if the conversation grew, a reset and the whole
-conversation if it changed. A crash mid-write leaves an unterminated last
-line, which `Load` ignores and the next `Save` cuts off.
+`Load` replays the lines: a message appends, a truncate cuts the
+conversation to its first `keep` messages, an app record is passed over.
+`Records` returns every line in order — what an application folds its own
+records from — and `Record.Apply` takes the conversation one record further,
+for a reader that needs it as of each line. The application's records are all
+`app`, told apart by name, so a later version can add a type of its own
+without meeting one of the application's; a reader that meets a type it does
+not know fails rather than replay the conversation wrong. `Save`
+appends only what differs from what the file holds — the messages after the
+longest unchanged prefix, behind a truncate to that prefix when anything after
+it changed — so an edit, a rewind or cleared tool output costs only what
+changed. It compares messages whole and flushes to disk. To branch at message
+k, `Fork` the session and save its first k messages to the copy. `Append`
+writes an application record and leaves the flush to the next `Save` or
+`Close`. A crash mid-write leaves an unterminated last line, which reading
+ignores and the next writer cuts off.
 
-`List` returns the sessions newest first, by file time. Renaming, copying and
-deleting a session are file operations. Give a session one writer at a time:
-two writers appending to one file interleave their lines.
+`Writer` is a lease: one writer per session, across processes, until `Close`.
+`List` returns the sessions newest first, by file time; `Fork` copies one to a
+new id, and `Delete` removes one no writer holds.
 
 What a turn cost and how it ended are on `InferenceEnd` and `TurnEnd`. They are
 not the conversation, so a session does not keep them; an application that
@@ -647,9 +651,7 @@ pkg/agent/
   hook.go      the six hooks, and how each chain runs
   tool.go      Tool, Result, ToolFunc, Sequential
   mcp/         an MCP server's tools, as this package's own
-pkg/session/  Save and Load a conversation
-  store.go    the Store interface
-  jsonl/      a Store as one file per session, one message per line
+pkg/session/  a conversation on disk: one append-only log per session
 ```
 
 ## What it does not do

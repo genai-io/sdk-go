@@ -445,19 +445,22 @@ answers a failed call with a shorter conversation and another go at the step.
 ### Sessions
 
 The agent never learns storage exists. A conversation is a `[]ai.Message`:
-load it, hand it over, save what the agent holds afterwards.
+load it, hand it over, save what the agent holds as it changes.
 
 ```go
-history, _ := store.Load(ctx, id)        // session.ErrNotFound if new
+w, _ := store.Writer(ctx, id)            // one writer per session
+history, _ := store.Load(ctx, id)
 a.SetMessages(history)
 for e, err := range a.Run(ctx, ai.UserMessage(line)) {
-    render(e)
+    switch e.(type) {
+    case agent.MessageAdded, agent.MessagesReplaced:
+        w.Save(a.Messages())             // appends only what is new
+    }
 }
-store.Save(ctx, id, a.Messages())        // the whole conversation
 ```
 
-`pkg/session` is that `Store`, and `pkg/session/jsonl` keeps one append-only
-file per conversation.
+`pkg/session` keeps one append-only file per conversation, and the
+application's own records beside its messages.
 
 Compaction needs nothing more: the next save is the compacted conversation.
 

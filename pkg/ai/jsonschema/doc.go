@@ -51,13 +51,6 @@
 // the providers document as supported, so a tag cannot produce a schema an
 // endpoint refuses.
 //
-// A key one edit from a keyword — enums, descrption — is refused rather than
-// ignored, and so are the jsonschema and ai tags, which name the two other
-// conventions a reader might expect to work here. Go drops an unrecognised key
-// without a word, which for these keys means losing the only thing the field
-// was annotated with. A key that is nobody's near miss is left alone: db,
-// validate and the rest belong to other tools.
-//
 // # Failing early
 //
 // Anything wrong with a type or a tag panics, the way a bad pattern panics in

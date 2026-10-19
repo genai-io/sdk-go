@@ -29,7 +29,6 @@ var keywords = map[string]struct{ numeric bool }{
 
 // applyTags writes a field's keywords onto its schema.
 func applyTags(field reflect.StructField, schema map[string]any, t reflect.Type, where string) {
-	rejectNearMisses(field, where)
 	for key, spec := range keywords {
 		value, ok := field.Tag.Lookup(key)
 		if !ok {
@@ -51,101 +50,6 @@ func applyTags(field reflect.StructField, schema map[string]any, t reflect.Type,
 			schema[key] = value
 		}
 	}
-}
-
-// rejectNearMisses catches a keyword that was misspelled or pluralised.
-func rejectNearMisses(field reflect.StructField, where string) {
-	for _, key := range tagKeys(string(field.Tag)) {
-		if _, known := keywords[key]; known || key == "json" {
-			continue
-		}
-		if key == "jsonschema" || key == "ai" {
-			panic(fmt.Sprintf("jsonschema: %s carries a %q tag. Keywords go in tags of their own: "+
-				"`description:\"…\" enum:\"a|b\"`", where, key))
-		}
-		for candidate := range keywords {
-			if nearMiss(key, candidate) {
-				panic(fmt.Sprintf("jsonschema: %s has a %s tag; did you mean %s?", where, key, candidate))
-			}
-		}
-	}
-}
-
-// tagKeys lists the keys present in a raw struct tag. reflect can look one up
-// but cannot enumerate them, and enumerating is what makes a typo findable.
-func tagKeys(tag string) []string {
-	var out []string
-	for tag != "" {
-		i := 0
-		for i < len(tag) && tag[i] == ' ' {
-			i++
-		}
-		tag = tag[i:]
-		i = 0
-		for i < len(tag) && tag[i] > ' ' && tag[i] != ':' && tag[i] != '"' {
-			i++
-		}
-		if i == 0 || i+1 >= len(tag) || tag[i] != ':' || tag[i+1] != '"' {
-			return out
-		}
-		key := tag[:i]
-		tag = tag[i+1:]
-		i = 1
-		for i < len(tag) && tag[i] != '"' {
-			if tag[i] == '\\' {
-				i++
-			}
-			i++
-		}
-		if i >= len(tag) {
-			return out
-		}
-		out = append(out, key)
-		tag = tag[i+1:]
-	}
-	return out
-}
-
-// nearMiss reports keys within one edit of each other, plus the plural of a
-// keyword — "enums" for "enum" is the mistake people actually make.
-func nearMiss(got, want string) bool {
-	if got == want+"s" {
-		return true
-	}
-	if abs(len(got)-len(want)) > 1 {
-		return false
-	}
-	lower, upper := strings.ToLower(got), strings.ToLower(want)
-	if lower == upper {
-		return true
-	}
-	edits, i, j := 0, 0, 0
-	for i < len(lower) && j < len(upper) {
-		if lower[i] == upper[j] {
-			i, j = i+1, j+1
-			continue
-		}
-		edits++
-		if edits > 1 {
-			return false
-		}
-		switch {
-		case len(lower) > len(upper):
-			i++
-		case len(lower) < len(upper):
-			j++
-		default:
-			i, j = i+1, j+1
-		}
-	}
-	return edits+abs(len(lower)-i)+abs(len(upper)-j) <= 1
-}
-
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
 
 // parseEnum types the members by the field they constrain, so a numeric field

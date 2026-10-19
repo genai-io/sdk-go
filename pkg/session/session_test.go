@@ -214,18 +214,17 @@ func TestRefused(t *testing.T) {
 	}
 }
 
-func TestConversation(t *testing.T) {
+func TestApply(t *testing.T) {
 	a := msg("1", "a")
-	recs := []session.Record{{Type: "message", Message: &a}, {Type: "app", Name: "note"}, {Type: "truncate"}, {Type: "message", Message: &a}, {Type: "message", Message: &a}}
-	got, err := session.Conversation(func(yield func(session.Record, error) bool) {
-		for _, r := range recs {
-			if !yield(r, nil) {
-				return
-			}
+	var got []ai.Message
+	for _, r := range []session.Record{{Type: "message", Message: &a}, {Type: "app", Name: "note"}, {Type: "truncate"}, {Type: "message", Message: &a}, {Type: "message", Message: &a}} {
+		var err error
+		if got, err = r.Apply(got); err != nil {
+			t.Fatal(err)
 		}
-	})
-	if err != nil || len(got) != 2 {
-		t.Fatalf("Conversation = %v, %v", got, err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Apply left %d messages, want 2", len(got))
 	}
 }
 

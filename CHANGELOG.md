@@ -9,6 +9,8 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-19
+
 ### Added
 
 - **`OpenAIResponsesCompat.CodexModelListing`**: the responses driver lists
@@ -977,6 +979,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.9.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.9.0
 [0.8.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.8.0
 [0.7.7]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.7
 [0.7.6]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.6

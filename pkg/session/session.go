@@ -53,7 +53,6 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -103,8 +102,8 @@ func (r Record) Apply(msgs []ai.Message) ([]ai.Message, error) {
 	return nil, fmt.Errorf("session: record type %q is from a newer version", r.Type)
 }
 
-// Conversation replays records into the conversation they end with.
-func Conversation(records iter.Seq2[Record, error]) ([]ai.Message, error) {
+// conversation replays records into the conversation they end with.
+func conversation(records iter.Seq2[Record, error]) ([]ai.Message, error) {
 	var msgs []ai.Message
 	for r, err := range records {
 		if err == nil {
@@ -132,7 +131,7 @@ func Open(dir string) (*Store, error) {
 
 // Load returns the session's conversation.
 func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
-	return Conversation(s.Records(ctx, id))
+	return conversation(s.Records(ctx, id))
 }
 
 // Records returns the session's records in the order they were written. An
@@ -307,8 +306,12 @@ func open(path, id string) (*Writer, error) {
 	}
 	data, err := io.ReadAll(f)
 	w := &Writer{f: f}
+	var msgs []ai.Message
 	if err == nil {
-		w.saved, err = Conversation(read(bytes.NewReader(data), id))
+		msgs, err = conversation(read(bytes.NewReader(data), id))
+	}
+	if err == nil {
+		w.saved, err = encode(msgs)
 	}
 	if err == nil {
 		err = f.Truncate(int64(bytes.LastIndexByte(data, '\n') + 1))
@@ -324,20 +327,25 @@ type Writer struct {
 	mu    sync.Mutex
 	f     *os.File
 	lock  *fileLock
-	saved []ai.Message // the conversation as the file holds it
-	err   error        // a failed write leaves the file unfit to append to
+	saved [][]byte // the conversation as the file holds it, one encoding per message
+	err   error    // a failed write leaves the file unfit to append to
 }
 
 // Save makes the session hold msgs, appending only what differs from what it
 // holds: the messages after the longest unchanged prefix, behind a truncate
 // to that prefix when anything after it changed. It flushes the session to
-// disk. Messages are compared whole, so an edit that keeps its ID is saved.
+// disk. Messages are compared by their encodings, so an edit that keeps its
+// ID is saved, and a message read back from disk is not taken for an edit.
 func (w *Writer) Save(msgs []ai.Message) error {
+	encs, err := encode(msgs)
+	if err != nil {
+		return err
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	now := time.Now()
 	keep := 0
-	for keep < min(len(w.saved), len(msgs)) && same(w.saved[keep], msgs[keep]) {
+	for keep < min(len(w.saved), len(encs)) && bytes.Equal(w.saved[keep], encs[keep]) {
 		keep++
 	}
 	var lines []Record
@@ -353,31 +361,19 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	if err := w.write(lines...); err != nil {
 		return err
 	}
-	w.saved = clone(msgs)
+	w.saved = encs
 	return w.sync()
 }
 
-// same reports whether two messages are the same message. Their encodings
-// decide when the values differ, since a message read back from disk can
-// differ from the one written only where JSON cannot tell — an empty slice
-// and a nil one.
-func same(a, b ai.Message) bool {
-	if reflect.DeepEqual(a, b) {
-		return true
+func encode(msgs []ai.Message) ([][]byte, error) {
+	encs := make([][]byte, len(msgs))
+	for i, m := range msgs {
+		var err error
+		if encs[i], err = json.Marshal(m); err != nil {
+			return nil, fmt.Errorf("session: encoding message %d: %w", i, err)
+		}
 	}
-	ja, errA := json.Marshal(a)
-	jb, errB := json.Marshal(b)
-	return errA == nil && errB == nil && bytes.Equal(ja, jb)
-}
-
-// clone copies msgs deep enough that an edit the caller makes in place still
-// differs from what was saved.
-func clone(msgs []ai.Message) []ai.Message {
-	out := slices.Clone(msgs)
-	for i := range out {
-		out[i].Content = out[i].Content.Clone()
-	}
-	return out
+	return encs, nil
 }
 
 // Append adds an app record called name, carrying data as JSON. It is on

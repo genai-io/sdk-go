@@ -12,7 +12,7 @@ import (
 func Repair(msgs []Message) []Message {
 	out := repairToolPairing(msgs)
 	for i := range out {
-		if content, changed := sanitizeContent(out[i].Content); changed {
+		if content := sanitizeContent(out[i].Content); content != nil {
 			out[i].Content = content
 		}
 	}
@@ -28,7 +28,7 @@ func repairToolPairing(msgs []Message) []Message {
 
 		// Tool results are only ever emitted alongside the assistant message
 		// they answer, below. One reaching here answers no call, so only it goes.
-		if msg.HasToolResults() {
+		if msg.Content.Has(BlockToolResult) {
 			msg.Content = filterBlocks(msg.Content, func(block Block) bool {
 				return block.Type != BlockToolResult
 			})
@@ -51,7 +51,7 @@ func repairToolPairing(msgs []Message) []Message {
 		// all that is wanted here is the identifiers.
 		answered := make(map[string]bool)
 		j := i + 1
-		for j < len(msgs) && msgs[j].HasToolResults() {
+		for j < len(msgs) && msgs[j].Content.Has(BlockToolResult) {
 			for _, block := range msgs[j].Content {
 				if block.Type == BlockToolResult && block.ToolResult != nil {
 					answered[block.ToolResult.ToolCallID] = true
@@ -125,7 +125,9 @@ func filterBlocks(content Content, keep func(Block) bool) Content {
 	return content
 }
 
-func sanitizeContent(c Content) (Content, bool) {
+// sanitizeContent returns c with its text made valid, or nil if nothing had to
+// change.
+func sanitizeContent(c Content) Content {
 	var out Content
 	for i, block := range c {
 		clean, changed := sanitizeBlock(block)
@@ -137,7 +139,7 @@ func sanitizeContent(c Content) (Content, bool) {
 		}
 		out[i] = clean
 	}
-	return out, out != nil
+	return out
 }
 
 // sanitizeBlock returns the block with its text made valid, and whether
@@ -168,13 +170,13 @@ func sanitizeBlock(block Block) (Block, bool) {
 		if block.ToolResult == nil {
 			return block, false
 		}
-		content, edited := sanitizeContent(block.ToolResult.Content)
+		content := sanitizeContent(block.ToolResult.Content)
 		name := sanitizeText(block.ToolResult.ToolName)
-		if !edited && name == block.ToolResult.ToolName {
+		if content == nil && name == block.ToolResult.ToolName {
 			return block, false
 		}
 		clean := cloneBlock(block)
-		if edited {
+		if content != nil {
 			clean.ToolResult.Content = content
 		}
 		clean.ToolResult.ToolName = name

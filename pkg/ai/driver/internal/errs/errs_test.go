@@ -73,7 +73,7 @@ func TestClassifyReadsEachSignalWhereItBelongs(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := Classify("stub", tc.status, tc.resp, "", tc.message, tc.err)
+			got := classify("stub", Details{Status: tc.status, Response: tc.resp, Message: tc.message}, tc.err, false)
 			if got.Kind != tc.want {
 				t.Errorf("kind = %q, want %q", got.Kind, tc.want)
 			}
@@ -87,22 +87,22 @@ func TestClassifyReadsEachSignalWhereItBelongs(t *testing.T) {
 	}
 }
 
-// A driver that already classified a failure has more to go on than Classify
+// A driver that already classified a failure has more to go on than classify
 // does, so its answer must survive being handed back through here.
 func TestClassifyPassesAnAlreadyTypedErrorThrough(t *testing.T) {
 	typed := &ai.Error{Driver: "anthropic", Kind: ai.KindContextExceeded, Message: "prompt is too long"}
-	if got := Classify("stub", http.StatusUnauthorized, nil, "", "ignored", typed); got != typed {
-		t.Errorf("Classify = %+v, want the driver's own error untouched", got)
+	if got := classify("stub", Details{Status: http.StatusUnauthorized, Message: "ignored"}, typed, false); got != typed {
+		t.Errorf("classify = %+v, want the driver's own error untouched", got)
 	}
 }
 
 // A stream that dies has usually lost its status, and the transport rarely says
 // why. Calling that a network failure is what makes it retryable.
 func TestClassifyStreamFallsBackToNetwork(t *testing.T) {
-	if got := ClassifyStream("stub", 0, nil, "", "connection went away", nil); got.Kind != ai.KindNetwork {
+	if got := classify("stub", Details{Message: "connection went away"}, nil, true); got.Kind != ai.KindNetwork {
 		t.Errorf("kind = %q, want %q", got.Kind, ai.KindNetwork)
 	}
-	if got := ClassifyStream("stub", http.StatusUnauthorized, nil, "", "bad key", nil); got.Kind != ai.KindAuth {
+	if got := classify("stub", Details{Status: http.StatusUnauthorized, Message: "bad key"}, nil, true); got.Kind != ai.KindAuth {
 		t.Errorf("kind = %q, want a real classification to survive", got.Kind)
 	}
 }

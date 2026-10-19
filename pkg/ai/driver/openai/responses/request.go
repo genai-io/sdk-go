@@ -204,7 +204,10 @@ func (d *driver) messageParam(role wire.EasyInputMessageRole, content ai.Content
 			}
 		case ai.BlockImage:
 			if block.Image != nil {
-				list = append(list, imagePart(block.Image.MediaType, block.Image.Data))
+				list = append(list, wire.ResponseInputContentUnionParam{OfInputImage: &wire.ResponseInputImageParam{
+					Detail:   wire.ResponseInputImageDetailAuto,
+					ImageURL: sdk.String(oai.DataURI(block.Image.MediaType, block.Image.Data)),
+				}})
 			}
 		}
 	}
@@ -212,22 +215,12 @@ func (d *driver) messageParam(role wire.EasyInputMessageRole, content ai.Content
 	return param
 }
 
-func imagePart(mediaType, data string) wire.ResponseInputContentUnionParam {
-	part := wire.ResponseInputContentParamOfInputImage(wire.ResponseInputImageDetailAuto)
-	if part.OfInputImage != nil {
-		part.OfInputImage.ImageURL = sdk.String(oai.DataURI(mediaType, data))
-	}
-	return part
-}
-
 // reasoningParam echoes a reasoning item from an earlier turn back.
 func reasoningParam(r ai.ReasoningItem) *wire.ResponseReasoningItemParam {
 	p := &wire.ResponseReasoningItemParam{
-		ID:      r.ID,
-		Summary: []wire.ResponseReasoningItemSummaryParam{},
-	}
-	if r.EncryptedContent != "" {
-		p.EncryptedContent = sdk.Opt(r.EncryptedContent)
+		ID:               r.ID,
+		EncryptedContent: sdk.Opt(r.EncryptedContent),
+		Summary:          []wire.ResponseReasoningItemSummaryParam{},
 	}
 	if r.Summary != "" {
 		p.Summary = []wire.ResponseReasoningItemSummaryParam{{Text: r.Summary}}

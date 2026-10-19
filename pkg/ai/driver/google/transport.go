@@ -53,7 +53,7 @@ func (d *driver) do(req *http.Request) (*http.Response, error) {
 	if d.apiKey != "" {
 		req.Header.Set("x-goog-api-key", d.apiKey)
 	}
-	for k, v := range d.headers {
+	for k, v := range d.model.Headers {
 		req.Header.Set(k, v)
 	}
 	res, err := d.client.Do(req)

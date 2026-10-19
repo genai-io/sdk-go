@@ -210,9 +210,11 @@ func (t *tool) Schema() ai.Schema { return t.schema }
 // Run calls the tool. A failure returns both content and error: the loop shows
 // the model the content, where the server put the reason it can correct.
 func (t *tool) Run(ctx context.Context, call ai.ToolCall) (agent.Result, error) {
-	args, err := decodeArgs(call.Input)
-	if err != nil {
-		return agent.Result{}, fmt.Errorf("mcp: %s was called with arguments that are not a JSON object: %w", t.schema.Name, err)
+	// The loop has already checked the input against the tool's schema. Empty
+	// input is {}, not null: several servers reject a null there.
+	args := json.RawMessage(call.Input)
+	if input := strings.TrimSpace(call.Input); input == "" || input == "null" {
+		args = json.RawMessage("{}")
 	}
 
 	res, err := t.client.session.CallTool(ctx, &mcpsdk.CallToolParams{Name: t.name, Arguments: args})
@@ -259,22 +261,6 @@ func errorText(c ai.Content) string {
 		return text
 	}
 	return "the tool reported an error and said nothing about it"
-}
-
-// decodeArgs turns the model's arguments into the object a server expects.
-// Empty input is {}, not null: several servers reject a null there.
-func decodeArgs(input string) (map[string]any, error) {
-	if strings.TrimSpace(input) == "" {
-		return map[string]any{}, nil
-	}
-	var args map[string]any
-	if err := json.Unmarshal([]byte(input), &args); err != nil {
-		return nil, err
-	}
-	if args == nil {
-		return map[string]any{}, nil
-	}
-	return args, nil
 }
 
 // Resource is something a server offers to read. Not a tool: the model cannot

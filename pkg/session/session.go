@@ -362,7 +362,10 @@ func (w *Writer) Save(msgs []ai.Message) error {
 		return err
 	}
 	w.saved = encs
-	return w.sync()
+	if err := w.f.Sync(); err != nil {
+		w.err = err
+	}
+	return w.err
 }
 
 func encode(msgs []ai.Message) ([][]byte, error) {
@@ -411,13 +414,6 @@ func (w *Writer) write(records ...Record) error {
 		return err
 	}
 	return nil
-}
-
-func (w *Writer) sync() error {
-	if err := w.f.Sync(); err != nil {
-		w.err = err
-	}
-	return w.err
 }
 
 // Close flushes the session to disk and gives up the writer.

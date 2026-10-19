@@ -70,8 +70,8 @@ func TestErrorRendersOnlyThePartsItHas(t *testing.T) {
 	}
 }
 
-// An application asking whether to retry holds a bare error, not the six
-// things a driver hands Classify. A dropped connection is worth another go
+// An application asking whether to retry holds a bare error, not the details
+// a driver hands its classifier. A dropped connection is worth another go
 // whether or not somebody wrapped it first.
 func TestIsRetryableAnswersForAnUnwrappedTransportFailure(t *testing.T) {
 	for _, tc := range []struct {

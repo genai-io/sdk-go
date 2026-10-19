@@ -241,7 +241,7 @@ func structSchema(t reflect.Type, seen map[reflect.Type]bool, where string) map[
 		}
 		schema := schemaForType(field.Type, seen, at)
 		applyTags(field, schema, field.Type, at)
-		if optional || slices.Contains(typeNames(schema["type"]), "null") {
+		if optional || admitsNull(schema) {
 			schema = nullable(schema)
 		}
 		properties[name] = schema

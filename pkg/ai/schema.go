@@ -2,6 +2,7 @@ package ai
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -114,10 +115,7 @@ func (s Schema) Validate(input string) error {
 	if len(definition) == 0 {
 		return nil
 	}
-	name := s.Name
-	if name == "" {
-		name = "the schema"
-	}
+	name := cmp.Or(s.Name, "the schema")
 	var value any
 	trimmed := bytes.TrimSpace([]byte(input))
 	if len(trimmed) == 0 {
@@ -134,10 +132,7 @@ func (s Schema) Validate(input string) error {
 // WireName is the identifier to send for a protocol that requires a schema to
 // be named. It is the schema's own Name, or "response" when it states none.
 func (s Schema) WireName() string {
-	if s.Name == "" {
-		return "response"
-	}
-	return s.Name
+	return cmp.Or(s.Name, "response")
 }
 
 func cloneSchema(schema *Schema) *Schema {

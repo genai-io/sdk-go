@@ -36,18 +36,15 @@ func (m Model) validate(req *Request) error {
 	return m.validateCapabilities(req)
 }
 
-// toolResultsHaveImages reports whether a tool result carries a picture: one
-// the model would be shown as surely as an image the caller attached.
-func toolResultsHaveImages(c Content) bool {
-	return slices.ContainsFunc(c.ToolResults(), func(r ToolResult) bool { return r.Content.HasImages() })
-}
-
 // validateCapabilities checks the request against what this model declares it
 // cannot do.
 func (m Model) validateCapabilities(req *Request) error {
 	if !m.Accepts(ModalityImage) {
 		for _, msg := range req.Messages {
-			if msg.Content.HasImages() || toolResultsHaveImages(msg.Content) {
+			// A picture in a tool result is shown to the model as surely as
+			// one the caller attached.
+			if msg.Content.HasImages() || slices.ContainsFunc(msg.Content.ToolResults(),
+				func(r ToolResult) bool { return r.Content.HasImages() }) {
 				return m.unsupported("does not accept image input")
 			}
 		}
@@ -173,14 +170,12 @@ func validateSettings(req *Request) error {
 }
 
 func (m Model) validateProtocolBlock(block Block) error {
-	if block.Type == BlockToolResult && block.ToolResult != nil &&
+	// Gemini takes no image in a tool result. Sending one drops it silently,
+	// and a model asked about a picture it was never shown answers anyway.
+	// Chat carries it in a user message after the results.
+	if m.API.googleFamily() && block.Type == BlockToolResult && block.ToolResult != nil &&
 		block.ToolResult.Content.HasImages() {
-		// Gemini takes no image in a tool result. Sending one drops it
-		// silently, and a model asked about a picture it was never shown
-		// answers anyway. Chat carries it in a user message after the results.
-		if m.API.googleFamily() {
-			return fmt.Errorf("the Gemini protocol carries only text in a tool result")
-		}
+		return fmt.Errorf("the Gemini protocol carries only text in a tool result")
 	}
 	// Thinking and reasoning are not checked here: they are the model's own
 	// state, and strip drops the ones this model cannot replay before anything

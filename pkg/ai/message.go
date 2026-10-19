@@ -354,6 +354,3 @@ func (m Message) ToolCalls() []ToolCall { return m.Content.ToolCalls() }
 
 // ToolResults returns the message's results in block order.
 func (m Message) ToolResults() []ToolResult { return m.Content.ToolResults() }
-
-// HasToolResults reports whether this turn carries any tool result.
-func (m Message) HasToolResults() bool { return m.Content.Has(BlockToolResult) }

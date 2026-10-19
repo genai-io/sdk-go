@@ -60,7 +60,7 @@ func checkType(schema map[string]any, value any, path string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("%s must be %s, not %s", at(path), joinWords(wanted, "or"), got)
+	return fmt.Errorf("%s must be %s, not %s", at(path), joinWords(wanted), got)
 }
 
 func checkObject(schema map[string]any, value map[string]any, path string) error {
@@ -283,17 +283,17 @@ func joinValues(values []any) string {
 	for i, v := range values {
 		out[i] = fmt.Sprint(v)
 	}
-	return joinWords(out, "or")
+	return joinWords(out)
 }
 
-func joinWords(words []string, conjunction string) string {
+func joinWords(words []string) string {
 	switch len(words) {
 	case 0:
 		return ""
 	case 1:
 		return words[0]
 	}
-	return strings.Join(words[:len(words)-1], ", ") + " " + conjunction + " " + words[len(words)-1]
+	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
 }
 
 func plural(one, many string, n int) string {

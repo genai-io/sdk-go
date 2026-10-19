@@ -106,9 +106,8 @@ func (e *Error) Unwrap() error { return e.Err }
 // another attempt whether or not it passed through a driver on the way here,
 // and an application should not have to reconstruct an *Error to be told so.
 func IsRetryable(err error) bool {
-	var e *Error
 	kind, ok := ErrorKind(""), true
-	if errors.As(err, &e) {
+	if e, isErr := errors.AsType[*Error](err); isErr {
 		kind = e.Kind
 	} else {
 		kind, ok = classifyTransport(err)
@@ -118,8 +117,8 @@ func IsRetryable(err error) bool {
 
 // IsKind reports whether err is a provider error of the given kind.
 func IsKind(err error, kind ErrorKind) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Kind == kind
+	e, ok := errors.AsType[*Error](err)
+	return ok && e.Kind == kind
 }
 
 // IsAuth reports whether err is a credential failure.
@@ -131,8 +130,7 @@ func IsContextExceeded(err error) bool { return IsKind(err, KindContextExceeded)
 
 // RetryAfter returns the provider's rate-limit hint, or 0.
 func RetryAfter(err error) time.Duration {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.RetryAfter
 	}
 	return 0
@@ -143,8 +141,6 @@ func RetryAfter(err error) time.Duration {
 // those, leaving the driver to fall back to its own signals.
 func classifyTransport(err error) (ErrorKind, bool) {
 	switch {
-	case err == nil:
-		return KindUnknown, false
 	case errors.Is(err, context.Canceled):
 		return KindCanceled, true
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
@@ -154,8 +150,7 @@ func classifyTransport(err error) (ErrorKind, bool) {
 	// net.Error also matches a per-request timeout — including
 	// context.DeadlineExceeded — which is likewise worth retrying. A user
 	// interrupt was already caught above and stays fatal.
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if _, ok := errors.AsType[net.Error](err); ok {
 		return KindNetwork, true
 	}
 	return KindUnknown, false

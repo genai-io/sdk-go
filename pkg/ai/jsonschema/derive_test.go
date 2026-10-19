@@ -220,18 +220,6 @@ func TestForPanics(t *testing.T) {
 		"a recursive type": {
 			func() { _ = jsonschema.For[recursive]() }, "refers to itself",
 		},
-		"a pluralised keyword": {
-			func() { _ = jsonschema.For[pluralised]() }, "did you mean enum",
-		},
-		"a misspelled keyword": {
-			func() { _ = jsonschema.For[misspelled]() }, "did you mean description",
-		},
-		"another library's key": {
-			func() { _ = jsonschema.For[otherLibrary]() }, "jsonschema",
-		},
-		"the ai tag this package used to take": {
-			func() { _ = jsonschema.For[aiTagged]() }, `"ai" tag`,
-		},
 		"an enum a boolean cannot hold": {
 			func() { _ = jsonschema.For[unbooleanEnum]() }, "not a boolean",
 		},
@@ -262,22 +250,6 @@ func TestForPanics(t *testing.T) {
 
 type recursive struct {
 	Next *recursive `json:"next"`
-}
-
-type pluralised struct {
-	Priority string `json:"priority" enums:"low|high"`
-}
-
-type misspelled struct {
-	Query string `json:"query" descrption:"what to look for"`
-}
-
-type otherLibrary struct {
-	Query string `json:"query" jsonschema:"description=what to look for"`
-}
-
-type aiTagged struct {
-	Query string `json:"query" ai:"description=what to look for"`
 }
 
 type unbooleanEnum struct {

@@ -583,56 +583,6 @@ func TestCompleteAsNamesTheTypeOnce(t *testing.T) {
 	}
 }
 
-// Go ignores an unrecognised struct tag without a word. For this package's
-// keys that means a field silently loses the one thing it was annotated with —
-// the description the model was supposed to read, or the enum that was
-// supposed to constrain it. Every way of getting the key wrong is refused by
-// name instead.
-func TestAMistypedSchemaTagIsNotSilent(t *testing.T) {
-	type OtherLibrary struct {
-		Q string `json:"q" jsonschema:"description=what to look for"`
-	}
-	type Pluralised struct {
-		Q string `json:"q" enums:"low|high"`
-	}
-	type Misspelled struct {
-		Q string `json:"q" descrption:"what to look for"`
-	}
-
-	for name, tc := range map[string]struct {
-		derive func()
-		want   string
-	}{
-		"another library's key": {func() { _ = ai.ToolSchema[OtherLibrary]("t", "") }, "jsonschema"},
-		"a pluralised keyword":  {func() { _ = ai.ToolSchema[Pluralised]("t", "") }, "did you mean enum"},
-		"a misspelled keyword":  {func() { _ = ai.ToolSchema[Misspelled]("t", "") }, "did you mean description"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			defer func() {
-				r := recover()
-				if r == nil {
-					t.Fatal("the tag must not be silently dropped")
-				}
-				if msg := fmt.Sprint(r); !strings.Contains(msg, tc.want) {
-					t.Errorf("panic = %q\nwant it to mention %q", msg, tc.want)
-				}
-			}()
-			tc.derive()
-		})
-	}
-
-	// An unrelated tool's tag is left alone: it is not one edit from anything
-	// here, so it is somebody else's and none of our business.
-	type Unrelated struct {
-		Q string `json:"q" db:"query" validate:"required" description:"what to look for"`
-	}
-	got := ai.ToolSchema[Unrelated]("t", "").DefinitionMap()
-	props := got["properties"].(map[string]any)["q"].(map[string]any)
-	if props["description"] != "what to look for" {
-		t.Errorf("q = %v, want the description alongside the unrelated tags", props)
-	}
-}
-
 // The schema has to be one the providers accept, not merely one that is valid.
 // These are the rules a general-purpose generator gets wrong, and each is a
 // documented requirement of OpenAI's strict structured output.

@@ -13,24 +13,14 @@ func Endpoint(vendorID string) (*endpoint.Endpoint, error) {
 	if !ok {
 		return nil, &catalog.UnknownVendorError{Vendor: vendorID}
 	}
-	if _, interactive := flows[v.ID]; interactive {
-		cfg, err := interactiveConfig(v, ai.Model{}, nil)
-		if err != nil {
-			return nil, err
-		}
-		return v.Endpoint(endpoint.Config{
-			BaseURL:    cfg.Model.BaseURL,
-			HTTPClient: cfg.HTTPClient,
-		}), nil
-	}
-
-	cfg, err := envConfig(v, ai.Model{})
+	cfg, err := vendorConfig(v, ai.Model{})
 	if err != nil {
 		return nil, err
 	}
 	return v.Endpoint(endpoint.Config{
-		APIKey:  cfg.APIKey,
-		BaseURL: cfg.Model.BaseURL,
-		Vertex:  cfg.Vertex,
+		APIKey:     cfg.APIKey,
+		BaseURL:    cfg.Model.BaseURL,
+		HTTPClient: cfg.HTTPClient,
+		Vertex:     cfg.Vertex,
 	}), nil
 }

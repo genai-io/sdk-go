@@ -10,7 +10,7 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
-func (d *driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatCompletionNewParams {
+func (d *driver) buildParams(req *ai.Request) sdk.ChatCompletionNewParams {
 	params := sdk.ChatCompletionNewParams{
 		Model:         d.model.ID,
 		Messages:      d.convertMessages(req),
@@ -45,6 +45,7 @@ func (d *driver) buildParams(req *ai.Request, level ai.ReasoningLevel) sdk.ChatC
 			}
 		}
 	}
+	level, _ := d.model.ResolveLevel(req.Effort)
 	d.applyReasoning(&params, level)
 	// Caller and model sampling parameters land last so they can reach fields
 	// this driver does not model, and override the ones it does.
@@ -130,7 +131,7 @@ func (d *driver) convertMessages(req *ai.Request) []sdk.ChatCompletionMessagePar
 		out = append(out, sdk.SystemMessage(req.System))
 	}
 	for _, msg := range req.Messages {
-		if msg.HasToolResults() {
+		if msg.Content.Has(ai.BlockToolResult) {
 			// Chat Completions carries one tool result per message, so a turn
 			// answering several calls expands into several messages.
 			for _, r := range msg.ToolResults() {

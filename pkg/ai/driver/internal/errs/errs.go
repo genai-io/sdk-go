@@ -2,7 +2,7 @@
 //
 // Reading a failure is protocol-specific — each SDK has its own error type, and
 // the Gemini driver has no SDK at all — but nothing after that differs: the
-// status, code, message and response go to Classify in the same order every
+// status, code, message and response are classified the same way every
 // time. Only the reading is worth writing once per protocol, so only the
 // reading lives in the drivers.
 //
@@ -53,8 +53,7 @@ func (c Classifier) Wrap(err error) error {
 	if err == nil {
 		return nil
 	}
-	d := c.read(err)
-	return Classify(c.driver, d.Status, d.Response, d.Code, d.Message, err)
+	return classify(c.driver, c.read(err), err, false)
 }
 
 // WrapStream classifies a failure that ended a stream, where the transport
@@ -63,20 +62,20 @@ func (c Classifier) WrapStream(err error) error {
 	if err == nil {
 		return nil
 	}
-	d := c.read(err)
-	return ClassifyStream(c.driver, d.Status, d.Response, d.Code, d.Message, err)
+	return classify(c.driver, c.read(err), err, true)
 }
 
-// Classify assembles an *ai.Error from what a driver has to hand. It applies
+// classify assembles an *ai.Error from what a driver has to hand. It applies
 // the checks in the order that keeps each from masking the next: an already
 // classified error, then a cancel, then the message, then the status, with the
-// transport as the last word.
-func Classify(driver string, status int, resp *http.Response, code, message string, err error) *ai.Error {
-	var typed *ai.Error
-	if errors.As(err, &typed) {
+// transport as the last word. A stream that ends unexplained is a network
+// failure: the transport commonly loses the protocol's typed error.
+func classify(driver string, d Details, err error, stream bool) *ai.Error {
+	if typed, ok := errors.AsType[*ai.Error](err); ok {
 		return typed
 	}
-	out := &ai.Error{Driver: driver, Status: status, Code: code, Message: message, Err: err}
+	status := d.Status
+	out := &ai.Error{Driver: driver, Status: status, Code: d.Code, Message: d.Message, Err: err}
 	if out.Message == "" && err != nil {
 		out.Message = err.Error()
 	}
@@ -90,21 +89,12 @@ func Classify(driver string, status int, resp *http.Response, code, message stri
 	case (status == 0 || status == http.StatusBadRequest) && IsContextExceededMessage(out.Message):
 		out.Kind = ai.KindContextExceeded
 	case status != 0:
-		out.Kind, out.RetryAfter = classifyStatus(status, resp)
-	case ai.IsRetryable(err):
+		out.Kind, out.RetryAfter = classifyStatus(status, d.Response)
+	case stream || ai.IsRetryable(err):
 		// A bare transport failure: a dropped connection or a timeout.
 		out.Kind = ai.KindNetwork
 	default:
 		out.Kind = ai.KindUnknown
-	}
-	return out
-}
-
-// ClassifyStream is Classify for an error that terminated a stream.
-func ClassifyStream(driver string, status int, resp *http.Response, code, message string, err error) *ai.Error {
-	out := Classify(driver, status, resp, code, message, err)
-	if out.Kind == ai.KindUnknown {
-		out.Kind = ai.KindNetwork
 	}
 	return out
 }

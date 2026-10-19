@@ -45,11 +45,15 @@ func Config(ref string) (ai.Config, error) {
 		// is nothing to resolve, so pass it through as-is.
 		return ai.Config{Model: model}, nil
 	}
+	return vendorConfig(v, model)
+}
 
+// vendorConfig resolves a catalog vendor's credential: from the sign-in for a
+// vendor with an interactive flow, from the environment otherwise.
+func vendorConfig(v catalog.Vendor, model ai.Model) (ai.Config, error) {
 	if _, interactive := flows[v.ID]; interactive {
-		return interactiveConfig(v, model, nil)
+		return interactiveConfig(v, model)
 	}
-
 	return envConfig(v, model)
 }
 
@@ -78,8 +82,8 @@ func envConfig(v catalog.Vendor, model ai.Model) (ai.Config, error) {
 // interactiveConfig builds a Config for a vendor that signs in through a
 // browser. It performs no network I/O: the base URL was recorded at sign-in,
 // and the token is minted lazily by the transport on the first request.
-func interactiveConfig(v catalog.Vendor, model ai.Model, store Store) (ai.Config, error) {
-	s, err := resolveStore(store)
+func interactiveConfig(v catalog.Vendor, model ai.Model) (ai.Config, error) {
+	s, err := resolveStore(nil)
 	if err != nil {
 		return ai.Config{}, err
 	}

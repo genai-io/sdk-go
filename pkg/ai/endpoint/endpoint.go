@@ -53,15 +53,6 @@ type Config struct {
 	// taken from the baseline.
 	API ai.API
 
-	// Fetch retrieves the live model list. Nil means the default: open a
-	// driver for this endpoint's protocol and call its Models. Set it for an
-	// endpoint whose listing lives somewhere other than the protocol's own
-	// models call.
-	//
-	// It is handed the *Endpoint it belongs to, so it can read the credential
-	// and host already configured here.
-	Fetch func(ctx context.Context, e *Endpoint) ([]ai.Model, error)
-
 	// Resolve fills in what is known about a model from its ID alone — its
 	// protocol quirks, and whatever the caller keeps about its models — which
 	// a host's listing rarely carries; catalog.Vendor.Endpoint installs the
@@ -144,14 +135,10 @@ func (e *Endpoint) Model(id string) (ai.Model, bool) {
 // previous list untouched, so an endpoint that went down keeps serving what it
 // last knew.
 func (e *Endpoint) Refresh(ctx context.Context) error {
-	fetch := e.cfg.Fetch
-	if fetch == nil {
-		if e.cfg.API == "" {
-			return nil
-		}
-		fetch = defaultFetch
+	if e.cfg.API == "" {
+		return nil
 	}
-	models, err := fetch(ctx, e)
+	models, err := e.fetch(ctx)
 	if err != nil {
 		return err
 	}
@@ -161,10 +148,10 @@ func (e *Endpoint) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// defaultFetch opens a client for the endpoint's protocol and asks it. The
-// probe is decorated like any other model, so a driver that lists by a quirk
-// of the host sees the host's compat.
-func defaultFetch(ctx context.Context, e *Endpoint) ([]ai.Model, error) {
+// fetch opens a client for the endpoint's protocol and asks it. The probe is
+// decorated like any other model, so a driver that lists by a quirk of the
+// host sees the host's compat.
+func (e *Endpoint) fetch(ctx context.Context) ([]ai.Model, error) {
 	probe := ai.Model{ID: "-"}
 	if len(e.cfg.Models) > 0 {
 		probe = e.cfg.Models[0].Clone()

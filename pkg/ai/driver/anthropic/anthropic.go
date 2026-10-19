@@ -20,7 +20,6 @@ import (
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/errs"
@@ -271,10 +270,8 @@ func (d *driver) CountTokens(ctx context.Context, req *ai.Request) (int, error) 
 		System: sdk.MessageCountTokensParamsSystemUnion{
 			OfTextBlockArray: params.System,
 		},
-		Tools: countTokenTools(params.Tools),
-	}
-	if !param.IsOmitted(params.Thinking) {
-		count.Thinking = params.Thinking
+		Tools:    countTokenTools(params.Tools),
+		Thinking: params.Thinking,
 	}
 	res, err := d.client.Messages.CountTokens(ctx, count)
 	if err != nil {

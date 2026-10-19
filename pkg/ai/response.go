@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -76,24 +77,12 @@ func SplitPromptTokens(promptTokens, cachedTokens int) (fresh, cached int) {
 // output tokens at message_delta — so a whole-struct replace would erase the
 // half that arrived first.
 func mergeUsage(dst *Usage, src Usage) {
-	if src.Input > 0 {
-		dst.Input = src.Input
-	}
-	if src.Output > 0 {
-		dst.Output = src.Output
-	}
-	if src.CacheWrite > 0 {
-		dst.CacheWrite = src.CacheWrite
-	}
-	if src.CacheWriteLong > 0 {
-		dst.CacheWriteLong = src.CacheWriteLong
-	}
-	if src.CacheRead > 0 {
-		dst.CacheRead = src.CacheRead
-	}
-	if src.Reasoning > 0 {
-		dst.Reasoning = src.Reasoning
-	}
+	dst.Input = cmp.Or(src.Input, dst.Input)
+	dst.Output = cmp.Or(src.Output, dst.Output)
+	dst.CacheWrite = cmp.Or(src.CacheWrite, dst.CacheWrite)
+	dst.CacheWriteLong = cmp.Or(src.CacheWriteLong, dst.CacheWriteLong)
+	dst.CacheRead = cmp.Or(src.CacheRead, dst.CacheRead)
+	dst.Reasoning = cmp.Or(src.Reasoning, dst.Reasoning)
 }
 
 // Response is the aggregated result of one inference call. Content is the
@@ -130,14 +119,6 @@ func (r *Response) ToolCalls() []ToolCall {
 		return nil
 	}
 	return r.Content.ToolCalls()
-}
-
-// ReasoningItems returns opaque reasoning state in block order.
-func (r *Response) ReasoningItems() []ReasoningItem {
-	if r == nil {
-		return nil
-	}
-	return r.Content.ReasoningItems()
 }
 
 // Message converts the response into the assistant turn to append to history,

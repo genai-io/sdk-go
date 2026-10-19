@@ -133,6 +133,9 @@ Each such change is listed under **Changed** with what to write instead.
 - `catalog.Vendor.SamplingParams`; set `Model.SamplingParams`.
 - `ai.ToolChoice.String`.
 - The `tools` example.
+- `endpoint.Config.Fetch`; `Refresh` asks the protocol's driver.
+- `Message.HasToolResults` (use `msg.Content.Has(ai.BlockToolResult)`) and
+  `Response.ReasoningItems` (use `resp.Content.ReasoningItems()`).
 
 ### Fixed
 

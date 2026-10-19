@@ -54,8 +54,7 @@ func (d *driver) Name() string { return name }
 // Stream runs one Chat Completions call.
 func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta, error] {
 	return func(yield func(ai.Delta, error) bool) {
-		level, _ := d.model.ResolveLevel(req.Effort)
-		params := d.buildParams(req, level)
+		params := d.buildParams(req)
 
 		var raw *http.Response
 		err := d.client.Post(ctx, "chat/completions", params, &raw, option.WithJSONSet("stream", true))

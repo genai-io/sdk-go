@@ -54,7 +54,6 @@ type driver struct {
 	// on Vertex the project and location come before "publishers/google/models".
 	modelsURL string
 	apiKey    string
-	headers   map[string]string
 	model     ai.Model
 	compat    ai.GoogleCompat
 }
@@ -77,7 +76,6 @@ func NewDeployment(cfg ai.Config, api ai.API, modelsURL string) (ai.Driver, erro
 		fail:      errs.For(string(api), details),
 		modelsURL: modelsURL,
 		apiKey:    cfg.APIKey,
-		headers:   cfg.Model.Headers,
 		model:     cfg.Model,
 		compat:    ai.CompatOf[ai.GoogleCompat](cfg.Model),
 	}, nil

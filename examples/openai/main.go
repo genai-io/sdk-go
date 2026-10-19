@@ -65,7 +65,7 @@ func run(ref string) error {
 		// cannot read — so appending it is what lets the next turn resume.
 		history = append(history, resp.Message())
 
-		if items := resp.ReasoningItems(); len(items) > 0 {
+		if items := resp.Content.ReasoningItems(); len(items) > 0 {
 			fmt.Printf("  \033[2mcarrying %d reasoning item(s) forward", len(items))
 			if items[0].Summary != "" {
 				fmt.Printf(" — %q", items[0].Summary)

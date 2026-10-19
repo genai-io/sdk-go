@@ -1,7 +1,6 @@
 package endpoint
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -288,26 +287,5 @@ func TestConfigForCarriesTheEndpointSettings(t *testing.T) {
 	cfg.Model.Headers["X-Acme"] = "tampered"
 	if again := p.ConfigFor(ai.Model{ID: "acme-pro"}); again.Model.Headers["X-Acme"] != "1" {
 		t.Error("editing a built Config changed the endpoint's headers")
-	}
-}
-
-// An endpoint whose listing lives off the protocol's models call — the Codex
-// subscription's own catalog — supplies it through Fetch.
-func TestFetchReplacesTheProtocolListing(t *testing.T) {
-	p := New(Config{
-		ID:  "acme",
-		API: ai.APIOpenAIChat,
-		Fetch: func(_ context.Context, got *Endpoint) ([]ai.Model, error) {
-			if got.Name() == "" {
-				t.Error("Fetch was not handed its endpoint")
-			}
-			return []ai.Model{{ID: "listed-elsewhere"}}, nil
-		},
-	})
-	if err := p.Refresh(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, listed := p.Model("listed-elsewhere"); !listed {
-		t.Errorf("Models = %+v, want what Fetch returned", p.Models())
 	}
 }

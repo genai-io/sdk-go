@@ -9,6 +9,8 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-21
+
 ### Fixed
 
 - A request body too large to send — a 413, or a 408 timed out reading the
@@ -985,6 +987,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.9.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.9.1
 [0.9.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.9.0
 [0.8.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.8.0
 [0.7.7]: https://github.com/genai-io/sdk-go/releases/tag/v0.7.7

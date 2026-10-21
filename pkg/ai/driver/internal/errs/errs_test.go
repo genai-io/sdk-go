@@ -46,6 +46,18 @@ func TestClassifyReadsEachSignalWhereItBelongs(t *testing.T) {
 			status: http.StatusServiceUnavailable, message: "upstream rejected: too many tokens",
 			want: ai.KindOverloaded, retryable: true,
 		},
+		"a 408 timed out reading the body is too big to resend": {
+			status: http.StatusRequestTimeout, message: "Timed out reading request body. Try again, or use a smaller request size.",
+			want: ai.KindContextExceeded,
+		},
+		"a bare 408 is still worth another try": {
+			status: http.StatusRequestTimeout, message: "request timeout",
+			want: ai.KindOverloaded, retryable: true,
+		},
+		"a 413 is too big to resend": {
+			status: http.StatusRequestEntityTooLarge, message: "request_too_large",
+			want: ai.KindContextExceeded,
+		},
 		"a 429 carries the provider's own hint": {
 			status: http.StatusTooManyRequests, resp: withRetryAfter("3"),
 			message: "slow down",

@@ -9,6 +9,12 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+### Fixed
+
+- A request body too large to send — a 413, or a 408 timed out reading the
+  body — is now `KindContextExceeded` instead of a retryable overload, so the
+  caller compacts instead of resending the same body until it fails.
+
 ## [0.9.0] - 2026-10-19
 
 ### Added

@@ -24,8 +24,9 @@ const (
 	KindAuth ErrorKind = "auth"
 	// KindInvalidRequest is a malformed or unacceptable request (400/404/422).
 	KindInvalidRequest ErrorKind = "invalid_request"
-	// KindContextExceeded means the prompt is larger than the context window.
-	// Retrying the same prompt cannot help; compacting it can.
+	// KindContextExceeded means the prompt is too large to accept: past the
+	// context window, or a request body too big to send (413, or a 408 timed
+	// out reading it). Retrying the same prompt cannot help; compacting it can.
 	KindContextExceeded ErrorKind = "context_exceeded"
 	// KindRateLimit is a 429. RetryAfter carries the provider's hint when it
 	// sent one.

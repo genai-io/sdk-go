@@ -88,6 +88,12 @@ func classify(driver string, d Details, err error, stream bool) *ai.Error {
 	// 400: a 401 or 503 mentioning tokens is a key or a busy server, not this.
 	case (status == 0 || status == http.StatusBadRequest) && IsContextExceededMessage(out.Message):
 		out.Kind = ai.KindContextExceeded
+	// A body too big to send in time fails the same way however often it is
+	// resent; a shorter conversation is a smaller body. Only a 408 that names
+	// the body: a bare one is an idle connection, worth another try.
+	case status == http.StatusRequestEntityTooLarge,
+		status == http.StatusRequestTimeout && strings.Contains(strings.ToLower(out.Message), "request body"):
+		out.Kind = ai.KindContextExceeded
 	case status != 0:
 		out.Kind, out.RetryAfter = classifyStatus(status, d.Response)
 	case stream || ai.IsRetryable(err):

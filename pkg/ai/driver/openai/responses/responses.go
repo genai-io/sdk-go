@@ -81,6 +81,7 @@ func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 		// stop reason would otherwise overwrite the refusal.
 		refused := false
 		complete := false
+		thought := false
 		var terminalErr error
 
 	events:
@@ -106,21 +107,23 @@ func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "response.reasoning_summary_part.added":
 				// The summary streams as discrete parts, each a self-contained
-				// "**headline**\n\nbody" with no separator between them.
-				// Without a break, two adjacent bold headlines collide into
-				// "…truncation****Updating…".
-				if event.AsResponseReasoningSummaryPartAdded().SummaryIndex > 0 {
+				// "**headline**\n\nbody" with no separator between them, and a
+				// later reasoning item's parts count from 0 again. Without a
+				// break, two bold headlines collide into "…truncation****Updating…".
+				if thought {
 					if !yield(ai.Delta{Block: ai.ThinkingBlock("\n\n", "")}, nil) {
 						return
 					}
 				}
 
 			case "response.reasoning_summary_text.delta":
+				thought = true
 				if !yield(ai.Delta{Block: ai.ThinkingBlock(event.AsResponseReasoningSummaryTextDelta().Delta, "")}, nil) {
 					return
 				}
 
 			case "response.reasoning_text.delta":
+				thought = true
 				if !yield(ai.Delta{Block: ai.ThinkingBlock(event.AsResponseReasoningTextDelta().Delta, "")}, nil) {
 					return
 				}

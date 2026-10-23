@@ -9,6 +9,14 @@ Each such change is listed under **Changed** with what to write instead.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-23
+
+### Fixed
+
+- Responses: a reasoning item that follows commentary in the same response
+  starts its summary on a new paragraph, instead of running its first headline
+  into the previous text.
+
 ## [0.9.1] - 2026-10-21
 
 ### Fixed
@@ -987,6 +995,7 @@ First release.
   file; `pkg/ai/auth` is the opt-in that does, including the browser sign-in
   for vendors that authenticate a person rather than a service.
 
+[0.9.2]: https://github.com/genai-io/sdk-go/releases/tag/v0.9.2
 [0.9.1]: https://github.com/genai-io/sdk-go/releases/tag/v0.9.1
 [0.9.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.9.0
 [0.8.0]: https://github.com/genai-io/sdk-go/releases/tag/v0.8.0

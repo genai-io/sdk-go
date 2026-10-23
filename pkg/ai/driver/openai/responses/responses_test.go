@@ -566,3 +566,36 @@ func at(m ai.Model, url string) ai.Model {
 	m.BaseURL = url
 	return m
 }
+
+// Every summary part after the first reasoning streamed starts a paragraph of
+// its own, including the first part of a later reasoning item, whose index
+// starts over at 0: without the break two bold headlines run together.
+func TestReasoningSummaryPartsAreSeparated(t *testing.T) {
+	part := func(item string, index int) string {
+		return fmt.Sprintf(`{"type":"response.reasoning_summary_part.added","item_id":%q,"output_index":0,"summary_index":%d,"part":{"type":"summary_text","text":""}}`, item, index)
+	}
+	text := func(item string, index int, delta string) string {
+		return fmt.Sprintf(`{"type":"response.reasoning_summary_text.delta","item_id":%q,"output_index":0,"summary_index":%d,"delta":%q}`, item, index, delta)
+	}
+	s := sse(t,
+		part("rs_1", 0), text("rs_1", 0, "**Reading**\n\nRead it."),
+		part("rs_1", 1), text("rs_1", 1, "**Checking**\n\nRan it."),
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Working."}`,
+		part("rs_2", 0), text("rs_2", 0, "**Fixing**\n\nEdit it."),
+		completed,
+	)
+	deltas, err := collect(t, driverFor(t, ai.Config{Model: at(reasoner, s.URL)}))
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	var thinking strings.Builder
+	for _, d := range deltas {
+		if d.Block.Type == ai.BlockThinking {
+			thinking.WriteString(d.Block.Text)
+		}
+	}
+	want := "**Reading**\n\nRead it.\n\n**Checking**\n\nRan it.\n\n**Fixing**\n\nEdit it."
+	if thinking.String() != want {
+		t.Errorf("thinking = %q, want %q", thinking.String(), want)
+	}
+}

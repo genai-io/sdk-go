@@ -103,6 +103,13 @@ default at five minutes and one minute. Running out is reported as a network
 failure — because it is one — and it is one of the two things `WithRetry` is
 for.
 
+Content events and `ai.EventProgress` reset the idle budget. Responses, Chat
+Completions and Anthropic drivers report tool-argument byte growth even while
+arguments are being accumulated internally; empty fragments, repeated metadata
+and keepalives do not reset it. Progress is forwarded as `InferenceUpdate.Delta`
+for interfaces to display the tool name and cumulative input bytes. It is not a
+tool call: tools run only after the complete inference succeeds.
+
 ### A cut-off answer can be resumed
 
 A model stopped by the output cap was interrupted, not finished, so the turn

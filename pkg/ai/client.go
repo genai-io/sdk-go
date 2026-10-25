@@ -96,6 +96,12 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 				yield(Event{Type: EventDone, Response: finish(err)}, err)
 				return
 			}
+			if delta.Progress != nil {
+				progress := *delta.Progress
+				if !yield(Event{Type: EventProgress, Progress: &progress}, nil) {
+					return
+				}
+			}
 			if delta.Block.Type != "" {
 				if !blocks.write(delta.Block) {
 					return
@@ -184,6 +190,8 @@ func (c *Client) prepare(ctx context.Context, messages []Message, opts []Option)
 type EventType string
 
 const (
+	// EventProgress reports non-content generation progress; Index is not used.
+	EventProgress EventType = "progress"
 	// EventBlockStart opens Event.Index with Block.Type set.
 	EventBlockStart EventType = "block_start"
 	// EventBlockDelta carries an incremental Block fragment.
@@ -198,9 +206,11 @@ const (
 // same start/delta/end lifecycle, so consumers need one state machine and can
 // switch on Block.Type only when rendering or acting on a complete block.
 type Event struct {
-	Type  EventType
-	Index int
-	Block Block
+	// Progress is set only on EventProgress.
+	Progress *Progress
+	Type     EventType
+	Index    int
+	Block    Block
 
 	// Response is set only on EventDone.
 	Response *Response

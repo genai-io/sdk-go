@@ -172,8 +172,11 @@ func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				case "signature_delta":
 					out.Block = ai.ThinkingBlock("", delta.Delta.Signature)
 				case "input_json_delta":
-					if tool := tools[delta.Index]; tool != nil {
+					if tool := tools[delta.Index]; tool != nil && delta.Delta.PartialJSON != "" {
 						tool.input.WriteString(delta.Delta.PartialJSON)
+						if !yield(ai.Delta{Progress: &ai.Progress{ToolCallID: tool.id, ToolName: tool.name, InputBytes: tool.input.Len()}}, nil) {
+							return
+						}
 					}
 					continue
 				default:

@@ -375,7 +375,9 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 	var resp *ai.Response
 	var err error
 	for evt, streamErr := range client.Stream(streamCtx, inf.Messages, inf.options()...) {
-		quiet.Reset(a.streamIdle)
+		if evt.Type == ai.EventProgress || evt.Type == ai.EventBlockStart || evt.Type == ai.EventBlockDelta || evt.Type == ai.EventBlockEnd {
+			quiet.Reset(a.streamIdle)
+		}
 		if streamErr != nil {
 			// A failed call still spent tokens and may have produced text.
 			resp, err = evt.Response, streamErr
@@ -384,7 +386,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 		// Fragments only; the finished response is announced by the caller,
 		// once PostInfer has had it.
 		switch evt.Type {
-		case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd:
+		case ai.EventBlockStart, ai.EventBlockDelta, ai.EventBlockEnd, ai.EventProgress:
 			emit(InferenceUpdate{Turn: a.turnNow(), Delta: evt})
 		case ai.EventDone:
 			resp = evt.Response

@@ -137,8 +137,12 @@ func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 
 			case "response.function_call_arguments.delta":
 				delta := event.AsResponseFunctionCallArgumentsDelta()
-				if i, ok := at[delta.ItemID]; ok {
+				if i, ok := at[delta.ItemID]; ok && delta.Delta != "" {
 					calls[i].Input += delta.Delta
+					call := calls[i]
+					if !yield(ai.Delta{Progress: &ai.Progress{ToolCallID: call.ID, ToolName: call.Name, InputBytes: len(call.Input)}}, nil) {
+						return
+					}
 				}
 
 			case "response.output_item.done":

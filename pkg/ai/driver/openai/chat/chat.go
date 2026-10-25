@@ -113,7 +113,11 @@ func (d *driver) Stream(ctx context.Context, req *ai.Request) iter.Seq2[ai.Delta
 				out.Model, out.ID = chunk.Model, chunk.ID
 
 				for _, tc := range choice.Delta.ToolCalls {
-					calls.add(tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments)
+					if progress := calls.add(tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments); progress != nil {
+						if !yield(ai.Delta{Progress: progress}, nil) {
+							return
+						}
+					}
 				}
 
 				if out.StopReason != "" || out.Model != "" || out.ID != "" {
@@ -192,7 +196,7 @@ type toolCallSet struct {
 	byIndex map[int64]*ai.ToolCall
 }
 
-func (s *toolCallSet) add(index int64, id, name, args string) {
+func (s *toolCallSet) add(index int64, id, name, args string) *ai.Progress {
 	call := s.byIndex[index]
 	if known := s.byID(id); known != nil {
 		// The same call at another index: one call, not two sharing an ID.
@@ -213,10 +217,11 @@ func (s *toolCallSet) add(index int64, id, name, args string) {
 		call.Name = name
 	}
 	// Some gateways resend the whole arguments once they are complete.
-	if args == call.Input && json.Valid([]byte(args)) {
-		return
+	if args == "" || (args == call.Input && json.Valid([]byte(args))) {
+		return nil
 	}
 	call.Input += args
+	return &ai.Progress{ToolCallID: call.ID, ToolName: call.Name, InputBytes: len(call.Input)}
 }
 
 func (s *toolCallSet) byID(id string) *ai.ToolCall {

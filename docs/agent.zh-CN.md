@@ -78,6 +78,8 @@ turn 有八种结束方式,**每个出口都必须说出是哪一种**。失败�
 
 **一个什么都不说的流,是唯一一种"看起来像在干活"的故障**,所以 agent 给它设了界:`WithStreamTimeout(first, idle)` 限定端点开口说第一句话的时限、以及开口之后可以停顿多久,默认开启,分别是五分钟和一分钟。超时会被报成**网络错误**——它本来就是——而它正是 `WithRetry` 存在的两个理由之一。
 
+内容事件和 `ai.EventProgress` 都会刷新 idle 预算。Responses、Chat Completions 和 Anthropic 驱动在内部累积工具参数时也会上报参数字节数的增长；空片段、重复元数据和保活消息不会续期。进度通过 `InferenceUpdate.Delta` 转发给界面，携带工具名和累积参数字节数，但不是工具调用：只有完整推理成功后才会执行工具。
+
 ### 被截断的回答可以续写
 
 被输出上限打断的模型**不是答完了,是被打断了** —— 这一轮会以 `max_tokens` 收尾,留下半个答案。`WithContinuation(attempts, prompt)` 改成把 prompt 放进对话、**在同一轮里**再走一步:

@@ -162,6 +162,14 @@ for event, err := range client.Stream(ctx, messages) {
 Every block that opens is closed, including on failure. Abandoning the iterator
 cancels the request.
 
+`EventProgress` is a non-content event for tool arguments still being generated.
+Its `Progress` carries `ToolCallID`, `ToolName`, and `InputBytes` (the cumulative
+argument byte count, not an increment). Drivers report growth, optionally zero
+once when a tool begins; empty fragments and repeated metadata are not progress.
+Progress neither opens nor closes a block, consumes no block index, and changes
+neither response content nor usage. `Complete` ignores it. A tool-call block is
+still delivered whole, never as executable argument fragments.
+
 ### Tool use
 
 A tool is a `Schema`: a name, a description, and the JSON its arguments take.

@@ -43,6 +43,17 @@ type TokenCounter interface {
 	CountTokens(ctx context.Context, req *Request) (int, error)
 }
 
+// Progress reports generation without exposing incomplete tool arguments.
+// InputBytes is the cumulative argument byte count for this tool call. Drivers
+// report only growth, optionally reporting zero once when a call begins.
+// Empty fragments, repeated metadata and transport keepalives are not progress.
+// Progress is not content and does not affect the final response.
+type Progress struct {
+	ToolCallID string
+	ToolName   string
+	InputBytes int
+}
+
 // Delta is the protocol-driver output. Block is one ordered content update:
 // text and thinking blocks carry incremental Text/Signature fragments; image,
 // tool and opaque reasoning blocks are complete values. EndBlock closes the
@@ -64,7 +75,10 @@ type TokenCounter interface {
 //   - Yielding an error ends the stream. Everything already yielded stays on
 //     the Response the caller receives, so a failure that arrives mid-answer
 //     keeps both the text and the tokens it cost.
+//   - Progress is forwarded out of band, without closing or indexing a block.
+//     Other fields on the same Delta are still applied.
 type Delta struct {
+	Progress *Progress
 	Block    Block
 	EndBlock bool
 

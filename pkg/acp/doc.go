@@ -10,10 +10,12 @@
 //
 //	ACP peer <--> Conn <--> application handlers <--> application runtime
 //
-// [Conn.Call] and [Conn.Notify] are Go APIs for sending messages. Names such as
-// "initialize" and "session/prompt" are wire method names, not typed APIs in this
-// package. Typed ACP methods, capability negotiation, session management,
-// authorization and prompt admission/cancellation are not implemented here.
+// The protocol subpackage contains generated stable ACP v1 wire types.
+// [Conn.Initialize], [Conn.NewSession], [Conn.Prompt], [Conn.Cancel],
+// [Conn.SessionUpdate] and [Conn.RequestPermission] validate message shapes
+// against the pinned schema. Incoming dispatch still uses [Handlers].
+// These convenience methods do not track initialization, serialize prompts,
+// negotiate capabilities, manage sessions or apply authorization policy.
 // New starts I/O workers; it does not launch a process, listen on a port or
 // connect an agent runtime. Applications may use child-process stdio streams.
 //

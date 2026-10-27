@@ -22,7 +22,7 @@ var (
 
 // Limits bounds connection-owned work. Defaults are 1 MiB per frame,
 // 8 requests, 32 pending calls, 64 notifications and 16 writes.
-// Zero selects a default; negative values fail.
+// Zero selects a default; negative values fail. FrameBytes cannot exceed 64 MiB.
 type Limits struct {
 	FrameBytes    int
 	Requests      int
@@ -48,11 +48,18 @@ func (l Limits) defaults() (Limits, error) {
 	return l, nil
 }
 
-// Handlers receive connection-bound contexts. Requests may call the peer back.
-// Notifications run serially and must return promptly; they must not Call using
-// their notification context, since responses wait for preceding notifications.
+// Handlers receive method names and raw JSON parameters with connection-bound
+// contexts. They must honor cancellation and implement application semantics.
 type Handlers struct {
-	Request      func(context.Context, *Conn, string, json.RawMessage) (any, error)
+	// Request may run concurrently and call the peer back with Conn.Call.
+	// Its return value becomes a response; *Error is preserved, while other
+	// errors are redacted. A nil handler returns "Method not found".
+	Request func(context.Context, *Conn, string, json.RawMessage) (any, error)
+
+	// Notification runs serially and must return promptly; an error closes
+	// the connection. It must not synchronously wait on Conn.Call on this
+	// connection, since responses wait for preceding notifications.
+	// A nil handler discards notifications.
 	Notification func(context.Context, *Conn, string, json.RawMessage) error
 }
 
@@ -136,9 +143,12 @@ func New(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handle
 	return c, nil
 }
 
-// Call waits for a response and its preceding notifications. Cancelling the
-// context stops this wait, not remote application work: send session/cancel for
-// a prompt, or Close to terminate the peer connection.
+// Call sends a request and waits for its response and preceding notifications
+// to finish processing. Params must encode as a JSON object, array or null;
+// result is a pointer to the response destination, or nil to discard the result.
+// Cancelling the context stops this wait, not remote application work: send
+// session/cancel for a prompt, or Close to terminate the peer connection.
+// Cancellation during an active frame write closes the connection.
 func (c *Conn) Call(ctx context.Context, method string, params any, result any) error {
 	if ctx.Value(notificationContext{}) == c {
 		return ErrNotificationCall
@@ -193,8 +203,9 @@ func (c *Conn) Call(ctx context.Context, method string, params any, result any) 
 	return nil
 }
 
-// Notify sends a notification. Cancellation after its write begins terminates
-// the connection: a partially written JSON frame cannot safely be reused.
+// Notify waits for a notification frame to be written, not for the peer to
+// process it. Cancellation after its write begins terminates the connection:
+// a partially written JSON frame cannot safely be reused.
 func (c *Conn) Notify(ctx context.Context, method string, params any) error {
 	frame, err := requestFrame(nil, method, params)
 	if err != nil {
@@ -428,15 +439,22 @@ func (c *Conn) shutdown(cause error) {
 	})
 }
 
+// Close cancels the connection and closes its streams; use Wait to join
+// handlers and I/O workers. It is idempotent and ignores stream-close errors.
 func (c *Conn) Close() error {
 	c.shutdown(ErrClosed)
 	return nil
 }
 
-// Done signals shutdown beginning; Wait also joins handlers and I/O workers.
+// Done signals shutdown beginning, not completed handler or stream cleanup.
 func (c *Conn) Done() <-chan struct{} { return c.ctx.Done() }
-func (c *Conn) Err() error            { return context.Cause(c.ctx) }
 
+// Err returns nil before shutdown begins, and its cause afterward.
+func (c *Conn) Err() error { return context.Cause(c.ctx) }
+
+// Wait joins handlers, I/O workers and stream shutdown, then returns Err.
+// Its context bounds waiting only: cancelling it does not close the connection
+// or force uncooperative handlers to stop.
 func (c *Conn) Wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():

@@ -34,12 +34,16 @@ type message struct {
 	err    *Error
 }
 
+// readFrame may return a view into r, valid only until the next read.
 func readFrame(r *bufio.Reader, limit int) ([]byte, error) {
 	var frame []byte
 	for {
 		part, err := r.ReadSlice('\n')
 		if len(part) > limit+1-len(frame) {
 			return nil, ErrFrameTooLarge
+		}
+		if err == nil && frame == nil {
+			return part[:len(part)-1], nil
 		}
 		frame = append(frame, part...)
 		if err == nil {
@@ -91,6 +95,8 @@ func decode(frame []byte) (message, error) {
 	return m, nil
 }
 
+func stringIDKey(s string) string { return "s:" + s }
+
 func idKey(raw json.RawMessage) (string, error) {
 	raw = bytes.TrimSpace(raw)
 	if bytes.Equal(raw, []byte("null")) {
@@ -99,7 +105,7 @@ func idKey(raw json.RawMessage) (string, error) {
 	if len(raw) != 0 && raw[0] == '"' {
 		var s string
 		if json.Unmarshal(raw, &s) == nil {
-			return "s:" + s, nil
+			return stringIDKey(s), nil
 		}
 	} else {
 		var n int64

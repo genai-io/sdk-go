@@ -88,7 +88,6 @@ type Conn struct {
 
 	writes        chan *write
 	notifications chan notification
-	requests      chan struct{}
 	wg            sync.WaitGroup
 	joined        chan struct{}
 	closed        chan struct{}
@@ -120,7 +119,7 @@ func New(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handle
 		ctx: life, cancel: cancel, input: input, output: output,
 		handlers: handlers, limits: limits,
 		writes: make(chan *write, limits.Writes), notifications: make(chan notification, limits.Notifications),
-		requests: make(chan struct{}, limits.Requests), joined: make(chan struct{}), closed: make(chan struct{}),
+		joined: make(chan struct{}), closed: make(chan struct{}),
 		pending: make(map[string]chan reply), inbound: make(map[string]*incoming), progress: make(chan struct{}),
 	}
 	stopParent := context.AfterFunc(ctx, func() { c.shutdown(context.Cause(ctx)) })
@@ -147,12 +146,13 @@ func (c *Conn) Call(ctx context.Context, method string, params any, result any) 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	id, _ := json.Marshal(strconv.FormatUint(c.next.Add(1), 10))
+	value := strconv.FormatUint(c.next.Add(1), 10)
+	id, _ := json.Marshal(value)
 	frame, err := requestFrame(id, method, params)
 	if err != nil {
 		return err
 	}
-	key, _ := idKey(id)
+	key := stringIDKey(value)
 	ch := make(chan reply, 1)
 	c.mu.Lock()
 	if len(c.pending) >= c.limits.PendingCalls {
@@ -320,13 +320,11 @@ func (c *Conn) dispatch(m message) error {
 		c.mu.Unlock()
 		return ErrInvalidMessage
 	}
-	select {
-	case c.requests <- struct{}{}:
-		c.inbound[m.key] = entry
-	default:
+	if len(c.inbound) >= c.limits.Requests {
 		c.mu.Unlock()
 		return ErrLimit
 	}
+	c.inbound[m.key] = entry
 	c.mu.Unlock()
 	release := func() {
 		entry.release.Do(func() {
@@ -334,7 +332,6 @@ func (c *Conn) dispatch(m message) error {
 			if c.inbound[m.key] == entry {
 				delete(c.inbound, m.key)
 			}
-			<-c.requests
 			c.mu.Unlock()
 		})
 	}

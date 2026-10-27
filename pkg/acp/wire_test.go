@@ -4,22 +4,58 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestFrameBoundary(t *testing.T) {
-	payload := []byte(`{"jsonrpc":"2.0","method":"update","params":{"text":"` + strings.Repeat("x", 8192) + `"}}`)
-	frame, err := readFrame(bufio.NewReaderSize(bytes.NewReader(append(payload, '\n')), 32), len(payload))
-	if err != nil || !bytes.Equal(frame, payload) {
-		t.Fatalf("exact-size frame: %v", err)
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"buffered", 16},
+		{"fragmented", 8192},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte(`{"jsonrpc":"2.0","method":"update","params":{"text":"` + strings.Repeat("x", tc.size) + `"}}`)
+			frame, err := readFrame(bufio.NewReaderSize(bytes.NewReader(append(payload, '\n')), 128), len(payload))
+			if err != nil || !bytes.Equal(frame, payload) {
+				t.Fatalf("exact-size frame: %v", err)
+			}
+			if _, err := decode(frame); err != nil {
+				t.Fatal(err)
+			}
+			_, err = readFrame(bufio.NewReaderSize(bytes.NewReader(append(payload, '\n')), 128), len(payload)-1)
+			if !errors.Is(err, ErrFrameTooLarge) {
+				t.Fatalf("oversize frame: %v", err)
+			}
+		})
 	}
-	if _, err := decode(frame); err != nil {
-		t.Fatal(err)
-	}
-	_, err = readFrame(bufio.NewReaderSize(bytes.NewReader(append(payload, '\n')), 32), len(payload)-1)
-	if !errors.Is(err, ErrFrameTooLarge) {
-		t.Fatalf("oversize frame: %v", err)
+}
+
+func TestDecodeOwnsFrame(t *testing.T) {
+	for _, raw := range []string{
+		`{"jsonrpc":"2.0","id":"1","method":"echo","params":{"text":"hello"}}`,
+		`{"jsonrpc":"2.0","id":"1","result":{"text":"hello"}}`,
+		`{"jsonrpc":"2.0","id":"1","error":{"code":-32001,"message":"denied","data":{"text":"hello"}}}`,
+	} {
+		want, err := decode([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame, err := readFrame(bufio.NewReader(strings.NewReader(raw+"\n")), len(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := decode(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clear(frame)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("decoded message retained frame storage: got %+v, want %+v", got, want)
+		}
 	}
 }
 

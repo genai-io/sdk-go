@@ -77,8 +77,10 @@ func Login(ctx context.Context, vendorID string, opts LoginOptions) (Credential,
 		return credential, err
 	}
 	// Whatever was cached for this vendor is now the previous sign-in.
-	forgetSources(vendorID)
-	if err := store.Save(credential); err != nil {
+	if err := withRefreshLock(ctx, vendorID, store, func() error {
+		forgetSources(vendorID)
+		return store.Save(credential)
+	}); err != nil {
 		// The sign-in worked; only persisting it did not. Handing back the
 		// credential lets the caller carry on with this session.
 		return credential, err
@@ -93,6 +95,8 @@ func Logout(vendorID string, store Store) error {
 	if err != nil {
 		return err
 	}
-	forgetSources(vendorID)
-	return s.Delete(vendorID)
+	return withRefreshLock(context.Background(), vendorID, s, func() error {
+		forgetSources(vendorID)
+		return s.Delete(vendorID)
+	})
 }

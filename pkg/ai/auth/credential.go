@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"time"
 )
 
@@ -51,6 +52,20 @@ type Store interface {
 	// Delete forgets a vendor's credential. Deleting one that is not there
 	// succeeds.
 	Delete(vendor string) error
+}
+
+// RefreshLocker is an optional Store capability for credentials shared across
+// processes. WithRefreshLock must serialize fn with other holders for the same
+// vendor, and allow fn to call Load and Save without taking this lock again.
+type RefreshLocker interface {
+	WithRefreshLock(ctx context.Context, vendor string, fn func() error) error
+}
+
+func withRefreshLock(ctx context.Context, vendor string, store Store, fn func() error) error {
+	if locker, ok := store.(RefreshLocker); ok {
+		return locker.WithRefreshLock(ctx, vendor, fn)
+	}
+	return fn()
 }
 
 // resolveStore is s, or the default file store when s is nil.

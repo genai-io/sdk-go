@@ -50,7 +50,7 @@ func newCodexFlow(cfg oauth2.Config) flow {
 			// a provider that does not rotate the refresh token gets it back.
 			token, err := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: c.Refresh}).Token()
 			if err != nil {
-				return "", time.Time{}, c, err
+				return "", time.Time{}, c, refreshError(codexVendor, err)
 			}
 			c.Access, c.Refresh, c.ExpiresAt = token.AccessToken, token.RefreshToken, token.Expiry
 			return c.Access, c.ExpiresAt, c, nil

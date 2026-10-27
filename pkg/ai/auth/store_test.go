@@ -123,12 +123,12 @@ func TestFileStoreLeavesNoTemporaryFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != filepath.Base(s.path) {
+	if len(entries) != 2 || entries[0].Name() != filepath.Base(s.path) || entries[1].Name() != filepath.Base(s.path)+".lock" {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Errorf("the directory holds %v, want only the credentials file", names)
+		t.Errorf("the directory holds %v, want only the credentials file and its write lock", names)
 	}
 }
 

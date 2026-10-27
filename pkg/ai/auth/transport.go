@@ -144,10 +144,27 @@ func (s *tokenSource) token(ctx context.Context) (string, error) {
 	if s.current != "" && !expired(s.expires) {
 		return s.current, nil
 	}
+	var token string
+	err := withRefreshLock(ctx, s.vendor, s.store, func() error {
+		var err error
+		token, err = s.refresh(ctx)
+		return err
+	})
+	return token, err
+}
+
+func (s *tokenSource) refresh(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	// Another process may have signed in or refreshed since this source was
 	// built, and a rotated refresh token can only be spent once.
 	if s.store != nil {
-		if stored, found, err := s.store.Load(s.vendor); err == nil && found && stored.Access != "" {
+		stored, found, err := s.store.Load(s.vendor)
+		if err != nil {
+			return "", fmt.Errorf("auth: reload %s credential: %w", s.vendor, err)
+		}
+		if found && stored.Access != "" {
 			s.cred = stored
 		}
 	}

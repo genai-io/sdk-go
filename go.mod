@@ -5,7 +5,7 @@ go 1.26.9
 require (
 	github.com/anthropics/anthropic-sdk-go v1.82.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/openai/openai-go/v3 v3.86.0
+	github.com/openai/openai-go/v3 v3.88.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
 )

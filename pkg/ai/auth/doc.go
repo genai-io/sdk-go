@@ -24,6 +24,12 @@
 // Login, Logout and HTTPClient. That file is the only thing this SDK writes to
 // disk.
 //
+// The file store serializes refreshes across processes. Custom stores shared
+// between processes implement RefreshLocker and reload the latest credential
+// in Load; the lock covers that read, the refresh exchange, and Save. A failed
+// read stops the exchange, rather than risking an already-spent refresh token.
+// Terminal Codex refresh failures are ai.KindAuth errors requiring a new sign-in.
+//
 // # Where things live
 //
 //	auth.go        resolving a reference into an ai.Config or a client

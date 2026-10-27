@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // fileStore keeps credentials in one JSON file, readable only by its owner.
@@ -70,27 +72,66 @@ func (s *fileStore) Save(c Credential) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	all, err := s.read()
-	if err != nil {
-		return err
-	}
-	all[c.Vendor] = c
-	return s.write(all)
+	return withFileLock(context.Background(), s.path+".lock", func() error {
+		all, err := s.read()
+		if err != nil {
+			return err
+		}
+		all[c.Vendor] = c
+		return s.write(all)
+	})
 }
 
 // Delete forgets a vendor's credential and rewrites the file.
 func (s *fileStore) Delete(vendor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	all, err := s.read()
+	return withFileLock(context.Background(), s.path+".lock", func() error {
+		all, err := s.read()
+		if err != nil {
+			return err
+		}
+		if _, ok := all[vendor]; !ok {
+			return nil
+		}
+		delete(all, vendor)
+		return s.write(all)
+	})
+}
+
+func (s *fileStore) WithRefreshLock(ctx context.Context, _ string, fn func() error) error {
+	return withFileLock(ctx, s.path+".refresh.lock", fn)
+}
+
+func withFileLock(ctx context.Context, path string, fn func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
-	if _, ok := all[vendor]; !ok {
-		return nil
+	defer func() { _ = f.Close() }()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		locked, err := tryFileLock(f)
+		if err != nil {
+			return fmt.Errorf("auth: lock %s: %w", path, err)
+		}
+		if locked {
+			return fn()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
-	delete(all, vendor)
-	return s.write(all)
 }
 
 func (s *fileStore) read() (map[string]Credential, error) {

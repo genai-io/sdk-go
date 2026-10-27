@@ -51,6 +51,7 @@ import (
 	"io"
 	"io/fs"
 	"iter"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -149,7 +150,10 @@ func (s *Store) Records(ctx context.Context, id string) iter.Seq2[Record, error]
 			return
 		}
 		defer func() { _ = f.Close() }()
-		for r, err := range read(f, id) {
+		for r, err := range read(f, id, nil) {
+			if err == nil {
+				err = ctx.Err()
+			}
 			if !yield(r, err) || err != nil {
 				return
 			}
@@ -158,17 +162,17 @@ func (s *Store) Records(ctx context.Context, id string) iter.Seq2[Record, error]
 }
 
 // read decodes complete lines from f.
-func read(f io.Reader, id string) iter.Seq2[Record, error] {
+func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 	return func(yield func(Record, error) bool) {
-		br := bufio.NewReader(f)
-		for n := 1; ; n++ {
-			line, err := br.ReadBytes('\n')
-			if errors.Is(err, io.EOF) {
-				return // nothing, or a line still being written
-			}
-			if err != nil {
-				yield(Record{}, err)
-				return
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 4096), math.MaxInt)
+		scanner.Split(completeLine)
+		n := 0
+		for scanner.Scan() {
+			n++
+			line := scanner.Bytes()
+			if end != nil {
+				*end += int64(len(line))
 			}
 			var r Record
 			if err := json.Unmarshal(line, &r); err != nil {
@@ -183,7 +187,21 @@ func read(f io.Reader, id string) iter.Seq2[Record, error] {
 				return
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			yield(Record{}, err)
+		}
 	}
+}
+
+// An unterminated tail may still be being written; only complete lines exist.
+func completeLine(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i+1], nil
+	}
+	if atEOF {
+		return len(data), nil, nil
+	}
+	return 0, nil, nil
 }
 
 // Info is a session as List reports it.
@@ -304,17 +322,17 @@ func open(path, id string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(f)
 	w := &Writer{f: f}
-	var msgs []ai.Message
-	if err == nil {
-		msgs, err = conversation(read(bytes.NewReader(data), id))
-	}
+	var end int64
+	msgs, err := conversation(read(f, id, &end))
 	if err == nil {
 		w.saved, err = encode(msgs)
 	}
 	if err == nil {
-		err = f.Truncate(int64(bytes.LastIndexByte(data, '\n') + 1))
+		var info os.FileInfo
+		if info, err = f.Stat(); err == nil && info.Size() != end {
+			err = f.Truncate(end)
+		}
 	}
 	if err != nil {
 		return nil, errors.Join(err, f.Close())

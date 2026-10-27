@@ -468,7 +468,10 @@ for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 ```
 
 `pkg/session` keeps one append-only file per conversation, and the
-application's own records beside its messages.
+application's own records beside its messages. Reads and writer recovery stream
+complete records through a reusable buffer; opening a writer does not buffer the
+whole log. A partial final record is ignored by readers and removed by the next
+writer, while a malformed complete record fails without changing the file.
 
 Compaction needs nothing more: the next save is the compacted conversation.
 

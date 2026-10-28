@@ -188,15 +188,7 @@ func TestProtocolPromptLocalCancellation(t *testing.T) {
 	}()
 	request := p.read(t, ctx)
 
-	// A later completed write proves cancellation cannot catch the prompt's
-	// write in progress and intentionally tear down the transport.
-	flushed := make(chan error, 1)
-	go func() { flushed <- c.Notify(ctx, "test/flush", nil) }()
-	flush := p.read(t, ctx)
-	equalJSON(t, flush["method"], `"test/flush"`)
-	if err := receive(t, ctx, flushed); err != nil {
-		t.Fatal(err)
-	}
+	p.flushWrites(t, ctx, c)
 	cancel()
 	if err := receive(t, ctx, done); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Prompt = %v, want context.Canceled", err)

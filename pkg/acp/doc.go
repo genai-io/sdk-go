@@ -1,6 +1,21 @@
-// Package acp provides the experimental connection kernel for ACP (Agent Client
-// Protocol), which connects editors and other clients to agents. It provides
-// bounded UTF-8, newline-delimited JSON-RPC 2.0 transport, not a complete agent.
+// Package acp provides experimental ACP (Agent Client Protocol) endpoints,
+// connecting editors and other clients to agents. It provides bounded UTF-8,
+// newline-delimited JSON-RPC 2.0 transport and a typed receiving-side core.
+//
+// # API map
+//
+// Use [NewAgent] to expose application callbacks to an ACP client. Use [New]
+// for a raw connection with application-defined dispatch. Neither constructor
+// starts a listener, launches a process or creates an agent runtime.
+//
+//	Scope            Receive from client          Send to client
+//	AgentHandlers    Initialize / CreateSession   callback return values
+//	                 Prompt                       final prompt result
+//	Turn             cancellation via Prompt ctx  SendUpdate / RequestPermission
+//
+// Agent owns connection-local protocol state; the application owns execution
+// and session resources. Turn binds outbound operations to the current prompt.
+// Conn methods instead take explicit contexts and session-bearing wire messages.
 //
 // # Connection boundary
 //
@@ -13,11 +28,57 @@
 // The protocol subpackage contains generated stable ACP v1 wire types.
 // [Conn.Initialize], [Conn.CreateSession], [Conn.Prompt], [Conn.CancelPrompt],
 // [Conn.SendSessionUpdate] and [Conn.RequestPermission] validate message shapes
-// against the pinned schema. Incoming dispatch still uses [Handlers].
+// against the pinned schema. Raw Conn dispatch uses [Handlers].
 // These convenience methods do not track initialization, serialize prompts,
 // negotiate capabilities, manage sessions or apply authorization policy.
-// New starts I/O workers; it does not launch a process, listen on a port or
-// connect an agent runtime. Applications may use child-process stdio streams.
+//
+// # Typed receiving endpoint
+//
+// [NewAgent] supplies initialization and session state over the same transport.
+// [AgentHandlers] implements Initialize, CreateSession and Prompt. Initialization
+// accepts protocol version 1; successful initialization is immutable. Independent
+// capability snapshots are available through [Agent.Initialization]; enforcing
+// content capabilities, MCP configuration and authorization remains application
+// work. Unsupported requests receive method-not-found; unknown notifications are
+// ignored. Malformed session/cancel notifications close the connection.
+//
+// Session slots are bounded by [AgentOptions.MaxSessions], including creations
+// in flight. The application allocates unique nonempty session IDs and owns all
+// runtime/storage resources, including cleanup after failed creation or shutdown.
+// There is no automatic eviction, persistence, resume or session-close operation.
+//
+// Admission occurs in wire order on the reader without invoking application
+// callbacks: overlapping prompts for a session are rejected, not queued. Cancel
+// binds to the turn active at admission and never to a later successor. Idle or
+// unknown-session cancellation is a no-op. Callbacks still run concurrently
+// across sessions. Initialization/session readiness and prompt-slot retirement
+// are committed before their responses become observable, alongside request-ID
+// retirement. Clients should await initialization/creation responses before
+// sending dependent work.
+//
+// Session-limit and active-prompt rejections use implementation-defined server
+// error code -32001, not ACP's -32000 (authentication required). Prompts for an
+// unknown session use -32002 (resource not found).
+//
+// Each Prompt receives a [Turn]. Its SendUpdate and RequestPermission
+// methods bind the session ID and reject work after the callback returns. The
+// response waits for callback unwind and all admitted outbound operations, so
+// final updates precede completion. Cancellation requests cooperative unwind;
+// it does not manufacture a response while application execution is still live.
+// A cancelled callback returning nil or context.Canceled produces stopReason
+// cancelled; other callback errors retain the usual Conn error handling.
+// Applications must join their own goroutines before returning from callbacks.
+//
+// Turn writes deliberately use connection lifetime: final updates can be sent
+// after cancellation, and cancelling a permission wait cannot tear a frame.
+// Permission cancellation takes effect after its request write finishes; a
+// stalled peer requires Close (or cancellation of NewAgent's parent context).
+// Callback return cancels outstanding permission waits and joins admitted work.
+// This does not send remote permission cancellation or apply permission policy.
+// Retained Turn values cannot publish into a successor. Raw Conn methods retain
+// their original active-write cancellation semantics.
+//
+// Applications may supply child-process stdio streams to either constructor.
 //
 // # Test conversation
 //

@@ -19,6 +19,11 @@ import (
 // opaque RawMessages, preventing validator arithmetic even in nonmatching union
 // branches. This is a validation-only projection, never the wire value.
 func projectNumbers(v any, schemas []*jsonschema.Schema, defs map[string]*jsonschema.Schema) (any, error) {
+	switch v.(type) {
+	case json.Number, map[string]any, []any:
+	default:
+		return v, nil
+	}
 	var expanded []*jsonschema.Schema
 	seen := map[*jsonschema.Schema]bool{}
 	var expand func(*jsonschema.Schema)

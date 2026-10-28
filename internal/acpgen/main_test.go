@@ -7,7 +7,7 @@ import (
 )
 
 func TestPins(t *testing.T) {
-	for file, hash := range map[string]string{"schema.json": "d6f7731bf74b3dbe3b9bbda52957a7637a12e688", "meta.json": "b9c67caa417dd2285a31d07309a215a6110bbfaf"} {
+	for file, hash := range map[string]string{"schema.json": sourcePin.SchemaBlob, "meta.json": sourcePin.MetadataBlob} {
 		b, err := os.ReadFile("../../pkg/acp/protocol/" + file)
 		if err != nil {
 			t.Fatal(err)

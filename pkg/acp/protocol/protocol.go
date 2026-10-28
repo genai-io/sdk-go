@@ -30,13 +30,6 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-const (
-	WireVersion   = 1
-	SchemaVersion = "schema-v1.26.0"
-	SourceCommit  = "e2d83349bc9e28a4059ea3acefa1c91c966f74e2"
-	SchemaBlob    = "d6f7731bf74b3dbe3b9bbda52957a7637a12e688"
-)
-
 //go:embed schema.json
 var schemaJSON []byte
 

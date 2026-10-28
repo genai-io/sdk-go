@@ -8,6 +8,13 @@ import (
 	"encoding/json"
 )
 
+const (
+	WireVersion   = 1
+	SchemaVersion = "schema-v1.26.0"
+	SourceCommit  = "e2d83349bc9e28a4059ea3acefa1c91c966f74e2"
+	SchemaBlob    = "d6f7731bf74b3dbe3b9bbda52957a7637a12e688"
+)
+
 type AgentAuthCapabilities struct {
 	Meta   Optional[json.RawMessage]    `json:"_meta"`
 	Logout Optional[LogoutCapabilities] `json:"logout"`

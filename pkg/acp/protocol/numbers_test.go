@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestNonNumericProjection(t *testing.T) {
+	for _, value := range []any{"text", true, false, nil} {
+		got, err := projectNumbers(value, nil, nil)
+		if err != nil || got != value {
+			t.Fatalf("projectNumbers(%v) = %v, %v", value, got, err)
+		}
+	}
+}
+
 func TestArbitraryNumbersAreOpaque(t *testing.T) {
 	for _, token := range []string{"18446744073709551616", "1e10000", "1e-10000", "1e1000000", "1e-1000000"} {
 		b := []byte(`{"protocolVersion":1,"_meta":{"n":` + token + `},"future":{"n":` + token + `}}`)

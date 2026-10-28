@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestGoName(t *testing.T) {
+	for input, want := range map[string]string{
+		"sessionId": "SessionID", "toolCallId": "ToolCallID", "optionId": "OptionID",
+		"mcpServers": "MCPServers", "McpServerHttp": "MCPServerHTTP",
+		"mimeType": "MIMEType", "uri": "URI", "url": "URL", "cwd": "CWD", "fs": "FS",
+		"ElicitationUrlCapabilities": "ElicitationURLCapabilities",
+		"schemaJSONValue":            "SchemaJSONValue", "allow_once": "AllowOnce",
+		"identity": "Identity", "": "Variant",
+	} {
+		if got := goName(input); got != want {
+			t.Errorf("goName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestPins(t *testing.T) {
 	for file, hash := range map[string]string{"schema.json": sourcePin.SchemaBlob, "meta.json": sourcePin.MetadataBlob} {
 		b, err := os.ReadFile("../../pkg/acp/protocol/" + file)

@@ -76,10 +76,10 @@ func TestValidation(t *testing.T) {
 			}
 		})
 	}
-	if _, err := json.Marshal(NewSessionRequest{Cwd: "/"}); err == nil {
+	if _, err := json.Marshal(NewSessionRequest{CWD: "/"}); err == nil {
 		t.Fatal("nil required array")
 	}
-	if _, err := json.Marshal(NewSessionRequest{Cwd: "/", McpServers: []McpServer{}}); err != nil {
+	if _, err := json.Marshal(NewSessionRequest{CWD: "/", MCPServers: []MCPServer{}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -92,9 +92,9 @@ func TestUnions(t *testing.T) {
 		{`{"type":"text","text":"hello"}`, &ContentBlock{}, ContentBlockTextVariant{}},
 		{`{"type":"image","data":"AA==","mimeType":"image/png"}`, &ContentBlock{}, ContentBlockImageVariant{}},
 		{`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`, &SessionUpdate{}, SessionUpdateAgentMessageChunkVariant{}},
-		{`{"name":"m","command":"cmd","args":[],"env":[]}`, &McpServer{}, McpServerStdioVariant{}},
-		{`{"type":"http","name":"m","url":"https://example.test","headers":[]}`, &McpServer{}, McpServerHttpVariant{}},
-		{`{"type":"sse","name":"m","url":"https://example.test","headers":[]}`, &McpServer{}, McpServerSseVariant{}},
+		{`{"name":"m","command":"cmd","args":[],"env":[]}`, &MCPServer{}, MCPServerStdioVariant{}},
+		{`{"type":"http","name":"m","url":"https://example.test","headers":[]}`, &MCPServer{}, MCPServerHTTPVariant{}},
+		{`{"type":"sse","name":"m","url":"https://example.test","headers":[]}`, &MCPServer{}, MCPServerSSEVariant{}},
 		{`{"uri":"file:///x","text":"hello"}`, &EmbeddedResourceResource{}, nil},
 		{`{"uri":"file:///x","blob":"AA=="}`, &EmbeddedResourceResource{}, nil},
 		{`[{"value":"v","name":"Value"}]`, &SessionConfigSelectOptions{}, SessionConfigSelectOptionsUngroupedVariant{}},
@@ -114,7 +114,7 @@ func TestUnions(t *testing.T) {
 					value = v.Value
 				case *SessionUpdate:
 					value = v.Value
-				case *McpServer:
+				case *MCPServer:
 					value = v.Value
 				case *SessionConfigSelectOptions:
 					value = v.Value
@@ -145,7 +145,7 @@ func TestUnions(t *testing.T) {
 	}
 }
 func TestConstruction(t *testing.T) {
-	v := PromptRequest{SessionId: "s", Prompt: []ContentBlock{{Value: ContentBlockTextVariant{Type: "text", Text: "hello"}}}}
+	v := PromptRequest{SessionID: "s", Prompt: []ContentBlock{{Value: ContentBlockTextVariant{Type: "text", Text: "hello"}}}}
 	b, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)

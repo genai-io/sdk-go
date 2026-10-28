@@ -76,7 +76,7 @@ func projectNumbers(v any, schemas []*jsonschema.Schema, defs map[string]*jsonsc
 			}
 		}
 		if integer {
-			c, err := integerText(string(x))
+			c, err := normalizeInteger(string(x))
 			if err != nil {
 				return nil, err
 			}
@@ -128,10 +128,10 @@ func projectNumbers(v any, schemas []*jsonschema.Schema, defs map[string]*jsonsc
 	return v, nil
 }
 
-// integerText normalizes a valid JSON number to an exact, at-most-20-digit
+// normalizeInteger normalizes a valid JSON number to an exact, at-most-20-digit
 // integer spelling. Exponents are saturated before any expansion; no big-number
 // arithmetic or allocation proportional to the exponent is performed.
-func integerText(s string) (string, error) {
+func normalizeInteger(s string) (string, error) {
 	original := s
 	if !json.Valid([]byte(s)) || len(s) == 0 || s[0] == '"' {
 		return "", errors.New("protocol: expected JSON integer")
@@ -199,7 +199,7 @@ func unmarshalExact(b []byte, dst any) error {
 	v := reflect.ValueOf(dst).Elem()
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		c, err := integerText(string(bytes.TrimSpace(b)))
+		c, err := normalizeInteger(string(bytes.TrimSpace(b)))
 		if err != nil {
 			return err
 		}
@@ -210,7 +210,7 @@ func unmarshalExact(b []byte, dst any) error {
 		v.SetInt(n)
 		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		c, err := integerText(string(bytes.TrimSpace(b)))
+		c, err := normalizeInteger(string(bytes.TrimSpace(b)))
 		if err != nil {
 			return err
 		}

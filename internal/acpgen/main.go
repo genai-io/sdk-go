@@ -35,36 +35,55 @@ var sourcePin = struct {
 	MetadataBlob:  "b9c67caa417dd2285a31d07309a215a6110bbfaf",
 }
 
-func obj(v any) node {
+func asObject(v any) node {
 	if v == nil {
 		return node{}
 	}
 	return node(v.(map[string]any))
 }
-func list(v any) []any {
+func asArray(v any) []any {
 	if v == nil {
 		return nil
 	}
 	return v.([]any)
 }
-func name(s string) string {
-	parts := strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	for i, p := range parts {
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+func goName(s string) string {
+	var result strings.Builder
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		runes := []rune(part)
+		start := 0
+		for end := 1; end <= len(runes); end++ {
+			if end < len(runes) {
+				startsWord := unicode.IsUpper(runes[end]) &&
+					(unicode.IsLower(runes[end-1]) || unicode.IsDigit(runes[end-1]) ||
+						(end+1 < len(runes) && unicode.IsLower(runes[end+1])))
+				if !startsWord {
+					continue
+				}
+			}
+			word := string(runes[start:end])
+			switch upper := strings.ToUpper(word); upper {
+			case "API", "CWD", "FS", "HTTP", "HTTPS", "ID", "JSON", "MCP", "MIME", "SSE", "URI", "URL":
+				result.WriteString(upper)
+			default:
+				result.WriteRune(unicode.ToUpper(runes[start]))
+				result.WriteString(string(runes[start+1 : end]))
+			}
+			start = end
+		}
 	}
-	s = strings.Join(parts, "")
-	if s == "" {
+	if result.Len() == 0 {
 		return "Variant"
 	}
-	return s
+	return result.String()
 }
-func ref(n node) string { s, _ := n["$ref"].(string); return strings.TrimPrefix(s, "#/$defs/") }
-func typ(n node) string {
-	if r := ref(n); r != "" {
-		return r
+func refName(n node) string { s, _ := n["$ref"].(string); return strings.TrimPrefix(s, "#/$defs/") }
+func goType(n node) string {
+	if definition := refName(n); definition != "" {
+		return goName(definition)
 	}
-	if a := list(n["allOf"]); len(a) == 1 {
-		return typ(obj(a[0]))
+	if a := asArray(n["allOf"]); len(a) == 1 {
+		return goType(asObject(a[0]))
 	}
 	t := n["type"]
 	if a, ok := t.([]any); ok {
@@ -91,36 +110,36 @@ func typ(n node) string {
 	case "boolean":
 		return "bool"
 	case "array":
-		return "[]" + typ(obj(n["items"]))
+		return "[]" + goType(asObject(n["items"]))
 	}
-	if a := list(n["anyOf"]); len(a) == 2 {
+	if a := asArray(n["anyOf"]); len(a) == 2 {
 		for _, v := range a {
-			q := obj(v)
+			q := asObject(v)
 			if q["type"] != "null" {
-				return typ(q)
+				return goType(q)
 			}
 		}
 	}
 	return "json.RawMessage"
 }
-func flatten(n node) node {
+func flattenObject(n node) node {
 	p := map[string]any{}
 	r := []any{}
-	for _, v := range list(n["allOf"]) {
-		q := obj(v)
-		if x := ref(q); x != "" {
+	for _, v := range asArray(n["allOf"]) {
+		q := asObject(v)
+		if x := refName(q); x != "" {
 			q = defs[x]
 		}
-		q = flatten(q)
-		for k, v := range obj(q["properties"]) {
+		q = flattenObject(q)
+		for k, v := range asObject(q["properties"]) {
 			p[k] = v
 		}
-		r = append(r, list(q["required"])...)
+		r = append(r, asArray(q["required"])...)
 	}
-	for k, v := range obj(n["properties"]) {
+	for k, v := range asObject(n["properties"]) {
 		p[k] = v
 	}
-	r = append(r, list(n["required"])...)
+	r = append(r, asArray(n["required"])...)
 	z := node{}
 	for k, v := range n {
 		z[k] = v
@@ -129,37 +148,37 @@ func flatten(n node) node {
 	z["required"] = r
 	return z
 }
-func emitStruct(nm string, n node, definition string) {
-	n = flatten(n)
-	fmt.Fprintf(&out, "type %s struct {\n", nm)
-	req := map[string]bool{}
-	for _, v := range list(n["required"]) {
-		req[v.(string)] = true
+func emitStruct(typeName string, schema node, definition string) {
+	schema = flattenObject(schema)
+	fmt.Fprintf(&out, "type %s struct {\n", typeName)
+	required := map[string]bool{}
+	for _, property := range asArray(schema["required"]) {
+		required[property.(string)] = true
 	}
-	p := obj(n["properties"])
-	for _, k := range slices.Sorted(maps.Keys(p)) {
-		t := typ(obj(p[k]))
-		if !req[k] {
-			t = "Optional[" + t + "]"
+	properties := asObject(schema["properties"])
+	for _, field := range slices.Sorted(maps.Keys(properties)) {
+		fieldType := goType(asObject(properties[field]))
+		if !required[field] {
+			fieldType = "Optional[" + fieldType + "]"
 		}
-		fmt.Fprintf(&out, "%s %s `json:%q`\n", name(k), t, k)
+		fmt.Fprintf(&out, "%s %s `json:%q`\n", goName(field), fieldType, field)
 	}
 	fmt.Fprintln(&out, "Extra map[string]json.RawMessage `json:\"-\"`\n}")
-	fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { return marshalObject(%q,v) }\nfunc (v *%s) UnmarshalJSON(b []byte) error { type plain %s; var p plain; if err:=unmarshalObject(%q,b,&p);err!=nil{return err};*v=%s(p);return nil }\n", nm, definition, nm, nm, definition, nm)
+	fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { return marshalObject(%q,v) }\nfunc (v *%s) UnmarshalJSON(b []byte) error { type plain %s; var p plain; if err:=unmarshalObject(%q,b,&p);err!=nil{return err};*v=%s(p);return nil }\n", typeName, definition, typeName, typeName, definition, typeName)
 }
-func branches(n node) []any {
-	if a := list(n["oneOf"]); len(a) > 0 {
+func unionBranches(n node) []any {
+	if a := asArray(n["oneOf"]); len(a) > 0 {
 		return a
 	}
-	return list(n["anyOf"])
+	return asArray(n["anyOf"])
 }
-func stringUnion(n node) bool {
-	a := branches(n)
+func isStringUnion(n node) bool {
+	a := unionBranches(n)
 	if len(a) == 0 {
 		return false
 	}
 	for _, v := range a {
-		if obj(v)["type"] != "string" {
+		if asObject(v)["type"] != "string" {
 			return false
 		}
 	}
@@ -171,15 +190,15 @@ func generate(schema []byte) ([]byte, error) {
 		return nil, err
 	}
 	defs = map[string]node{}
-	for k, v := range obj(doc["$defs"]) {
-		defs[k] = obj(v)
+	for k, v := range asObject(doc["$defs"]) {
+		defs[k] = asObject(v)
 	}
 	seen := map[string]bool{}
 	var walk func(any)
 	walk = func(v any) {
 		switch x := v.(type) {
 		case map[string]any:
-			if r := ref(node(x)); r != "" && !seen[r] {
+			if r := refName(node(x)); r != "" && !seen[r] {
 				seen[r] = true
 				walk(map[string]any(defs[r]))
 			}
@@ -203,82 +222,82 @@ func generate(schema []byte) ([]byte, error) {
 	}
 	fmt.Fprintln(&out, ")")
 	fmt.Fprintf(&out, "const (\nWireVersion = %d\nSchemaVersion = %q\nSourceCommit = %q\nSchemaBlob = %q\n)\n", sourcePin.WireVersion, sourcePin.SchemaVersion, sourcePin.Commit, sourcePin.SchemaBlob)
-	for _, nm := range slices.Sorted(maps.Keys(seen)) {
-		n := defs[nm]
-		a := branches(n)
-		if len(a) > 0 && !stringUnion(n) {
-			fmt.Fprintf(&out, "// %s holds one of its concrete variant types in Value.\ntype %s struct { Value any }\n", nm, nm)
-			variants := []string{}
-			for i, v := range a {
-				q := obj(v)
-				suffix, _ := q["title"].(string)
-				for _, pk := range slices.Sorted(maps.Keys(obj(q["properties"]))) {
-					pv := obj(q["properties"])[pk]
-					if c, ok := obj(pv)["const"].(string); ok {
-						suffix = c
+	for _, definition := range slices.Sorted(maps.Keys(seen)) {
+		typeName := goName(definition)
+		schema := defs[definition]
+		alternatives := unionBranches(schema)
+		if len(alternatives) > 0 && !isStringUnion(schema) {
+			fmt.Fprintf(&out, "// %s holds one of its concrete variant types in Value.\ntype %s struct { Value any }\n", typeName, typeName)
+			variantNames := []string{}
+			for index, alternative := range alternatives {
+				branch := asObject(alternative)
+				caseName, _ := branch["title"].(string)
+				for _, property := range slices.Sorted(maps.Keys(asObject(branch["properties"]))) {
+					if tag, ok := asObject(asObject(branch["properties"])[property])["const"].(string); ok {
+						caseName = tag
 					}
 				}
-				if suffix == "" {
-					if x := list(q["allOf"]); len(x) == 1 {
-						suffix = ref(obj(x[0]))
+				if caseName == "" {
+					if composition := asArray(branch["allOf"]); len(composition) == 1 {
+						caseName = refName(asObject(composition[0]))
 					}
 				}
-				if suffix == "" {
-					suffix = fmt.Sprintf("Variant%d", i+1)
+				if caseName == "" {
+					caseName = fmt.Sprintf("Variant%d", index+1)
 				}
-				vn := nm + name(suffix) + "Variant"
-				variants = append(variants, vn)
-				if q["type"] == "array" {
-					fmt.Fprintf(&out, "type %s %s\n", vn, typ(q))
-					emitScalar(vn, fmt.Sprintf("%s/%d", nm, i))
+				variantName := typeName + goName(caseName) + "Variant"
+				variantNames = append(variantNames, variantName)
+				if branch["type"] == "array" {
+					fmt.Fprintf(&out, "type %s %s\n", variantName, goType(branch))
+					emitScalar(variantName, fmt.Sprintf("%s/%d", definition, index))
 				} else {
-					merged := flatten(q)
-					p := obj(merged["properties"])
-					for k, v := range obj(n["properties"]) {
-						p[k] = v
+					merged := flattenObject(branch)
+					properties := asObject(merged["properties"])
+					for field, property := range asObject(schema["properties"]) {
+						properties[field] = property
 					}
-					merged["required"] = append(list(merged["required"]), list(n["required"])...)
-					emitStruct(vn, merged, fmt.Sprintf("%s/%d", nm, i))
+					merged["required"] = append(asArray(merged["required"]), asArray(schema["required"])...)
+					emitStruct(variantName, merged, fmt.Sprintf("%s/%d", definition, index))
 				}
 			}
-			accepted := make([]string, 0, 2*len(variants))
-			for _, vn := range variants {
-				accepted = append(accepted, vn, "*"+vn)
+			accepted := make([]string, 0, 2*len(variantNames))
+			for _, variantName := range variantNames {
+				accepted = append(accepted, variantName, "*"+variantName)
 			}
-			fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { switch v.Value.(type) {case %s: return marshalValue(%q,v.Value);default:return nil,errVariant} }\n", nm, strings.Join(accepted, ","), nm)
-			fmt.Fprintf(&out, "func (v *%s) UnmarshalJSON(b []byte) error {", nm)
-			if nm == "SessionConfigSelectOptions" {
+			fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { switch v.Value.(type) {case %s: return marshalValue(%q,v.Value);default:return nil,errVariant} }\n", typeName, strings.Join(accepted, ","), definition)
+			fmt.Fprintf(&out, "func (v *%s) UnmarshalJSON(b []byte) error {", typeName)
+			if definition == "SessionConfigSelectOptions" {
 				fmt.Fprintln(&out, "if bytes.Equal(bytes.TrimSpace(b),[]byte(\"[]\")) {var p SessionConfigSelectOptionsUngroupedVariant;if err:=json.Unmarshal(b,&p);err!=nil{return err};v.Value=p;return nil}")
 			}
-			fmt.Fprintf(&out, "i,err:=selectVariant(%q,b);if err!=nil{return err};switch i {", nm)
-			for i, vn := range variants {
-				fmt.Fprintf(&out, "case %d: var p %s;if err:=json.Unmarshal(b,&p);err!=nil{return err};v.Value=p;", i, vn)
+			fmt.Fprintf(&out, "i,err:=selectVariant(%q,b);if err!=nil{return err};switch i {", definition)
+			for index, variantName := range variantNames {
+				fmt.Fprintf(&out, "case %d: var p %s;if err:=json.Unmarshal(b,&p);err!=nil{return err};v.Value=p;", index, variantName)
 			}
 			fmt.Fprintln(&out, "};return nil }")
-		} else if n["type"] == "object" {
-			emitStruct(nm, n, nm)
+		} else if schema["type"] == "object" {
+			emitStruct(typeName, schema, definition)
 		} else {
-			t := typ(n)
-			if stringUnion(n) || n["enum"] != nil {
-				t = "string"
+			underlyingType := goType(schema)
+			if isStringUnion(schema) || schema["enum"] != nil {
+				underlyingType = "string"
 			}
-			fmt.Fprintf(&out, "type %s %s\n", nm, t)
-			emitScalar(nm, nm)
+			fmt.Fprintf(&out, "type %s %s\n", typeName, underlyingType)
+			emitScalar(typeName, definition)
 			values := map[string]bool{}
-			for _, v := range list(n["enum"]) {
-				if s, ok := v.(string); ok {
-					values[s] = true
+			for _, value := range asArray(schema["enum"]) {
+				if text, ok := value.(string); ok {
+					values[text] = true
 				}
 			}
-			if stringUnion(n) {
-				for _, v := range branches(n) {
-					if s, ok := obj(v)["const"].(string); ok {
-						values[s] = true
+			if isStringUnion(schema) {
+				for _, branch := range unionBranches(schema) {
+					if text, ok := asObject(branch)["const"].(string); ok {
+						values[text] = true
 					}
 				}
 			}
-			for _, v := range slices.Sorted(maps.Keys(values)) {
-				fmt.Fprintf(&out, "const %s%s %s = %q\n", nm, name(v), nm, v)
+			for _, value := range slices.Sorted(maps.Keys(values)) {
+				fmt.Fprintf(&out, "const %s%s %s = %q\n", typeName, goName(value), typeName, value)
 			}
 		}
 	}
@@ -289,9 +308,9 @@ func generate(schema []byte) ([]byte, error) {
 	fmt.Fprintln(&out, "})")
 	return format.Source(out.Bytes())
 }
-func emitScalar(nm, definition string) {
-	fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { type plain %s; return marshalValue(%q,plain(v)) }\n", nm, nm, definition)
-	fmt.Fprintf(&out, "func (v *%s) UnmarshalJSON(b []byte) error {if err:=ValidateJSON(%q,b);err!=nil{return err};type plain %s; var p plain;if err:=unmarshalExact(b,&p);err!=nil{return err};*v=%s(p);return nil }\n", nm, definition, nm, nm)
+func emitScalar(typeName, definition string) {
+	fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { type plain %s; return marshalValue(%q,plain(v)) }\n", typeName, typeName, definition)
+	fmt.Fprintf(&out, "func (v *%s) UnmarshalJSON(b []byte) error {if err:=ValidateJSON(%q,b);err!=nil{return err};type plain %s; var p plain;if err:=unmarshalExact(b,&p);err!=nil{return err};*v=%s(p);return nil }\n", typeName, definition, typeName, typeName)
 }
 func checkBlob(b []byte, want string) error {
 	h := sha1.New()

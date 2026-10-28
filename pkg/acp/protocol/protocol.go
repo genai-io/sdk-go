@@ -1,6 +1,8 @@
 // Package protocol provides wire values for stable ACP v1 (schema-v1.26.0).
 // Schema and metadata are reproduced unmodified from agentclientprotocol/
 // agent-client-protocol at SourceCommit under Apache-2.0; see LICENSE.schema.
+// Go names normalize initialisms (ID, MCP, HTTP, URI); union variants follow
+// <Union><Case>Variant. JSON fields and schema definition names are unchanged.
 //
 // Codecs validate the official JSON Schema, preserve unknown object properties,
 // and distinguish absent, null, and present optional fields. They intentionally
@@ -104,7 +106,7 @@ var sourceDefs map[string]json.RawMessage
 var sourceDefsJSON json.RawMessage
 var errSource error
 
-func source() (map[string]json.RawMessage, error) {
+func loadDefinitions() (map[string]json.RawMessage, error) {
 	sourceOnce.Do(func() {
 		var d struct {
 			Defs map[string]json.RawMessage `json:"$defs"`
@@ -117,7 +119,7 @@ func source() (map[string]json.RawMessage, error) {
 	})
 	return sourceDefs, errSource
 }
-func schemaDefinitionFor(name string) (*schemaDefinition, error) {
+func lookupDefinition(name string) (*schemaDefinition, error) {
 	if !supportedDefinitions[name] {
 		return nil, fmt.Errorf("protocol: unsupported definition %q", name)
 	}
@@ -126,12 +128,12 @@ func schemaDefinitionFor(name string) (*schemaDefinition, error) {
 		value, _ = definitions.LoadOrStore(name, &definitionEntry{})
 	}
 	entry := value.(*definitionEntry)
-	entry.once.Do(func() { entry.value, entry.err = loadDefinition(name) })
+	entry.once.Do(func() { entry.value, entry.err = parseDefinition(name) })
 	return entry.value, entry.err
 }
 
-func loadDefinition(name string) (*schemaDefinition, error) {
-	defs, err := source()
+func parseDefinition(name string) (*schemaDefinition, error) {
+	defs, err := loadDefinitions()
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +178,7 @@ func loadDefinition(name string) (*schemaDefinition, error) {
 	return definition, nil
 }
 
-func validator(definition string) (*jsonschema.Resolved, error) {
+func lookupValidator(definition string) (*jsonschema.Resolved, error) {
 	value, ok := validators.Load(definition)
 	if !ok {
 		parts := strings.Split(definition, "/")
@@ -186,16 +188,16 @@ func validator(definition string) (*jsonschema.Resolved, error) {
 		value, _ = validators.LoadOrStore(definition, &validatorEntry{})
 	}
 	entry := value.(*validatorEntry)
-	entry.once.Do(func() { entry.value, entry.err = resolveValidator(definition) })
+	entry.once.Do(func() { entry.value, entry.err = compileValidator(definition) })
 	if entry.err != nil {
 		validators.CompareAndDelete(definition, entry)
 	}
 	return entry.value, entry.err
 }
 
-func resolveValidator(definition string) (*jsonschema.Resolved, error) {
+func compileValidator(definition string) (*jsonschema.Resolved, error) {
 	parts := strings.Split(definition, "/")
-	metadata, err := schemaDefinitionFor(parts[0])
+	metadata, err := lookupDefinition(parts[0])
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +242,7 @@ func resolveValidator(definition string) (*jsonschema.Resolved, error) {
 // It performs no network access or default insertion; unconstrained JSON
 // numbers retain their original representation.
 func ValidateJSON(definition string, data []byte) error {
-	r, err := validator(definition)
+	r, err := lookupValidator(definition)
 	if err != nil {
 		return err
 	}
@@ -340,7 +342,7 @@ func selectVariant(def string, b []byte) (int, error) {
 	if err := ValidateJSON(def, b); err != nil {
 		return 0, err
 	}
-	metadata, err := schemaDefinitionFor(def)
+	metadata, err := lookupDefinition(def)
 	if err != nil {
 		return 0, err
 	}

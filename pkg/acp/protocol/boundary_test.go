@@ -36,7 +36,7 @@ func TestNumericBoundaryContract(t *testing.T) {
 func TestTaggedTransportDoesNotFallBack(t *testing.T) {
 	// This is schema-valid as a stdio server with unknown properties. A recognized
 	// HTTP discriminator must nevertheless select HTTP and reject missing fields.
-	var v McpServer
+	var v MCPServer
 	if err := json.Unmarshal([]byte(`{"type":"http","name":"m","command":"cmd","args":[],"env":[]}`), &v); err == nil {
 		t.Fatal("HTTP incorrectly decoded as stdio")
 	}
@@ -44,7 +44,7 @@ func TestTaggedTransportDoesNotFallBack(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"type":"http","name":"m","command":"cmd","args":[],"env":[],"url":"https://example.test","headers":[]}`), &v); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := v.Value.(McpServerHttpVariant); !ok {
+	if _, ok := v.Value.(MCPServerHTTPVariant); !ok {
 		t.Fatalf("got %T", v.Value)
 	}
 }
@@ -61,7 +61,7 @@ func TestExtensionRecoveryHintsAreStrict(t *testing.T) {
 func TestPermissionOutcomeConstruction(t *testing.T) {
 	for _, v := range []RequestPermissionResponse{
 		{Outcome: RequestPermissionOutcome{Value: RequestPermissionOutcomeCancelledVariant{Outcome: "cancelled"}}},
-		{Outcome: RequestPermissionOutcome{Value: RequestPermissionOutcomeSelectedVariant{Outcome: "selected", OptionId: "allow"}}},
+		{Outcome: RequestPermissionOutcome{Value: RequestPermissionOutcomeSelectedVariant{Outcome: "selected", OptionID: "allow"}}},
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {

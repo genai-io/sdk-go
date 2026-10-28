@@ -38,7 +38,7 @@ type AgentCapabilities struct {
 	Meta                Optional[json.RawMessage]       `json:"_meta"`
 	Auth                Optional[AgentAuthCapabilities] `json:"auth"`
 	LoadSession         Optional[bool]                  `json:"loadSession"`
-	McpCapabilities     Optional[McpCapabilities]       `json:"mcpCapabilities"`
+	MCPCapabilities     Optional[MCPCapabilities]       `json:"mcpCapabilities"`
 	PromptCapabilities  Optional[PromptCapabilities]    `json:"promptCapabilities"`
 	SessionCapabilities Optional[SessionCapabilities]   `json:"sessionCapabilities"`
 	Extra               map[string]json.RawMessage      `json:"-"`
@@ -80,7 +80,7 @@ type AudioContent struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Annotations Optional[Annotations]      `json:"annotations"`
 	Data        string                     `json:"data"`
-	MimeType    string                     `json:"mimeType"`
+	MIMEType    string                     `json:"mimeType"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
 
@@ -119,7 +119,7 @@ type AuthMethodTerminalVariant struct {
 	Args        Optional[[]string]         `json:"args"`
 	Description Optional[string]           `json:"description"`
 	Env         Optional[json.RawMessage]  `json:"env"`
-	Id          AuthMethodId               `json:"id"`
+	ID          AuthMethodID               `json:"id"`
 	Name        string                     `json:"name"`
 	Type        string                     `json:"type"`
 	Extra       map[string]json.RawMessage `json:"-"`
@@ -141,7 +141,7 @@ func (v *AuthMethodTerminalVariant) UnmarshalJSON(b []byte) error {
 type AuthMethodAgentVariant struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Description Optional[string]           `json:"description"`
-	Id          AuthMethodId               `json:"id"`
+	ID          AuthMethodID               `json:"id"`
 	Name        string                     `json:"name"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
@@ -191,7 +191,7 @@ func (v *AuthMethod) UnmarshalJSON(b []byte) error {
 type AuthMethodAgent struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Description Optional[string]           `json:"description"`
-	Id          AuthMethodId               `json:"id"`
+	ID          AuthMethodID               `json:"id"`
 	Name        string                     `json:"name"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
@@ -207,22 +207,22 @@ func (v *AuthMethodAgent) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type AuthMethodId string
+type AuthMethodID string
 
-func (v AuthMethodId) MarshalJSON() ([]byte, error) {
-	type plain AuthMethodId
+func (v AuthMethodID) MarshalJSON() ([]byte, error) {
+	type plain AuthMethodID
 	return marshalValue("AuthMethodId", plain(v))
 }
-func (v *AuthMethodId) UnmarshalJSON(b []byte) error {
+func (v *AuthMethodID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("AuthMethodId", b); err != nil {
 		return err
 	}
-	type plain AuthMethodId
+	type plain AuthMethodID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = AuthMethodId(p)
+	*v = AuthMethodID(p)
 	return nil
 }
 
@@ -231,7 +231,7 @@ type AuthMethodTerminal struct {
 	Args        Optional[[]string]         `json:"args"`
 	Description Optional[string]           `json:"description"`
 	Env         Optional[json.RawMessage]  `json:"env"`
-	Id          AuthMethodId               `json:"id"`
+	ID          AuthMethodID               `json:"id"`
 	Name        string                     `json:"name"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
@@ -334,8 +334,8 @@ func (v *AvailableCommandsUpdate) UnmarshalJSON(b []byte) error {
 type BlobResourceContents struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
 	Blob     string                     `json:"blob"`
-	MimeType Optional[string]           `json:"mimeType"`
-	Uri      string                     `json:"uri"`
+	MIMEType Optional[string]           `json:"mimeType"`
+	URI      string                     `json:"uri"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -372,7 +372,7 @@ func (v *BooleanConfigOptionCapabilities) UnmarshalJSON(b []byte) error {
 
 type CancelNotification struct {
 	Meta      Optional[json.RawMessage]  `json:"_meta"`
-	SessionId SessionId                  `json:"sessionId"`
+	SessionID SessionID                  `json:"sessionId"`
 	Extra     map[string]json.RawMessage `json:"-"`
 }
 
@@ -393,7 +393,7 @@ type ClientCapabilities struct {
 	Meta        Optional[json.RawMessage]           `json:"_meta"`
 	Auth        Optional[AuthCapabilities]          `json:"auth"`
 	Elicitation Optional[ElicitationCapabilities]   `json:"elicitation"`
-	Fs          Optional[FileSystemCapabilities]    `json:"fs"`
+	FS          Optional[FileSystemCapabilities]    `json:"fs"`
 	Session     Optional[ClientSessionCapabilities] `json:"session"`
 	Terminal    Optional[bool]                      `json:"terminal"`
 	Extra       map[string]json.RawMessage          `json:"-"`
@@ -450,22 +450,22 @@ func (v *CompactionCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type CompactionId string
+type CompactionID string
 
-func (v CompactionId) MarshalJSON() ([]byte, error) {
-	type plain CompactionId
+func (v CompactionID) MarshalJSON() ([]byte, error) {
+	type plain CompactionID
 	return marshalValue("CompactionId", plain(v))
 }
-func (v *CompactionId) UnmarshalJSON(b []byte) error {
+func (v *CompactionID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("CompactionId", b); err != nil {
 		return err
 	}
-	type plain CompactionId
+	type plain CompactionID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = CompactionId(p)
+	*v = CompactionID(p)
 	return nil
 }
 
@@ -495,7 +495,7 @@ const CompactionStatusInProgress CompactionStatus = "in_progress"
 
 type CompactionSummaryChunk struct {
 	Meta         Optional[json.RawMessage]  `json:"_meta"`
-	CompactionId CompactionId               `json:"compactionId"`
+	CompactionID CompactionID               `json:"compactionId"`
 	Content      ContentBlock               `json:"content"`
 	Extra        map[string]json.RawMessage `json:"-"`
 }
@@ -515,7 +515,7 @@ func (v *CompactionSummaryChunk) UnmarshalJSON(b []byte) error {
 
 type CompactionUpdate struct {
 	Meta         Optional[json.RawMessage]  `json:"_meta"`
-	CompactionId CompactionId               `json:"compactionId"`
+	CompactionID CompactionID               `json:"compactionId"`
 	Error        Optional[string]           `json:"error"`
 	Status       CompactionStatus           `json:"status"`
 	Summary      Optional[[]ContentBlock]   `json:"summary"`
@@ -596,9 +596,9 @@ type ContentBlockImageVariant struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Annotations Optional[Annotations]      `json:"annotations"`
 	Data        string                     `json:"data"`
-	MimeType    string                     `json:"mimeType"`
+	MIMEType    string                     `json:"mimeType"`
 	Type        string                     `json:"type"`
-	Uri         Optional[string]           `json:"uri"`
+	URI         Optional[string]           `json:"uri"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
 
@@ -619,7 +619,7 @@ type ContentBlockAudioVariant struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Annotations Optional[Annotations]      `json:"annotations"`
 	Data        string                     `json:"data"`
-	MimeType    string                     `json:"mimeType"`
+	MIMEType    string                     `json:"mimeType"`
 	Type        string                     `json:"type"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
@@ -641,12 +641,12 @@ type ContentBlockResourceLinkVariant struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Annotations Optional[Annotations]      `json:"annotations"`
 	Description Optional[string]           `json:"description"`
-	MimeType    Optional[string]           `json:"mimeType"`
+	MIMEType    Optional[string]           `json:"mimeType"`
 	Name        string                     `json:"name"`
 	Size        Optional[int64]            `json:"size"`
 	Title       Optional[string]           `json:"title"`
 	Type        string                     `json:"type"`
-	Uri         string                     `json:"uri"`
+	URI         string                     `json:"uri"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
 
@@ -734,7 +734,7 @@ func (v *ContentBlock) UnmarshalJSON(b []byte) error {
 type ContentChunk struct {
 	Meta      Optional[json.RawMessage]  `json:"_meta"`
 	Content   ContentBlock               `json:"content"`
-	MessageId Optional[MessageId]        `json:"messageId"`
+	MessageID Optional[MessageID]        `json:"messageId"`
 	Extra     map[string]json.RawMessage `json:"-"`
 }
 
@@ -769,7 +769,7 @@ func (v *Cost) UnmarshalJSON(b []byte) error {
 
 type CurrentModeUpdate struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
-	CurrentModeId SessionModeId              `json:"currentModeId"`
+	CurrentModeID SessionModeID              `json:"currentModeId"`
 	Extra         map[string]json.RawMessage `json:"-"`
 }
 
@@ -808,7 +808,7 @@ func (v *Diff) UnmarshalJSON(b []byte) error {
 type ElicitationCapabilities struct {
 	Meta  Optional[json.RawMessage]             `json:"_meta"`
 	Form  Optional[ElicitationFormCapabilities] `json:"form"`
-	Url   Optional[ElicitationUrlCapabilities]  `json:"url"`
+	URL   Optional[ElicitationURLCapabilities]  `json:"url"`
 	Extra map[string]json.RawMessage            `json:"-"`
 }
 
@@ -843,21 +843,21 @@ func (v *ElicitationFormCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type ElicitationUrlCapabilities struct {
+type ElicitationURLCapabilities struct {
 	Meta  Optional[json.RawMessage]  `json:"_meta"`
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
-func (v ElicitationUrlCapabilities) MarshalJSON() ([]byte, error) {
+func (v ElicitationURLCapabilities) MarshalJSON() ([]byte, error) {
 	return marshalObject("ElicitationUrlCapabilities", v)
 }
-func (v *ElicitationUrlCapabilities) UnmarshalJSON(b []byte) error {
-	type plain ElicitationUrlCapabilities
+func (v *ElicitationURLCapabilities) UnmarshalJSON(b []byte) error {
+	type plain ElicitationURLCapabilities
 	var p plain
 	if err := unmarshalObject("ElicitationUrlCapabilities", b, &p); err != nil {
 		return err
 	}
-	*v = ElicitationUrlCapabilities(p)
+	*v = ElicitationURLCapabilities(p)
 	return nil
 }
 
@@ -883,9 +883,9 @@ func (v *EmbeddedResource) UnmarshalJSON(b []byte) error {
 type EmbeddedResourceResource struct{ Value any }
 type EmbeddedResourceResourceTextResourceContentsVariant struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
-	MimeType Optional[string]           `json:"mimeType"`
+	MIMEType Optional[string]           `json:"mimeType"`
 	Text     string                     `json:"text"`
-	Uri      string                     `json:"uri"`
+	URI      string                     `json:"uri"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -905,8 +905,8 @@ func (v *EmbeddedResourceResourceTextResourceContentsVariant) UnmarshalJSON(b []
 type EmbeddedResourceResourceBlobResourceContentsVariant struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
 	Blob     string                     `json:"blob"`
-	MimeType Optional[string]           `json:"mimeType"`
-	Uri      string                     `json:"uri"`
+	MIMEType Optional[string]           `json:"mimeType"`
+	URI      string                     `json:"uri"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -990,21 +990,21 @@ func (v *FileSystemCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type HttpHeader struct {
+type HTTPHeader struct {
 	Meta  Optional[json.RawMessage]  `json:"_meta"`
 	Name  string                     `json:"name"`
 	Value string                     `json:"value"`
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
-func (v HttpHeader) MarshalJSON() ([]byte, error) { return marshalObject("HttpHeader", v) }
-func (v *HttpHeader) UnmarshalJSON(b []byte) error {
-	type plain HttpHeader
+func (v HTTPHeader) MarshalJSON() ([]byte, error) { return marshalObject("HttpHeader", v) }
+func (v *HTTPHeader) UnmarshalJSON(b []byte) error {
+	type plain HTTPHeader
 	var p plain
 	if err := unmarshalObject("HttpHeader", b, &p); err != nil {
 		return err
 	}
-	*v = HttpHeader(p)
+	*v = HTTPHeader(p)
 	return nil
 }
 
@@ -1012,8 +1012,8 @@ type ImageContent struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Annotations Optional[Annotations]      `json:"annotations"`
 	Data        string                     `json:"data"`
-	MimeType    string                     `json:"mimeType"`
-	Uri         Optional[string]           `json:"uri"`
+	MIMEType    string                     `json:"mimeType"`
+	URI         Optional[string]           `json:"uri"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
 
@@ -1108,67 +1108,67 @@ func (v *LogoutCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type McpCapabilities struct {
+type MCPCapabilities struct {
 	Meta  Optional[json.RawMessage]  `json:"_meta"`
-	Http  Optional[bool]             `json:"http"`
-	Sse   Optional[bool]             `json:"sse"`
+	HTTP  Optional[bool]             `json:"http"`
+	SSE   Optional[bool]             `json:"sse"`
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpCapabilities) MarshalJSON() ([]byte, error) { return marshalObject("McpCapabilities", v) }
-func (v *McpCapabilities) UnmarshalJSON(b []byte) error {
-	type plain McpCapabilities
+func (v MCPCapabilities) MarshalJSON() ([]byte, error) { return marshalObject("McpCapabilities", v) }
+func (v *MCPCapabilities) UnmarshalJSON(b []byte) error {
+	type plain MCPCapabilities
 	var p plain
 	if err := unmarshalObject("McpCapabilities", b, &p); err != nil {
 		return err
 	}
-	*v = McpCapabilities(p)
+	*v = MCPCapabilities(p)
 	return nil
 }
 
-// McpServer holds one of its concrete variant types in Value.
-type McpServer struct{ Value any }
-type McpServerHttpVariant struct {
+// MCPServer holds one of its concrete variant types in Value.
+type MCPServer struct{ Value any }
+type MCPServerHTTPVariant struct {
 	Meta    Optional[json.RawMessage]  `json:"_meta"`
-	Headers []HttpHeader               `json:"headers"`
+	Headers []HTTPHeader               `json:"headers"`
 	Name    string                     `json:"name"`
 	Type    string                     `json:"type"`
-	Url     string                     `json:"url"`
+	URL     string                     `json:"url"`
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpServerHttpVariant) MarshalJSON() ([]byte, error) { return marshalObject("McpServer/0", v) }
-func (v *McpServerHttpVariant) UnmarshalJSON(b []byte) error {
-	type plain McpServerHttpVariant
+func (v MCPServerHTTPVariant) MarshalJSON() ([]byte, error) { return marshalObject("McpServer/0", v) }
+func (v *MCPServerHTTPVariant) UnmarshalJSON(b []byte) error {
+	type plain MCPServerHTTPVariant
 	var p plain
 	if err := unmarshalObject("McpServer/0", b, &p); err != nil {
 		return err
 	}
-	*v = McpServerHttpVariant(p)
+	*v = MCPServerHTTPVariant(p)
 	return nil
 }
 
-type McpServerSseVariant struct {
+type MCPServerSSEVariant struct {
 	Meta    Optional[json.RawMessage]  `json:"_meta"`
-	Headers []HttpHeader               `json:"headers"`
+	Headers []HTTPHeader               `json:"headers"`
 	Name    string                     `json:"name"`
 	Type    string                     `json:"type"`
-	Url     string                     `json:"url"`
+	URL     string                     `json:"url"`
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpServerSseVariant) MarshalJSON() ([]byte, error) { return marshalObject("McpServer/1", v) }
-func (v *McpServerSseVariant) UnmarshalJSON(b []byte) error {
-	type plain McpServerSseVariant
+func (v MCPServerSSEVariant) MarshalJSON() ([]byte, error) { return marshalObject("McpServer/1", v) }
+func (v *MCPServerSSEVariant) UnmarshalJSON(b []byte) error {
+	type plain MCPServerSSEVariant
 	var p plain
 	if err := unmarshalObject("McpServer/1", b, &p); err != nil {
 		return err
 	}
-	*v = McpServerSseVariant(p)
+	*v = MCPServerSSEVariant(p)
 	return nil
 }
 
-type McpServerStdioVariant struct {
+type MCPServerStdioVariant struct {
 	Meta    Optional[json.RawMessage]  `json:"_meta"`
 	Args    []string                   `json:"args"`
 	Command string                     `json:"command"`
@@ -1177,44 +1177,44 @@ type McpServerStdioVariant struct {
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpServerStdioVariant) MarshalJSON() ([]byte, error) { return marshalObject("McpServer/2", v) }
-func (v *McpServerStdioVariant) UnmarshalJSON(b []byte) error {
-	type plain McpServerStdioVariant
+func (v MCPServerStdioVariant) MarshalJSON() ([]byte, error) { return marshalObject("McpServer/2", v) }
+func (v *MCPServerStdioVariant) UnmarshalJSON(b []byte) error {
+	type plain MCPServerStdioVariant
 	var p plain
 	if err := unmarshalObject("McpServer/2", b, &p); err != nil {
 		return err
 	}
-	*v = McpServerStdioVariant(p)
+	*v = MCPServerStdioVariant(p)
 	return nil
 }
-func (v McpServer) MarshalJSON() ([]byte, error) {
+func (v MCPServer) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case McpServerHttpVariant, *McpServerHttpVariant, McpServerSseVariant, *McpServerSseVariant, McpServerStdioVariant, *McpServerStdioVariant:
+	case MCPServerHTTPVariant, *MCPServerHTTPVariant, MCPServerSSEVariant, *MCPServerSSEVariant, MCPServerStdioVariant, *MCPServerStdioVariant:
 		return marshalValue("McpServer", v.Value)
 	default:
 		return nil, errVariant
 	}
 }
-func (v *McpServer) UnmarshalJSON(b []byte) error {
+func (v *MCPServer) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("McpServer", b)
 	if err != nil {
 		return err
 	}
 	switch i {
 	case 0:
-		var p McpServerHttpVariant
+		var p MCPServerHTTPVariant
 		if err := json.Unmarshal(b, &p); err != nil {
 			return err
 		}
 		v.Value = p
 	case 1:
-		var p McpServerSseVariant
+		var p MCPServerSSEVariant
 		if err := json.Unmarshal(b, &p); err != nil {
 			return err
 		}
 		v.Value = p
 	case 2:
-		var p McpServerStdioVariant
+		var p MCPServerStdioVariant
 		if err := json.Unmarshal(b, &p); err != nil {
 			return err
 		}
@@ -1223,45 +1223,45 @@ func (v *McpServer) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type McpServerHttp struct {
+type MCPServerHTTP struct {
 	Meta    Optional[json.RawMessage]  `json:"_meta"`
-	Headers []HttpHeader               `json:"headers"`
+	Headers []HTTPHeader               `json:"headers"`
 	Name    string                     `json:"name"`
-	Url     string                     `json:"url"`
+	URL     string                     `json:"url"`
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpServerHttp) MarshalJSON() ([]byte, error) { return marshalObject("McpServerHttp", v) }
-func (v *McpServerHttp) UnmarshalJSON(b []byte) error {
-	type plain McpServerHttp
+func (v MCPServerHTTP) MarshalJSON() ([]byte, error) { return marshalObject("McpServerHttp", v) }
+func (v *MCPServerHTTP) UnmarshalJSON(b []byte) error {
+	type plain MCPServerHTTP
 	var p plain
 	if err := unmarshalObject("McpServerHttp", b, &p); err != nil {
 		return err
 	}
-	*v = McpServerHttp(p)
+	*v = MCPServerHTTP(p)
 	return nil
 }
 
-type McpServerSse struct {
+type MCPServerSSE struct {
 	Meta    Optional[json.RawMessage]  `json:"_meta"`
-	Headers []HttpHeader               `json:"headers"`
+	Headers []HTTPHeader               `json:"headers"`
 	Name    string                     `json:"name"`
-	Url     string                     `json:"url"`
+	URL     string                     `json:"url"`
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpServerSse) MarshalJSON() ([]byte, error) { return marshalObject("McpServerSse", v) }
-func (v *McpServerSse) UnmarshalJSON(b []byte) error {
-	type plain McpServerSse
+func (v MCPServerSSE) MarshalJSON() ([]byte, error) { return marshalObject("McpServerSse", v) }
+func (v *MCPServerSSE) UnmarshalJSON(b []byte) error {
+	type plain MCPServerSSE
 	var p plain
 	if err := unmarshalObject("McpServerSse", b, &p); err != nil {
 		return err
 	}
-	*v = McpServerSse(p)
+	*v = MCPServerSSE(p)
 	return nil
 }
 
-type McpServerStdio struct {
+type MCPServerStdio struct {
 	Meta    Optional[json.RawMessage]  `json:"_meta"`
 	Args    []string                   `json:"args"`
 	Command string                     `json:"command"`
@@ -1270,41 +1270,41 @@ type McpServerStdio struct {
 	Extra   map[string]json.RawMessage `json:"-"`
 }
 
-func (v McpServerStdio) MarshalJSON() ([]byte, error) { return marshalObject("McpServerStdio", v) }
-func (v *McpServerStdio) UnmarshalJSON(b []byte) error {
-	type plain McpServerStdio
+func (v MCPServerStdio) MarshalJSON() ([]byte, error) { return marshalObject("McpServerStdio", v) }
+func (v *MCPServerStdio) UnmarshalJSON(b []byte) error {
+	type plain MCPServerStdio
 	var p plain
 	if err := unmarshalObject("McpServerStdio", b, &p); err != nil {
 		return err
 	}
-	*v = McpServerStdio(p)
+	*v = MCPServerStdio(p)
 	return nil
 }
 
-type MessageId string
+type MessageID string
 
-func (v MessageId) MarshalJSON() ([]byte, error) {
-	type plain MessageId
+func (v MessageID) MarshalJSON() ([]byte, error) {
+	type plain MessageID
 	return marshalValue("MessageId", plain(v))
 }
-func (v *MessageId) UnmarshalJSON(b []byte) error {
+func (v *MessageID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("MessageId", b); err != nil {
 		return err
 	}
-	type plain MessageId
+	type plain MessageID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = MessageId(p)
+	*v = MessageID(p)
 	return nil
 }
 
 type NewSessionRequest struct {
 	Meta                  Optional[json.RawMessage]  `json:"_meta"`
 	AdditionalDirectories Optional[[]string]         `json:"additionalDirectories"`
-	Cwd                   string                     `json:"cwd"`
-	McpServers            []McpServer                `json:"mcpServers"`
+	CWD                   string                     `json:"cwd"`
+	MCPServers            []MCPServer                `json:"mcpServers"`
 	Extra                 map[string]json.RawMessage `json:"-"`
 }
 
@@ -1325,7 +1325,7 @@ type NewSessionResponse struct {
 	Meta          Optional[json.RawMessage]       `json:"_meta"`
 	ConfigOptions Optional[[]SessionConfigOption] `json:"configOptions"`
 	Modes         Optional[SessionModeState]      `json:"modes"`
-	SessionId     SessionId                       `json:"sessionId"`
+	SessionID     SessionID                       `json:"sessionId"`
 	Extra         map[string]json.RawMessage      `json:"-"`
 }
 
@@ -1405,7 +1405,7 @@ type PermissionOption struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
 	Kind     PermissionOptionKind       `json:"kind"`
 	Name     string                     `json:"name"`
-	OptionId PermissionOptionId         `json:"optionId"`
+	OptionID PermissionOptionID         `json:"optionId"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -1420,22 +1420,22 @@ func (v *PermissionOption) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type PermissionOptionId string
+type PermissionOptionID string
 
-func (v PermissionOptionId) MarshalJSON() ([]byte, error) {
-	type plain PermissionOptionId
+func (v PermissionOptionID) MarshalJSON() ([]byte, error) {
+	type plain PermissionOptionID
 	return marshalValue("PermissionOptionId", plain(v))
 }
-func (v *PermissionOptionId) UnmarshalJSON(b []byte) error {
+func (v *PermissionOptionID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("PermissionOptionId", b); err != nil {
 		return err
 	}
-	type plain PermissionOptionId
+	type plain PermissionOptionID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = PermissionOptionId(p)
+	*v = PermissionOptionID(p)
 	return nil
 }
 
@@ -1569,7 +1569,7 @@ func (v *PromptCapabilities) UnmarshalJSON(b []byte) error {
 type PromptRequest struct {
 	Meta      Optional[json.RawMessage]  `json:"_meta"`
 	Prompt    []ContentBlock             `json:"prompt"`
-	SessionId SessionId                  `json:"sessionId"`
+	SessionID SessionID                  `json:"sessionId"`
 	Extra     map[string]json.RawMessage `json:"-"`
 }
 
@@ -1642,7 +1642,7 @@ func (v *RequestPermissionOutcomeCancelledVariant) UnmarshalJSON(b []byte) error
 
 type RequestPermissionOutcomeSelectedVariant struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
-	OptionId PermissionOptionId         `json:"optionId"`
+	OptionID PermissionOptionID         `json:"optionId"`
 	Outcome  string                     `json:"outcome"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
@@ -1692,7 +1692,7 @@ func (v *RequestPermissionOutcome) UnmarshalJSON(b []byte) error {
 type RequestPermissionRequest struct {
 	Meta      Optional[json.RawMessage]  `json:"_meta"`
 	Options   []PermissionOption         `json:"options"`
-	SessionId SessionId                  `json:"sessionId"`
+	SessionID SessionID                  `json:"sessionId"`
 	ToolCall  ToolCallUpdate             `json:"toolCall"`
 	Extra     map[string]json.RawMessage `json:"-"`
 }
@@ -1733,11 +1733,11 @@ type ResourceLink struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Annotations Optional[Annotations]      `json:"annotations"`
 	Description Optional[string]           `json:"description"`
-	MimeType    Optional[string]           `json:"mimeType"`
+	MIMEType    Optional[string]           `json:"mimeType"`
 	Name        string                     `json:"name"`
 	Size        Optional[int64]            `json:"size"`
 	Title       Optional[string]           `json:"title"`
-	Uri         string                     `json:"uri"`
+	URI         string                     `json:"uri"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
 
@@ -1773,7 +1773,7 @@ const RoleUser Role = "user"
 
 type SelectedPermissionOutcome struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
-	OptionId PermissionOptionId         `json:"optionId"`
+	OptionID PermissionOptionID         `json:"optionId"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -1867,41 +1867,41 @@ func (v *SessionConfigBoolean) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type SessionConfigGroupId string
+type SessionConfigGroupID string
 
-func (v SessionConfigGroupId) MarshalJSON() ([]byte, error) {
-	type plain SessionConfigGroupId
+func (v SessionConfigGroupID) MarshalJSON() ([]byte, error) {
+	type plain SessionConfigGroupID
 	return marshalValue("SessionConfigGroupId", plain(v))
 }
-func (v *SessionConfigGroupId) UnmarshalJSON(b []byte) error {
+func (v *SessionConfigGroupID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigGroupId", b); err != nil {
 		return err
 	}
-	type plain SessionConfigGroupId
+	type plain SessionConfigGroupID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = SessionConfigGroupId(p)
+	*v = SessionConfigGroupID(p)
 	return nil
 }
 
-type SessionConfigId string
+type SessionConfigID string
 
-func (v SessionConfigId) MarshalJSON() ([]byte, error) {
-	type plain SessionConfigId
+func (v SessionConfigID) MarshalJSON() ([]byte, error) {
+	type plain SessionConfigID
 	return marshalValue("SessionConfigId", plain(v))
 }
-func (v *SessionConfigId) UnmarshalJSON(b []byte) error {
+func (v *SessionConfigID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigId", b); err != nil {
 		return err
 	}
-	type plain SessionConfigId
+	type plain SessionConfigID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = SessionConfigId(p)
+	*v = SessionConfigID(p)
 	return nil
 }
 
@@ -1910,9 +1910,9 @@ type SessionConfigOption struct{ Value any }
 type SessionConfigOptionSelectVariant struct {
 	Meta         Optional[json.RawMessage]             `json:"_meta"`
 	Category     Optional[SessionConfigOptionCategory] `json:"category"`
-	CurrentValue SessionConfigValueId                  `json:"currentValue"`
+	CurrentValue SessionConfigValueID                  `json:"currentValue"`
 	Description  Optional[string]                      `json:"description"`
-	Id           SessionConfigId                       `json:"id"`
+	ID           SessionConfigID                       `json:"id"`
 	Name         string                                `json:"name"`
 	Options      SessionConfigSelectOptions            `json:"options"`
 	Type         string                                `json:"type"`
@@ -1937,7 +1937,7 @@ type SessionConfigOptionBooleanVariant struct {
 	Category     Optional[SessionConfigOptionCategory] `json:"category"`
 	CurrentValue bool                                  `json:"currentValue"`
 	Description  Optional[string]                      `json:"description"`
-	Id           SessionConfigId                       `json:"id"`
+	ID           SessionConfigID                       `json:"id"`
 	Name         string                                `json:"name"`
 	Type         string                                `json:"type"`
 	Extra        map[string]json.RawMessage            `json:"-"`
@@ -2029,7 +2029,7 @@ func (v *SessionConfigOptionsCapabilities) UnmarshalJSON(b []byte) error {
 }
 
 type SessionConfigSelect struct {
-	CurrentValue SessionConfigValueId       `json:"currentValue"`
+	CurrentValue SessionConfigValueID       `json:"currentValue"`
 	Options      SessionConfigSelectOptions `json:"options"`
 	Extra        map[string]json.RawMessage `json:"-"`
 }
@@ -2049,7 +2049,7 @@ func (v *SessionConfigSelect) UnmarshalJSON(b []byte) error {
 
 type SessionConfigSelectGroup struct {
 	Meta    Optional[json.RawMessage]   `json:"_meta"`
-	Group   SessionConfigGroupId        `json:"group"`
+	Group   SessionConfigGroupID        `json:"group"`
 	Name    string                      `json:"name"`
 	Options []SessionConfigSelectOption `json:"options"`
 	Extra   map[string]json.RawMessage  `json:"-"`
@@ -2072,7 +2072,7 @@ type SessionConfigSelectOption struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Description Optional[string]           `json:"description"`
 	Name        string                     `json:"name"`
-	Value       SessionConfigValueId       `json:"value"`
+	Value       SessionConfigValueID       `json:"value"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
 
@@ -2166,22 +2166,22 @@ func (v *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type SessionConfigValueId string
+type SessionConfigValueID string
 
-func (v SessionConfigValueId) MarshalJSON() ([]byte, error) {
-	type plain SessionConfigValueId
+func (v SessionConfigValueID) MarshalJSON() ([]byte, error) {
+	type plain SessionConfigValueID
 	return marshalValue("SessionConfigValueId", plain(v))
 }
-func (v *SessionConfigValueId) UnmarshalJSON(b []byte) error {
+func (v *SessionConfigValueID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigValueId", b); err != nil {
 		return err
 	}
-	type plain SessionConfigValueId
+	type plain SessionConfigValueID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = SessionConfigValueId(p)
+	*v = SessionConfigValueID(p)
 	return nil
 }
 
@@ -2203,22 +2203,22 @@ func (v *SessionDeleteCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type SessionId string
+type SessionID string
 
-func (v SessionId) MarshalJSON() ([]byte, error) {
-	type plain SessionId
+func (v SessionID) MarshalJSON() ([]byte, error) {
+	type plain SessionID
 	return marshalValue("SessionId", plain(v))
 }
-func (v *SessionId) UnmarshalJSON(b []byte) error {
+func (v *SessionID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionId", b); err != nil {
 		return err
 	}
-	type plain SessionId
+	type plain SessionID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = SessionId(p)
+	*v = SessionID(p)
 	return nil
 }
 
@@ -2263,7 +2263,7 @@ func (v *SessionListCapabilities) UnmarshalJSON(b []byte) error {
 type SessionMode struct {
 	Meta        Optional[json.RawMessage]  `json:"_meta"`
 	Description Optional[string]           `json:"description"`
-	Id          SessionModeId              `json:"id"`
+	ID          SessionModeID              `json:"id"`
 	Name        string                     `json:"name"`
 	Extra       map[string]json.RawMessage `json:"-"`
 }
@@ -2279,29 +2279,29 @@ func (v *SessionMode) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type SessionModeId string
+type SessionModeID string
 
-func (v SessionModeId) MarshalJSON() ([]byte, error) {
-	type plain SessionModeId
+func (v SessionModeID) MarshalJSON() ([]byte, error) {
+	type plain SessionModeID
 	return marshalValue("SessionModeId", plain(v))
 }
-func (v *SessionModeId) UnmarshalJSON(b []byte) error {
+func (v *SessionModeID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionModeId", b); err != nil {
 		return err
 	}
-	type plain SessionModeId
+	type plain SessionModeID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = SessionModeId(p)
+	*v = SessionModeID(p)
 	return nil
 }
 
 type SessionModeState struct {
 	Meta           Optional[json.RawMessage]  `json:"_meta"`
 	AvailableModes []SessionMode              `json:"availableModes"`
-	CurrentModeId  SessionModeId              `json:"currentModeId"`
+	CurrentModeID  SessionModeID              `json:"currentModeId"`
 	Extra          map[string]json.RawMessage `json:"-"`
 }
 
@@ -2318,7 +2318,7 @@ func (v *SessionModeState) UnmarshalJSON(b []byte) error {
 
 type SessionNotification struct {
 	Meta      Optional[json.RawMessage]  `json:"_meta"`
-	SessionId SessionId                  `json:"sessionId"`
+	SessionID SessionID                  `json:"sessionId"`
 	Update    SessionUpdate              `json:"update"`
 	Extra     map[string]json.RawMessage `json:"-"`
 }
@@ -2359,7 +2359,7 @@ type SessionUpdate struct{ Value any }
 type SessionUpdateUserMessageChunkVariant struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
 	Content       ContentBlock               `json:"content"`
-	MessageId     Optional[MessageId]        `json:"messageId"`
+	MessageID     Optional[MessageID]        `json:"messageId"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	Extra         map[string]json.RawMessage `json:"-"`
 }
@@ -2380,7 +2380,7 @@ func (v *SessionUpdateUserMessageChunkVariant) UnmarshalJSON(b []byte) error {
 type SessionUpdateAgentMessageChunkVariant struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
 	Content       ContentBlock               `json:"content"`
-	MessageId     Optional[MessageId]        `json:"messageId"`
+	MessageID     Optional[MessageID]        `json:"messageId"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	Extra         map[string]json.RawMessage `json:"-"`
 }
@@ -2401,7 +2401,7 @@ func (v *SessionUpdateAgentMessageChunkVariant) UnmarshalJSON(b []byte) error {
 type SessionUpdateAgentThoughtChunkVariant struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
 	Content       ContentBlock               `json:"content"`
-	MessageId     Optional[MessageId]        `json:"messageId"`
+	MessageID     Optional[MessageID]        `json:"messageId"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	Extra         map[string]json.RawMessage `json:"-"`
 }
@@ -2430,7 +2430,7 @@ type SessionUpdateToolCallVariant struct {
 	SessionUpdate string                       `json:"sessionUpdate"`
 	Status        Optional[ToolCallStatus]     `json:"status"`
 	Title         string                       `json:"title"`
-	ToolCallId    ToolCallId                   `json:"toolCallId"`
+	ToolCallID    ToolCallID                   `json:"toolCallId"`
 	Extra         map[string]json.RawMessage   `json:"-"`
 }
 
@@ -2458,7 +2458,7 @@ type SessionUpdateToolCallUpdateVariant struct {
 	SessionUpdate string                       `json:"sessionUpdate"`
 	Status        Optional[ToolCallStatus]     `json:"status"`
 	Title         Optional[string]             `json:"title"`
-	ToolCallId    ToolCallId                   `json:"toolCallId"`
+	ToolCallID    ToolCallID                   `json:"toolCallId"`
 	Extra         map[string]json.RawMessage   `json:"-"`
 }
 
@@ -2517,7 +2517,7 @@ func (v *SessionUpdateAvailableCommandsUpdateVariant) UnmarshalJSON(b []byte) er
 
 type SessionUpdateCurrentModeUpdateVariant struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
-	CurrentModeId SessionModeId              `json:"currentModeId"`
+	CurrentModeID SessionModeID              `json:"currentModeId"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	Extra         map[string]json.RawMessage `json:"-"`
 }
@@ -2622,7 +2622,7 @@ func (v *SessionUpdateNoticeVariant) UnmarshalJSON(b []byte) error {
 
 type SessionUpdateCompactionUpdateVariant struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
-	CompactionId  CompactionId               `json:"compactionId"`
+	CompactionID  CompactionID               `json:"compactionId"`
 	Error         Optional[string]           `json:"error"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	Status        CompactionStatus           `json:"status"`
@@ -2645,7 +2645,7 @@ func (v *SessionUpdateCompactionUpdateVariant) UnmarshalJSON(b []byte) error {
 
 type SessionUpdateCompactionSummaryChunkVariant struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
-	CompactionId  CompactionId               `json:"compactionId"`
+	CompactionID  CompactionID               `json:"compactionId"`
 	Content       ContentBlock               `json:"content"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	Extra         map[string]json.RawMessage `json:"-"`
@@ -2792,7 +2792,7 @@ const StopReasonRefusal StopReason = "refusal"
 
 type Terminal struct {
 	Meta       Optional[json.RawMessage]  `json:"_meta"`
-	TerminalId TerminalId                 `json:"terminalId"`
+	TerminalID TerminalID                 `json:"terminalId"`
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 
@@ -2807,22 +2807,22 @@ func (v *Terminal) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type TerminalId string
+type TerminalID string
 
-func (v TerminalId) MarshalJSON() ([]byte, error) {
-	type plain TerminalId
+func (v TerminalID) MarshalJSON() ([]byte, error) {
+	type plain TerminalID
 	return marshalValue("TerminalId", plain(v))
 }
-func (v *TerminalId) UnmarshalJSON(b []byte) error {
+func (v *TerminalID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("TerminalId", b); err != nil {
 		return err
 	}
-	type plain TerminalId
+	type plain TerminalID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = TerminalId(p)
+	*v = TerminalID(p)
 	return nil
 }
 
@@ -2846,9 +2846,9 @@ func (v *TextContent) UnmarshalJSON(b []byte) error {
 
 type TextResourceContents struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
-	MimeType Optional[string]           `json:"mimeType"`
+	MIMEType Optional[string]           `json:"mimeType"`
 	Text     string                     `json:"text"`
-	Uri      string                     `json:"uri"`
+	URI      string                     `json:"uri"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -2875,7 +2875,7 @@ type ToolCall struct {
 	RawOutput  Optional[json.RawMessage]    `json:"rawOutput"`
 	Status     Optional[ToolCallStatus]     `json:"status"`
 	Title      string                       `json:"title"`
-	ToolCallId ToolCallId                   `json:"toolCallId"`
+	ToolCallID ToolCallID                   `json:"toolCallId"`
 	Extra      map[string]json.RawMessage   `json:"-"`
 }
 
@@ -2936,7 +2936,7 @@ func (v *ToolCallContentDiffVariant) UnmarshalJSON(b []byte) error {
 
 type ToolCallContentTerminalVariant struct {
 	Meta       Optional[json.RawMessage]  `json:"_meta"`
-	TerminalId TerminalId                 `json:"terminalId"`
+	TerminalID TerminalID                 `json:"terminalId"`
 	Type       string                     `json:"type"`
 	Extra      map[string]json.RawMessage `json:"-"`
 }
@@ -2989,22 +2989,22 @@ func (v *ToolCallContent) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type ToolCallId string
+type ToolCallID string
 
-func (v ToolCallId) MarshalJSON() ([]byte, error) {
-	type plain ToolCallId
+func (v ToolCallID) MarshalJSON() ([]byte, error) {
+	type plain ToolCallID
 	return marshalValue("ToolCallId", plain(v))
 }
-func (v *ToolCallId) UnmarshalJSON(b []byte) error {
+func (v *ToolCallID) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("ToolCallId", b); err != nil {
 		return err
 	}
-	type plain ToolCallId
+	type plain ToolCallID
 	var p plain
 	if err := unmarshalExact(b, &p); err != nil {
 		return err
 	}
-	*v = ToolCallId(p)
+	*v = ToolCallID(p)
 	return nil
 }
 
@@ -3060,7 +3060,7 @@ type ToolCallUpdate struct {
 	RawOutput  Optional[json.RawMessage]    `json:"rawOutput"`
 	Status     Optional[ToolCallStatus]     `json:"status"`
 	Title      Optional[string]             `json:"title"`
-	ToolCallId ToolCallId                   `json:"toolCallId"`
+	ToolCallID ToolCallID                   `json:"toolCallId"`
 	Extra      map[string]json.RawMessage   `json:"-"`
 }
 

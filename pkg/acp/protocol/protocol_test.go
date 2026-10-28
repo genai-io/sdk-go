@@ -18,6 +18,9 @@ func TestSchemaPin(t *testing.T) {
 	if got := hex.EncodeToString(h.Sum(nil)); got != SchemaBlob {
 		t.Fatal(got)
 	}
+	if got := len(supportedDefinitions); got != 108 {
+		t.Fatalf("generated closure has %d definitions, want 108", got)
+	}
 }
 func TestOptionalAndUnknown(t *testing.T) {
 	for _, input := range []string{`{"protocolVersion":1}`, `{"protocolVersion":1,"clientInfo":null}`, `{"protocolVersion":1,"clientInfo":{"name":"test","version":"1"}}`, `{"protocolVersion":1,"_meta":{"large":9007199254740993123},"future":{"n":9007199254740993123}}`} {

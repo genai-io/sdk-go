@@ -80,10 +80,35 @@ func definitionSet(names []string) map[string]bool {
 	return set
 }
 
+type schemaVariant struct {
+	definition string
+	schema     json.RawMessage
+	tags       map[string]json.RawMessage
+}
+
+type schemaDefinition struct {
+	document map[string]json.RawMessage
+	variants []schemaVariant
+}
+
+type definitionEntry struct {
+	once  sync.Once
+	value *schemaDefinition
+	err   error
+}
+
+type validatorEntry struct {
+	once  sync.Once
+	value *jsonschema.Resolved
+	err   error
+}
+
 var errVariant = errors.New("protocol: invalid or missing union variant")
+var definitions sync.Map
 var validators sync.Map
 var sourceOnce sync.Once
 var sourceDefs map[string]json.RawMessage
+var sourceDefsJSON json.RawMessage
 var errSource error
 
 func source() (map[string]json.RawMessage, error) {
@@ -91,79 +116,131 @@ func source() (map[string]json.RawMessage, error) {
 		var d struct {
 			Defs map[string]json.RawMessage `json:"$defs"`
 		}
-		errSource = json.Unmarshal(schemaJSON, &d)
+		if errSource = json.Unmarshal(schemaJSON, &d); errSource != nil {
+			return
+		}
 		sourceDefs = d.Defs
+		sourceDefsJSON, errSource = json.Marshal(d.Defs)
 	})
 	return sourceDefs, errSource
 }
-func validator(definition string) (*jsonschema.Resolved, error) {
-	if v, ok := validators.Load(definition); ok {
-		return v.(*jsonschema.Resolved), nil
+func schemaDefinitionFor(name string) (*schemaDefinition, error) {
+	if !supportedDefinitions[name] {
+		return nil, fmt.Errorf("protocol: unsupported definition %q", name)
 	}
+	value, ok := definitions.Load(name)
+	if !ok {
+		value, _ = definitions.LoadOrStore(name, &definitionEntry{})
+	}
+	entry := value.(*definitionEntry)
+	entry.once.Do(func() { entry.value, entry.err = loadDefinition(name) })
+	return entry.value, entry.err
+}
+
+func loadDefinition(name string) (*schemaDefinition, error) {
 	defs, err := source()
 	if err != nil {
 		return nil, err
 	}
-	parts := strings.Split(definition, "/")
-	if len(parts) > 2 || !supportedDefinitions[parts[0]] {
-		return nil, fmt.Errorf("protocol: unsupported definition %q", definition)
-	}
-	b, ok := defs[parts[0]]
+	b, ok := defs[name]
 	if !ok {
-		return nil, fmt.Errorf("protocol: unknown definition %q", definition)
+		return nil, fmt.Errorf("protocol: unknown definition %q", name)
 	}
-	var n map[string]json.RawMessage
-	if err = json.Unmarshal(b, &n); err != nil {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(b, &document); err != nil {
 		return nil, err
 	}
-	if len(parts) == 2 {
-		i, e := strconv.Atoi(parts[1])
-		if e != nil {
-			return nil, e
-		}
-		a := n["oneOf"]
-		if len(a) == 0 {
-			a = n["anyOf"]
-		}
-		var variants []json.RawMessage
-		if err = json.Unmarshal(a, &variants); err != nil {
+	a := document["oneOf"]
+	if len(a) == 0 {
+		a = document["anyOf"]
+	}
+	var branches []json.RawMessage
+	if len(a) != 0 {
+		if err := json.Unmarshal(a, &branches); err != nil {
 			return nil, err
 		}
-		if i < 0 || i >= len(variants) {
-			return nil, errVariant
+	}
+	definition := &schemaDefinition{document: document}
+	for i, b := range branches {
+		var branch struct {
+			Properties map[string]struct {
+				Const json.RawMessage `json:"const"`
+			} `json:"properties"`
 		}
-		common := map[string]json.RawMessage{}
-		for k, v := range n {
-			if k != "oneOf" && k != "anyOf" {
-				common[k] = v
+		if err := json.Unmarshal(b, &branch); err != nil {
+			return nil, err
+		}
+		tags := make(map[string]json.RawMessage)
+		for key, property := range branch.Properties {
+			if len(property.Const) != 0 {
+				tags[key] = property.Const
 			}
 		}
-		c, err := json.Marshal(common)
-		if err != nil {
-			return nil, err
-		}
-		n = map[string]json.RawMessage{"allOf": json.RawMessage("[" + string(c) + "," + string(variants[i]) + "]")}
+		definition.variants = append(definition.variants, schemaVariant{
+			definition: fmt.Sprintf("%s/%d", name, i), schema: b, tags: tags,
+		})
 	}
-	db, err := json.Marshal(defs)
+	return definition, nil
+}
+
+func validator(definition string) (*jsonschema.Resolved, error) {
+	value, ok := validators.Load(definition)
+	if !ok {
+		parts := strings.Split(definition, "/")
+		if len(parts) > 2 || !supportedDefinitions[parts[0]] {
+			return nil, fmt.Errorf("protocol: unsupported definition %q", definition)
+		}
+		value, _ = validators.LoadOrStore(definition, &validatorEntry{})
+	}
+	entry := value.(*validatorEntry)
+	entry.once.Do(func() { entry.value, entry.err = resolveValidator(definition) })
+	if entry.err != nil {
+		validators.CompareAndDelete(definition, entry)
+	}
+	return entry.value, entry.err
+}
+
+func resolveValidator(definition string) (*jsonschema.Resolved, error) {
+	parts := strings.Split(definition, "/")
+	metadata, err := schemaDefinitionFor(parts[0])
 	if err != nil {
 		return nil, err
 	}
-	n["$defs"] = db
+	n := make(map[string]json.RawMessage, len(metadata.document)+2)
+	for key, value := range metadata.document {
+		n[key] = value
+	}
+	if len(parts) == 2 {
+		i, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, err
+		}
+		if i < 0 || i >= len(metadata.variants) {
+			return nil, errVariant
+		}
+		delete(n, "oneOf")
+		delete(n, "anyOf")
+		common, err := json.Marshal(n)
+		if err != nil {
+			return nil, err
+		}
+		n = map[string]json.RawMessage{"allOf": json.RawMessage("[" + string(common) + "," + string(metadata.variants[i].schema) + "]")}
+	}
+	n["$defs"] = sourceDefsJSON
 	n["$schema"] = json.RawMessage(`"https://json-schema.org/draft/2020-12/schema"`)
-	b, err = json.Marshal(n)
+	b, err := json.Marshal(n)
 	if err != nil {
 		return nil, err
 	}
 	var s jsonschema.Schema
-	if err = json.Unmarshal(b, &s); err != nil {
+	if err := json.Unmarshal(b, &s); err != nil {
 		return nil, err
 	}
 	r, err := s.Resolve(nil)
 	if err != nil {
 		return nil, fmt.Errorf("protocol schema %s: %w", definition, err)
 	}
-	actual, _ := validators.LoadOrStore(definition, r)
-	return actual.(*jsonschema.Resolved), nil
+	return r, nil
 }
 
 // ValidateJSON validates a named definition from the pinned official schema.
@@ -256,7 +333,7 @@ func unmarshalObject(def string, b []byte, dst any) error {
 	v.FieldByName("Extra").Set(reflect.ValueOf(m))
 	return nil
 }
-func marshalUnion(def string, v any) ([]byte, error) {
+func marshalValue(def string, v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
@@ -270,41 +347,22 @@ func selectVariant(def string, b []byte) (int, error) {
 	if err := ValidateJSON(def, b); err != nil {
 		return 0, err
 	}
-	defs, err := source()
+	metadata, err := schemaDefinitionFor(def)
 	if err != nil {
 		return 0, err
 	}
-	var n map[string]json.RawMessage
-	if err := json.Unmarshal(defs[def], &n); err != nil {
-		return 0, err
-	}
-	a := n["oneOf"]
-	if len(a) == 0 {
-		a = n["anyOf"]
-	}
-	var variants []json.RawMessage
-	if err := json.Unmarshal(a, &variants); err != nil {
-		return 0, err
-	}
 	var fields map[string]json.RawMessage
-	if len(bytes.TrimSpace(b)) > 0 && bytes.TrimSpace(b)[0] == '{' {
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
 		if err := json.Unmarshal(b, &fields); err != nil {
 			return 0, err
 		}
 	}
 	// Honor recognized tags before considering permissive untagged fallbacks.
-	for i, v := range variants {
-		var q struct {
-			Properties map[string]struct {
-				Const json.RawMessage `json:"const"`
-			} `json:"properties"`
-		}
-		if err := json.Unmarshal(v, &q); err != nil {
-			return 0, err
-		}
-		for k, p := range q.Properties {
-			if len(p.Const) > 0 && bytes.Equal(bytes.TrimSpace(fields[k]), p.Const) {
-				if err := ValidateJSON(fmt.Sprintf("%s/%d", def, i), b); err != nil {
+	for i, variant := range metadata.variants {
+		for key, tag := range variant.tags {
+			if bytes.Equal(bytes.TrimSpace(fields[key]), tag) {
+				if err := ValidateJSON(variant.definition, b); err != nil {
 					return 0, err
 				}
 				return i, nil
@@ -312,14 +370,11 @@ func selectVariant(def string, b []byte) (int, error) {
 		}
 	}
 	selected := -1
-	for i := range variants {
-		if ValidateJSON(fmt.Sprintf("%s/%d", def, i), b) != nil {
+	for i, variant := range metadata.variants {
+		if ValidateJSON(variant.definition, b) != nil {
 			continue
 		}
 		if selected >= 0 {
-			if bytes.Equal(bytes.TrimSpace(b), []byte("[]")) {
-				continue
-			}
 			return 0, fmt.Errorf("protocol %s: ambiguous untagged union", def)
 		}
 		selected = i

@@ -3,7 +3,10 @@
 // schema/v1/schema.json blob d6f7731bf74b3dbe3b9bbda52957a7637a12e688
 package protocol
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 type AgentAuthCapabilities struct {
 	Meta   Optional[json.RawMessage]    `json:"_meta"`
@@ -150,12 +153,11 @@ func (v *AuthMethodAgentVariant) UnmarshalJSON(b []byte) error {
 }
 func (v AuthMethod) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case AuthMethodTerminalVariant, *AuthMethodTerminalVariant:
-		return marshalUnion("AuthMethod", v.Value)
-	case AuthMethodAgentVariant, *AuthMethodAgentVariant:
-		return marshalUnion("AuthMethod", v.Value)
+	case AuthMethodTerminalVariant, *AuthMethodTerminalVariant, AuthMethodAgentVariant, *AuthMethodAgentVariant:
+		return marshalValue("AuthMethod", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *AuthMethod) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("AuthMethod", b)
@@ -202,14 +204,7 @@ type AuthMethodId string
 
 func (v AuthMethodId) MarshalJSON() ([]byte, error) {
 	type plain AuthMethodId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("AuthMethodId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("AuthMethodId", plain(v))
 }
 func (v *AuthMethodId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("AuthMethodId", b); err != nil {
@@ -289,9 +284,10 @@ func (v *AvailableCommandInputUnstructuredVariant) UnmarshalJSON(b []byte) error
 func (v AvailableCommandInput) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
 	case AvailableCommandInputUnstructuredVariant, *AvailableCommandInputUnstructuredVariant:
-		return marshalUnion("AvailableCommandInput", v.Value)
+		return marshalValue("AvailableCommandInput", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *AvailableCommandInput) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("AvailableCommandInput", b)
@@ -451,14 +447,7 @@ type CompactionId string
 
 func (v CompactionId) MarshalJSON() ([]byte, error) {
 	type plain CompactionId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("CompactionId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("CompactionId", plain(v))
 }
 func (v *CompactionId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("CompactionId", b); err != nil {
@@ -477,14 +466,7 @@ type CompactionStatus string
 
 func (v CompactionStatus) MarshalJSON() ([]byte, error) {
 	type plain CompactionStatus
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("CompactionStatus", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("CompactionStatus", plain(v))
 }
 func (v *CompactionStatus) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("CompactionStatus", b); err != nil {
@@ -696,18 +678,11 @@ func (v *ContentBlockResourceVariant) UnmarshalJSON(b []byte) error {
 }
 func (v ContentBlock) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case ContentBlockTextVariant, *ContentBlockTextVariant:
-		return marshalUnion("ContentBlock", v.Value)
-	case ContentBlockImageVariant, *ContentBlockImageVariant:
-		return marshalUnion("ContentBlock", v.Value)
-	case ContentBlockAudioVariant, *ContentBlockAudioVariant:
-		return marshalUnion("ContentBlock", v.Value)
-	case ContentBlockResourceLinkVariant, *ContentBlockResourceLinkVariant:
-		return marshalUnion("ContentBlock", v.Value)
-	case ContentBlockResourceVariant, *ContentBlockResourceVariant:
-		return marshalUnion("ContentBlock", v.Value)
+	case ContentBlockTextVariant, *ContentBlockTextVariant, ContentBlockImageVariant, *ContentBlockImageVariant, ContentBlockAudioVariant, *ContentBlockAudioVariant, ContentBlockResourceLinkVariant, *ContentBlockResourceLinkVariant, ContentBlockResourceVariant, *ContentBlockResourceVariant:
+		return marshalValue("ContentBlock", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *ContentBlock) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("ContentBlock", b)
@@ -942,12 +917,11 @@ func (v *EmbeddedResourceResourceBlobResourceContentsVariant) UnmarshalJSON(b []
 }
 func (v EmbeddedResourceResource) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case EmbeddedResourceResourceTextResourceContentsVariant, *EmbeddedResourceResourceTextResourceContentsVariant:
-		return marshalUnion("EmbeddedResourceResource", v.Value)
-	case EmbeddedResourceResourceBlobResourceContentsVariant, *EmbeddedResourceResourceBlobResourceContentsVariant:
-		return marshalUnion("EmbeddedResourceResource", v.Value)
+	case EmbeddedResourceResourceTextResourceContentsVariant, *EmbeddedResourceResourceTextResourceContentsVariant, EmbeddedResourceResourceBlobResourceContentsVariant, *EmbeddedResourceResourceBlobResourceContentsVariant:
+		return marshalValue("EmbeddedResourceResource", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *EmbeddedResourceResource) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("EmbeddedResourceResource", b)
@@ -1208,14 +1182,11 @@ func (v *McpServerStdioVariant) UnmarshalJSON(b []byte) error {
 }
 func (v McpServer) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case McpServerHttpVariant, *McpServerHttpVariant:
-		return marshalUnion("McpServer", v.Value)
-	case McpServerSseVariant, *McpServerSseVariant:
-		return marshalUnion("McpServer", v.Value)
-	case McpServerStdioVariant, *McpServerStdioVariant:
-		return marshalUnion("McpServer", v.Value)
+	case McpServerHttpVariant, *McpServerHttpVariant, McpServerSseVariant, *McpServerSseVariant, McpServerStdioVariant, *McpServerStdioVariant:
+		return marshalValue("McpServer", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *McpServer) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("McpServer", b)
@@ -1307,14 +1278,7 @@ type MessageId string
 
 func (v MessageId) MarshalJSON() ([]byte, error) {
 	type plain MessageId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("MessageId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("MessageId", plain(v))
 }
 func (v *MessageId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("MessageId", b); err != nil {
@@ -1411,14 +1375,7 @@ type NoticeSeverity string
 
 func (v NoticeSeverity) MarshalJSON() ([]byte, error) {
 	type plain NoticeSeverity
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("NoticeSeverity", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("NoticeSeverity", plain(v))
 }
 func (v *NoticeSeverity) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("NoticeSeverity", b); err != nil {
@@ -1460,14 +1417,7 @@ type PermissionOptionId string
 
 func (v PermissionOptionId) MarshalJSON() ([]byte, error) {
 	type plain PermissionOptionId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("PermissionOptionId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("PermissionOptionId", plain(v))
 }
 func (v *PermissionOptionId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("PermissionOptionId", b); err != nil {
@@ -1486,14 +1436,7 @@ type PermissionOptionKind string
 
 func (v PermissionOptionKind) MarshalJSON() ([]byte, error) {
 	type plain PermissionOptionKind
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("PermissionOptionKind", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("PermissionOptionKind", plain(v))
 }
 func (v *PermissionOptionKind) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("PermissionOptionKind", b); err != nil {
@@ -1553,14 +1496,7 @@ type PlanEntryPriority string
 
 func (v PlanEntryPriority) MarshalJSON() ([]byte, error) {
 	type plain PlanEntryPriority
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("PlanEntryPriority", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("PlanEntryPriority", plain(v))
 }
 func (v *PlanEntryPriority) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("PlanEntryPriority", b); err != nil {
@@ -1583,14 +1519,7 @@ type PlanEntryStatus string
 
 func (v PlanEntryStatus) MarshalJSON() ([]byte, error) {
 	type plain PlanEntryStatus
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("PlanEntryStatus", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("PlanEntryStatus", plain(v))
 }
 func (v *PlanEntryStatus) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("PlanEntryStatus", b); err != nil {
@@ -1669,14 +1598,7 @@ type ProtocolVersion uint16
 
 func (v ProtocolVersion) MarshalJSON() ([]byte, error) {
 	type plain ProtocolVersion
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("ProtocolVersion", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("ProtocolVersion", plain(v))
 }
 func (v *ProtocolVersion) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("ProtocolVersion", b); err != nil {
@@ -1732,12 +1654,11 @@ func (v *RequestPermissionOutcomeSelectedVariant) UnmarshalJSON(b []byte) error 
 }
 func (v RequestPermissionOutcome) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case RequestPermissionOutcomeCancelledVariant, *RequestPermissionOutcomeCancelledVariant:
-		return marshalUnion("RequestPermissionOutcome", v.Value)
-	case RequestPermissionOutcomeSelectedVariant, *RequestPermissionOutcomeSelectedVariant:
-		return marshalUnion("RequestPermissionOutcome", v.Value)
+	case RequestPermissionOutcomeCancelledVariant, *RequestPermissionOutcomeCancelledVariant, RequestPermissionOutcomeSelectedVariant, *RequestPermissionOutcomeSelectedVariant:
+		return marshalValue("RequestPermissionOutcome", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *RequestPermissionOutcome) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("RequestPermissionOutcome", b)
@@ -1826,17 +1747,7 @@ func (v *ResourceLink) UnmarshalJSON(b []byte) error {
 
 type Role string
 
-func (v Role) MarshalJSON() ([]byte, error) {
-	type plain Role
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("Role", b); err != nil {
-		return nil, err
-	}
-	return b, nil
-}
+func (v Role) MarshalJSON() ([]byte, error) { type plain Role; return marshalValue("Role", plain(v)) }
 func (v *Role) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("Role", b); err != nil {
 		return err
@@ -1953,14 +1864,7 @@ type SessionConfigGroupId string
 
 func (v SessionConfigGroupId) MarshalJSON() ([]byte, error) {
 	type plain SessionConfigGroupId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionConfigGroupId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionConfigGroupId", plain(v))
 }
 func (v *SessionConfigGroupId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigGroupId", b); err != nil {
@@ -1979,14 +1883,7 @@ type SessionConfigId string
 
 func (v SessionConfigId) MarshalJSON() ([]byte, error) {
 	type plain SessionConfigId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionConfigId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionConfigId", plain(v))
 }
 func (v *SessionConfigId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigId", b); err != nil {
@@ -2053,12 +1950,11 @@ func (v *SessionConfigOptionBooleanVariant) UnmarshalJSON(b []byte) error {
 }
 func (v SessionConfigOption) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case SessionConfigOptionSelectVariant, *SessionConfigOptionSelectVariant:
-		return marshalUnion("SessionConfigOption", v.Value)
-	case SessionConfigOptionBooleanVariant, *SessionConfigOptionBooleanVariant:
-		return marshalUnion("SessionConfigOption", v.Value)
+	case SessionConfigOptionSelectVariant, *SessionConfigOptionSelectVariant, SessionConfigOptionBooleanVariant, *SessionConfigOptionBooleanVariant:
+		return marshalValue("SessionConfigOption", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *SessionConfigOption) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("SessionConfigOption", b)
@@ -2086,14 +1982,7 @@ type SessionConfigOptionCategory string
 
 func (v SessionConfigOptionCategory) MarshalJSON() ([]byte, error) {
 	type plain SessionConfigOptionCategory
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionConfigOptionCategory", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionConfigOptionCategory", plain(v))
 }
 func (v *SessionConfigOptionCategory) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigOptionCategory", b); err != nil {
@@ -2199,14 +2088,7 @@ type SessionConfigSelectOptionsUngroupedVariant []SessionConfigSelectOption
 
 func (v SessionConfigSelectOptionsUngroupedVariant) MarshalJSON() ([]byte, error) {
 	type plain SessionConfigSelectOptionsUngroupedVariant
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionConfigSelectOptions/0", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionConfigSelectOptions/0", plain(v))
 }
 func (v *SessionConfigSelectOptionsUngroupedVariant) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigSelectOptions/0", b); err != nil {
@@ -2225,14 +2107,7 @@ type SessionConfigSelectOptionsGroupedVariant []SessionConfigSelectGroup
 
 func (v SessionConfigSelectOptionsGroupedVariant) MarshalJSON() ([]byte, error) {
 	type plain SessionConfigSelectOptionsGroupedVariant
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionConfigSelectOptions/1", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionConfigSelectOptions/1", plain(v))
 }
 func (v *SessionConfigSelectOptionsGroupedVariant) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigSelectOptions/1", b); err != nil {
@@ -2248,14 +2123,21 @@ func (v *SessionConfigSelectOptionsGroupedVariant) UnmarshalJSON(b []byte) error
 }
 func (v SessionConfigSelectOptions) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case SessionConfigSelectOptionsUngroupedVariant, *SessionConfigSelectOptionsUngroupedVariant:
-		return marshalUnion("SessionConfigSelectOptions", v.Value)
-	case SessionConfigSelectOptionsGroupedVariant, *SessionConfigSelectOptionsGroupedVariant:
-		return marshalUnion("SessionConfigSelectOptions", v.Value)
+	case SessionConfigSelectOptionsUngroupedVariant, *SessionConfigSelectOptionsUngroupedVariant, SessionConfigSelectOptionsGroupedVariant, *SessionConfigSelectOptionsGroupedVariant:
+		return marshalValue("SessionConfigSelectOptions", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *SessionConfigSelectOptions) UnmarshalJSON(b []byte) error {
+	if bytes.Equal(bytes.TrimSpace(b), []byte("[]")) {
+		var p SessionConfigSelectOptionsUngroupedVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+		return nil
+	}
 	i, err := selectVariant("SessionConfigSelectOptions", b)
 	if err != nil {
 		return err
@@ -2281,14 +2163,7 @@ type SessionConfigValueId string
 
 func (v SessionConfigValueId) MarshalJSON() ([]byte, error) {
 	type plain SessionConfigValueId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionConfigValueId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionConfigValueId", plain(v))
 }
 func (v *SessionConfigValueId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionConfigValueId", b); err != nil {
@@ -2325,14 +2200,7 @@ type SessionId string
 
 func (v SessionId) MarshalJSON() ([]byte, error) {
 	type plain SessionId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionId", plain(v))
 }
 func (v *SessionId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionId", b); err != nil {
@@ -2408,14 +2276,7 @@ type SessionModeId string
 
 func (v SessionModeId) MarshalJSON() ([]byte, error) {
 	type plain SessionModeId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("SessionModeId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("SessionModeId", plain(v))
 }
 func (v *SessionModeId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("SessionModeId", b); err != nil {
@@ -2797,36 +2658,11 @@ func (v *SessionUpdateCompactionSummaryChunkVariant) UnmarshalJSON(b []byte) err
 }
 func (v SessionUpdate) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case SessionUpdateUserMessageChunkVariant, *SessionUpdateUserMessageChunkVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateAgentMessageChunkVariant, *SessionUpdateAgentMessageChunkVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateAgentThoughtChunkVariant, *SessionUpdateAgentThoughtChunkVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateToolCallVariant, *SessionUpdateToolCallVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateToolCallUpdateVariant, *SessionUpdateToolCallUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdatePlanVariant, *SessionUpdatePlanVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateAvailableCommandsUpdateVariant, *SessionUpdateAvailableCommandsUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateCurrentModeUpdateVariant, *SessionUpdateCurrentModeUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateConfigOptionUpdateVariant, *SessionUpdateConfigOptionUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateSessionInfoUpdateVariant, *SessionUpdateSessionInfoUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateUsageUpdateVariant, *SessionUpdateUsageUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateNoticeVariant, *SessionUpdateNoticeVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateCompactionUpdateVariant, *SessionUpdateCompactionUpdateVariant:
-		return marshalUnion("SessionUpdate", v.Value)
-	case SessionUpdateCompactionSummaryChunkVariant, *SessionUpdateCompactionSummaryChunkVariant:
-		return marshalUnion("SessionUpdate", v.Value)
+	case SessionUpdateUserMessageChunkVariant, *SessionUpdateUserMessageChunkVariant, SessionUpdateAgentMessageChunkVariant, *SessionUpdateAgentMessageChunkVariant, SessionUpdateAgentThoughtChunkVariant, *SessionUpdateAgentThoughtChunkVariant, SessionUpdateToolCallVariant, *SessionUpdateToolCallVariant, SessionUpdateToolCallUpdateVariant, *SessionUpdateToolCallUpdateVariant, SessionUpdatePlanVariant, *SessionUpdatePlanVariant, SessionUpdateAvailableCommandsUpdateVariant, *SessionUpdateAvailableCommandsUpdateVariant, SessionUpdateCurrentModeUpdateVariant, *SessionUpdateCurrentModeUpdateVariant, SessionUpdateConfigOptionUpdateVariant, *SessionUpdateConfigOptionUpdateVariant, SessionUpdateSessionInfoUpdateVariant, *SessionUpdateSessionInfoUpdateVariant, SessionUpdateUsageUpdateVariant, *SessionUpdateUsageUpdateVariant, SessionUpdateNoticeVariant, *SessionUpdateNoticeVariant, SessionUpdateCompactionUpdateVariant, *SessionUpdateCompactionUpdateVariant, SessionUpdateCompactionSummaryChunkVariant, *SessionUpdateCompactionSummaryChunkVariant:
+		return marshalValue("SessionUpdate", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *SessionUpdate) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("SessionUpdate", b)
@@ -2926,14 +2762,7 @@ type StopReason string
 
 func (v StopReason) MarshalJSON() ([]byte, error) {
 	type plain StopReason
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("StopReason", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("StopReason", plain(v))
 }
 func (v *StopReason) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("StopReason", b); err != nil {
@@ -2975,14 +2804,7 @@ type TerminalId string
 
 func (v TerminalId) MarshalJSON() ([]byte, error) {
 	type plain TerminalId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("TerminalId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("TerminalId", plain(v))
 }
 func (v *TerminalId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("TerminalId", b); err != nil {
@@ -3126,14 +2948,11 @@ func (v *ToolCallContentTerminalVariant) UnmarshalJSON(b []byte) error {
 }
 func (v ToolCallContent) MarshalJSON() ([]byte, error) {
 	switch v.Value.(type) {
-	case ToolCallContentContentVariant, *ToolCallContentContentVariant:
-		return marshalUnion("ToolCallContent", v.Value)
-	case ToolCallContentDiffVariant, *ToolCallContentDiffVariant:
-		return marshalUnion("ToolCallContent", v.Value)
-	case ToolCallContentTerminalVariant, *ToolCallContentTerminalVariant:
-		return marshalUnion("ToolCallContent", v.Value)
+	case ToolCallContentContentVariant, *ToolCallContentContentVariant, ToolCallContentDiffVariant, *ToolCallContentDiffVariant, ToolCallContentTerminalVariant, *ToolCallContentTerminalVariant:
+		return marshalValue("ToolCallContent", v.Value)
+	default:
+		return nil, errVariant
 	}
-	return nil, errVariant
 }
 func (v *ToolCallContent) UnmarshalJSON(b []byte) error {
 	i, err := selectVariant("ToolCallContent", b)
@@ -3167,14 +2986,7 @@ type ToolCallId string
 
 func (v ToolCallId) MarshalJSON() ([]byte, error) {
 	type plain ToolCallId
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("ToolCallId", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("ToolCallId", plain(v))
 }
 func (v *ToolCallId) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("ToolCallId", b); err != nil {
@@ -3211,14 +3023,7 @@ type ToolCallStatus string
 
 func (v ToolCallStatus) MarshalJSON() ([]byte, error) {
 	type plain ToolCallStatus
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("ToolCallStatus", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("ToolCallStatus", plain(v))
 }
 func (v *ToolCallStatus) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("ToolCallStatus", b); err != nil {
@@ -3267,14 +3072,7 @@ type ToolKind string
 
 func (v ToolKind) MarshalJSON() ([]byte, error) {
 	type plain ToolKind
-	b, err := json.Marshal(plain(v))
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateJSON("ToolKind", b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return marshalValue("ToolKind", plain(v))
 }
 func (v *ToolKind) UnmarshalJSON(b []byte) error {
 	if err := ValidateJSON("ToolKind", b); err != nil {

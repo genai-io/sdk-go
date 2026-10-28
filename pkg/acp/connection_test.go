@@ -87,6 +87,20 @@ func (p *peer) read(t *testing.T, ctx context.Context) map[string]json.RawMessag
 	return m
 }
 
+// A later completed write ensures cancellation cannot interrupt an earlier frame.
+func (p *peer) flushWrites(t *testing.T, ctx context.Context, c *acp.Conn) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- c.Notify(ctx, "test/flush", nil) }()
+	frame := p.read(t, ctx)
+	if string(frame["method"]) != `"test/flush"` {
+		t.Fatalf("flush frame: %v", frame)
+	}
+	if err := receive(t, ctx, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func wantCause(t *testing.T, ctx context.Context, c *acp.Conn, want error) {
 	t.Helper()
 	if err := c.Wait(ctx); !errors.Is(err, want) {
@@ -352,6 +366,7 @@ func TestPendingCallCapAndLateResponse(t *testing.T) {
 		t.Fatal("pending cap closed connection")
 	default:
 	}
+	p.flushWrites(t, ctx, c)
 	cancel()
 	if err := receive(t, ctx, done); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)

@@ -92,6 +92,7 @@ type Conn struct {
 	output   io.WriteCloser
 	handlers Handlers
 	limits   Limits
+	agent    *Agent
 
 	writes        chan *write
 	notifications chan notification
@@ -111,6 +112,10 @@ type Conn struct {
 // New takes ownership of input/output on success. Closing either stream must
 // interrupt its active I/O. No process stdio, logger, or global state is changed.
 func New(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handlers Handlers, limits Limits) (*Conn, error) {
+	return newConn(ctx, input, output, handlers, limits, nil)
+}
+
+func newConn(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handlers Handlers, limits Limits, agent *Agent) (*Conn, error) {
 	if ctx == nil || input == nil || output == nil {
 		return nil, errors.New("acp: context and closable streams are required")
 	}
@@ -124,7 +129,7 @@ func New(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handle
 	life, cancel := context.WithCancelCause(context.Background())
 	c := &Conn{
 		ctx: life, cancel: cancel, input: input, output: output,
-		handlers: handlers, limits: limits,
+		handlers: handlers, limits: limits, agent: agent,
 		writes: make(chan *write, limits.Writes), notifications: make(chan notification, limits.Notifications),
 		joined: make(chan struct{}), closed: make(chan struct{}),
 		pending: make(map[string]chan reply), inbound: make(map[string]*incoming), progress: make(chan struct{}),
@@ -150,6 +155,11 @@ func New(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handle
 // session/cancel for a prompt, or Close to terminate the peer connection.
 // Cancellation during an active frame write closes the connection.
 func (c *Conn) Call(ctx context.Context, method string, params any, result any) error {
+	return c.call(ctx, ctx, method, params, result)
+}
+
+// Separate write lifetime from response waiting for turn-bound permission calls.
+func (c *Conn) call(ctx, writeCtx context.Context, method string, params any, result any) error {
 	if ctx.Value(notificationContext{}) == c {
 		return ErrNotificationCall
 	}
@@ -176,7 +186,7 @@ func (c *Conn) Call(ctx context.Context, method string, params any, result any) 
 		delete(c.pending, key)
 		c.mu.Unlock()
 	}()
-	if err := c.send(ctx, frame); err != nil {
+	if err := c.send(writeCtx, frame); err != nil {
 		return err
 	}
 	var response reply
@@ -308,6 +318,13 @@ func (c *Conn) read() {
 				}
 			}
 		case len(m.id) == 0:
+			if c.agent != nil {
+				if err := c.agent.notification(m); err != nil {
+					c.shutdown(err)
+					return
+				}
+				continue
+			}
 			sequence++
 			select {
 			case c.notifications <- notification{message: m, sequence: sequence}:
@@ -346,32 +363,48 @@ func (c *Conn) dispatch(m message) error {
 			c.mu.Unlock()
 		})
 	}
+	var work func() (any, error)
+	var commit func()
+	if c.agent != nil {
+		work, commit = c.agent.admit(c, m)
+	}
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		defer release()
-		result, failure := c.invoke(m)
+		result, failure := c.invoke(m, work)
 		frame, err := responseFrame(m.id, result, failure)
 		if err != nil {
 			frame, _ = responseFrame(m.id, nil, &Error{Code: -32603, Message: "Internal error"})
 		}
-		if err := c.sendCommit(c.ctx, frame, release); err != nil {
+		if err := c.sendCommit(c.ctx, frame, func() {
+			release()
+			if commit != nil {
+				commit()
+			}
+		}); err != nil {
 			c.shutdown(err)
 		}
 	}()
 	return nil
 }
 
-func (c *Conn) invoke(m message) (result any, failure *Error) {
+func (c *Conn) invoke(m message, work func() (any, error)) (result any, failure *Error) {
 	defer func() {
 		if recover() != nil {
 			result, failure = nil, &Error{Code: -32603, Message: "Internal error"}
 		}
 	}()
-	if c.handlers.Request == nil {
+	if work == nil && c.handlers.Request == nil {
 		return nil, &Error{Code: -32601, Message: "Method not found"}
 	}
-	value, err := c.handlers.Request(c.ctx, c, m.method, m.params)
+	var value any
+	var err error
+	if work != nil {
+		value, err = work()
+	} else {
+		value, err = c.handlers.Request(c.ctx, c, m.method, m.params)
+	}
 	if err == nil {
 		return value, nil
 	}

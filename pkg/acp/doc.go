@@ -11,8 +11,8 @@
 //	ACP peer <--> Conn <--> application handlers <--> application runtime
 //
 // The protocol subpackage contains generated stable ACP v1 wire types.
-// [Conn.Initialize], [Conn.NewSession], [Conn.Prompt], [Conn.Cancel],
-// [Conn.SessionUpdate] and [Conn.RequestPermission] validate message shapes
+// [Conn.Initialize], [Conn.CreateSession], [Conn.Prompt], [Conn.CancelPrompt],
+// [Conn.SendSessionUpdate] and [Conn.RequestPermission] validate message shapes
 // against the pinned schema. Incoming dispatch still uses [Handlers].
 // These convenience methods do not track initialization, serialize prompts,
 // negotiate capabilities, manage sessions or apply authorization policy.

@@ -14,29 +14,30 @@ func (c *Conn) Initialize(ctx context.Context, request protocol.InitializeReques
 	return callProtocol[protocol.InitializeResponse](ctx, c, "initialize", request)
 }
 
-// NewSession asks the agent to create a session. Storage and admission remain
+// CreateSession asks the agent to create a session. Storage and admission remain
 // the agent application's responsibility.
-func (c *Conn) NewSession(ctx context.Context, request protocol.NewSessionRequest) (protocol.NewSessionResponse, error) {
+func (c *Conn) CreateSession(ctx context.Context, request protocol.NewSessionRequest) (protocol.NewSessionResponse, error) {
 	return callProtocol[protocol.NewSessionResponse](ctx, c, "session/new", request)
 }
 
 // Prompt waits for a prompt result and its preceding notifications. It does not
 // serialize prompts for a session. Context cancellation stops the local wait,
 // not remote work; cancellation during an active frame write closes the
-// connection. Use Cancel to request session-level cancellation from the agent.
+// connection. Use CancelPrompt to request cancellation of the active prompt.
 func (c *Conn) Prompt(ctx context.Context, request protocol.PromptRequest) (protocol.PromptResponse, error) {
 	return callProtocol[protocol.PromptResponse](ctx, c, "session/prompt", request)
 }
 
-// Cancel sends session/cancel. It neither waits for the turn to unwind nor
-// cancels the local Prompt wait; the agent should still answer that prompt.
-func (c *Conn) Cancel(ctx context.Context, notification protocol.CancelNotification) error {
+// CancelPrompt sends session/cancel for the active prompt, not session closure.
+// It neither waits for unwind nor cancels the local Prompt wait; the agent
+// should still answer that prompt.
+func (c *Conn) CancelPrompt(ctx context.Context, notification protocol.CancelNotification) error {
 	return notifyProtocol(ctx, c, "session/cancel", notification)
 }
 
-// SessionUpdate sends an agent-to-client update. Completion means the frame was
-// written, not that the client has rendered or processed it.
-func (c *Conn) SessionUpdate(ctx context.Context, notification protocol.SessionNotification) error {
+// SendSessionUpdate sends an agent-to-client update. Completion means the frame
+// was written, not that the client has rendered or processed it.
+func (c *Conn) SendSessionUpdate(ctx context.Context, notification protocol.SessionNotification) error {
 	return notifyProtocol(ctx, c, "session/update", notification)
 }
 

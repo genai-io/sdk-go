@@ -77,7 +77,7 @@ func TestProtocolCalls(t *testing.T) {
 		testProtocolCall(t, "initialize", `{"protocolVersion":1.0}`, `{"protocolVersion":1e0}`, false, (*acp.Conn).Initialize)
 	})
 	t.Run("new", func(t *testing.T) {
-		testProtocolCall(t, "session/new", `{"cwd":"/fixture","mcpServers":[]}`, `{"sessionId":"fixture"}`, false, (*acp.Conn).NewSession)
+		testProtocolCall(t, "session/new", `{"cwd":"/fixture","mcpServers":[]}`, `{"sessionId":"fixture"}`, false, (*acp.Conn).CreateSession)
 	})
 	t.Run("prompt", func(t *testing.T) {
 		testProtocolCall(t, "session/prompt", `{"sessionId":"fixture","prompt":[{"type":"text","text":"hello"}]}`, `{"stopReason":"end_turn"}`, false, (*acp.Conn).Prompt)
@@ -92,7 +92,7 @@ func TestProtocolResponseValidation(t *testing.T) {
 		testProtocolCall(t, "initialize", `{"protocolVersion":1}`, `{"protocolVersion":65536,"agentCapabilities":{},"authMethods":[]}`, true, (*acp.Conn).Initialize)
 	})
 	t.Run("missing session ID", func(t *testing.T) {
-		testProtocolCall(t, "session/new", `{"cwd":"/fixture","mcpServers":[]}`, `{}`, true, (*acp.Conn).NewSession)
+		testProtocolCall(t, "session/new", `{"cwd":"/fixture","mcpServers":[]}`, `{}`, true, (*acp.Conn).CreateSession)
 	})
 	t.Run("unknown stop reason", func(t *testing.T) {
 		testProtocolCall(t, "session/prompt", `{"sessionId":"fixture","prompt":[]}`, `{"stopReason":"invented"}`, true, (*acp.Conn).Prompt)
@@ -107,11 +107,11 @@ func TestProtocolCancelledContext(t *testing.T) {
 	c, _ := rawConn(t, ctx, acp.Handlers{}, acp.Limits{})
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := c.NewSession(cancelled, protocol.NewSessionRequest{}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("NewSession = %v, want context.Canceled", err)
+	if _, err := c.CreateSession(cancelled, protocol.NewSessionRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSession = %v, want context.Canceled", err)
 	}
-	if err := c.Cancel(cancelled, protocol.CancelNotification{}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Cancel = %v, want context.Canceled", err)
+	if err := c.CancelPrompt(cancelled, protocol.CancelNotification{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CancelPrompt = %v, want context.Canceled", err)
 	}
 	if c.Err() != nil {
 		t.Fatal(c.Err())
@@ -121,7 +121,7 @@ func TestProtocolCancelledContext(t *testing.T) {
 func TestProtocolRequestValidation(t *testing.T) {
 	ctx := testContext(t)
 	c, p := rawConn(t, ctx, acp.Handlers{}, acp.Limits{})
-	if _, err := c.NewSession(ctx, protocol.NewSessionRequest{}); err == nil {
+	if _, err := c.CreateSession(ctx, protocol.NewSessionRequest{}); err == nil {
 		t.Fatal("nil required mcpServers array accepted")
 	}
 	if _, err := c.Prompt(ctx, protocol.PromptRequest{}); err == nil {
@@ -165,10 +165,10 @@ func testProtocolNotification[Notification any](t *testing.T, method, params str
 
 func TestProtocolNotifications(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
-		testProtocolNotification(t, "session/cancel", `{"sessionId":"fixture"}`, (*acp.Conn).Cancel)
+		testProtocolNotification(t, "session/cancel", `{"sessionId":"fixture"}`, (*acp.Conn).CancelPrompt)
 	})
 	t.Run("update", func(t *testing.T) {
-		testProtocolNotification(t, "session/update", `{"sessionId":"fixture","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello\n世界"}}}`, (*acp.Conn).SessionUpdate)
+		testProtocolNotification(t, "session/update", `{"sessionId":"fixture","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello\n世界"}}}`, (*acp.Conn).SendSessionUpdate)
 	})
 }
 
@@ -223,7 +223,7 @@ func TestProtocolPromptLocalCancellation(t *testing.T) {
 	}
 }
 
-func TestProtocolCancelKeepsPromptWait(t *testing.T) {
+func TestProtocolCancelPromptKeepsWait(t *testing.T) {
 	ctx := testContext(t)
 	c, p := rawConn(t, ctx, acp.Handlers{}, acp.Limits{})
 	var prompt protocol.PromptRequest
@@ -245,7 +245,7 @@ func TestProtocolCancelKeepsPromptWait(t *testing.T) {
 	}()
 	request := p.read(t, ctx)
 	cancelDone := make(chan error, 1)
-	go func() { cancelDone <- c.Cancel(ctx, cancel) }()
+	go func() { cancelDone <- c.CancelPrompt(ctx, cancel) }()
 	notification := p.read(t, ctx)
 	equalJSON(t, notification["method"], `"session/cancel"`)
 	if _, present := notification["id"]; present {

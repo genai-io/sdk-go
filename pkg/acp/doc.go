@@ -45,7 +45,7 @@
 // error code -32001, not ACP's -32000 (authentication required). Prompts for an
 // unknown session use -32002 (resource not found).
 //
-// Each Prompt receives a [Turn]. Its SendSessionUpdate and RequestPermission
+// Each Prompt receives a [Turn]. Its SendUpdate and RequestPermission
 // methods bind the session ID and reject work after the callback returns. The
 // response waits for callback unwind and all admitted outbound operations, so
 // final updates precede completion. Cancellation requests cooperative unwind;

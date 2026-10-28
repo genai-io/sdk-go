@@ -96,7 +96,7 @@ func TestAgentFinishJoinsAdmittedUpdate(t *testing.T) {
 	h.Prompt = func(_ context.Context, turn *acp.Turn, _ protocol.PromptRequest) (protocol.PromptResponse, error) {
 		var update protocol.SessionNotification
 		_ = json.Unmarshal([]byte(`{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"final"}}}`), &update)
-		go func() { updateDone <- turn.SendSessionUpdate(update) }()
+		go func() { updateDone <- turn.SendUpdate(update) }()
 		// The write has entered the transport, so the operation is admitted even
 		// though this deliberately adversarial callback fails to join its goroutine.
 		<-started

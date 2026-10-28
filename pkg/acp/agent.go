@@ -272,11 +272,11 @@ func (t *Turn) finish() {
 	t.work.Wait()
 }
 
-// SendSessionUpdate binds the notification to this session (the supplied
+// SendUpdate binds the notification to this session (the supplied
 // SessionID is ignored). It remains usable during cooperative cancellation for
 // final updates. Writes use connection lifetime, not turn cancellation; a stuck
 // peer requires connection shutdown. Completion means written, not rendered.
-func (t *Turn) SendSessionUpdate(update protocol.SessionNotification) error {
+func (t *Turn) SendUpdate(update protocol.SessionNotification) error {
 	if err := t.begin(); err != nil {
 		return err
 	}

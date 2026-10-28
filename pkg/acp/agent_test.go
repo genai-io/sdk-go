@@ -146,7 +146,7 @@ func TestAgentWireOrderCancellationAndSuccessor(t *testing.T) {
 			<-unwind
 			var update protocol.SessionNotification
 			_ = json.Unmarshal([]byte(`{"sessionId":"wrong","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"final"}}}`), &update)
-			if err := turn.SendSessionUpdate(update); err != nil {
+			if err := turn.SendUpdate(update); err != nil {
 				return protocol.PromptResponse{}, err
 			}
 			return protocol.PromptResponse{}, ctx.Err()
@@ -177,7 +177,7 @@ func TestAgentWireOrderCancellationAndSuccessor(t *testing.T) {
 	p.send(t, ctx, cancelFrame+agentRequest("first", "session/prompt", promptParams))
 	receive(t, ctx, entered)
 	equalJSON(t, p.read(t, ctx)["result"], `{"stopReason":"end_turn"}`)
-	if err := old.SendSessionUpdate(protocol.SessionNotification{}); !errors.Is(err, acp.ErrTurnFinished) {
+	if err := old.SendUpdate(protocol.SessionNotification{}); !errors.Is(err, acp.ErrTurnFinished) {
 		t.Fatalf("late update: %v", err)
 	}
 	if _, err := old.RequestPermission(protocol.RequestPermissionRequest{}); !errors.Is(err, acp.ErrTurnFinished) {

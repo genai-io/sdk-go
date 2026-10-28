@@ -17,9 +17,15 @@ import (
 // MCP server handling belong to the application. Only advertise capabilities
 // implemented by these callbacks; optional protocol methods are not dispatched.
 type AgentHandlers struct {
-	Initialize    func(context.Context, protocol.InitializeRequest) (protocol.InitializeResponse, error)
-	CreateSession func(context.Context, protocol.NewSessionRequest) (protocol.NewSessionResponse, error)
-	Prompt        func(context.Context, *Turn, protocol.PromptRequest) (protocol.PromptResponse, error)
+	// Initialize handles initialize and returns the agent's version and capabilities.
+	Initialize func(ctx context.Context, request protocol.InitializeRequest) (protocol.InitializeResponse, error)
+
+	// CreateSession handles session/new and returns an application-owned session ID.
+	CreateSession func(ctx context.Context, request protocol.NewSessionRequest) (protocol.NewSessionResponse, error)
+
+	// Prompt handles session/prompt and returns its final stop reason. Use turn for
+	// updates and permissions; ctx is cancelled by session/cancel or shutdown.
+	Prompt func(ctx context.Context, turn *Turn, request protocol.PromptRequest) (protocol.PromptResponse, error)
 }
 
 // AgentOptions bounds transport and connection-local session bookkeeping.

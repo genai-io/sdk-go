@@ -2,6 +2,21 @@
 // connecting editors and other clients to agents. It provides bounded UTF-8,
 // newline-delimited JSON-RPC 2.0 transport and a typed receiving-side core.
 //
+// # API map
+//
+// Use [NewAgent] to expose application callbacks to an ACP client. Use [New]
+// for a raw connection with application-defined dispatch. Neither constructor
+// starts a listener, launches a process or creates an agent runtime.
+//
+//	Scope            Receive from client          Send to client
+//	AgentHandlers    Initialize / CreateSession   callback return values
+//	                 Prompt                       final prompt result
+//	Turn             cancellation via Prompt ctx  SendUpdate / RequestPermission
+//
+// Agent owns connection-local protocol state; the application owns execution
+// and session resources. Turn binds outbound operations to the current prompt.
+// Conn methods instead take explicit contexts and session-bearing wire messages.
+//
 // # Connection boundary
 //
 // Applications supply closable streams and [Handlers] to [New]. The connection
@@ -63,8 +78,7 @@
 // Retained Turn values cannot publish into a successor. Raw Conn methods retain
 // their original active-write cancellation semantics.
 //
-// New starts I/O workers; it does not launch a process, listen on a port or
-// connect an agent runtime. Applications may use child-process stdio streams.
+// Applications may supply child-process stdio streams to either constructor.
 //
 // # Test conversation
 //

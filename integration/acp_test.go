@@ -25,12 +25,6 @@ func acpPipe(t *testing.T, handlers acp.Handlers) (context.Context, *acp.Conn, a
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
-	conn, peer := acpPipeContext(t, ctx, handlers)
-	return ctx, conn, peer
-}
-
-func acpPipeContext(t *testing.T, ctx context.Context, handlers acp.Handlers) (*acp.Conn, acpPeer) {
-	t.Helper()
 	in, clientInput, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +49,7 @@ func acpPipeContext(t *testing.T, ctx context.Context, handlers acp.Handlers) (*
 			t.Errorf("ACP cleanup: %v", err)
 		}
 	})
-	return conn, acpPeer{clientInput, bufio.NewReader(clientOutput)}
+	return ctx, conn, acpPeer{clientInput, bufio.NewReader(clientOutput)}
 }
 
 func (p acpPeer) send(t *testing.T, message jsonrpc.Message) {

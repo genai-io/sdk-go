@@ -39,7 +39,7 @@ func FetchCodexUsage(ctx context.Context, client *http.Client) (CodexUsage, erro
 	if err != nil {
 		return CodexUsage{}, fmt.Errorf("codex usage: request failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return CodexUsage{}, fmt.Errorf("codex usage: HTTP %d", resp.StatusCode)
 	}

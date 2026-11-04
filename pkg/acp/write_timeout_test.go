@@ -151,10 +151,13 @@ func TestWriteTimeoutCompletionRace(t *testing.T) {
 func TestWriteTimeoutRejectsNegative(t *testing.T) {
 	input, send := io.Pipe()
 	recv, output := io.Pipe()
-	defer input.Close()
-	defer send.Close()
-	defer recv.Close()
-	defer output.Close()
+	t.Cleanup(func() {
+		// These unused pipes only need resource cleanup.
+		_ = input.Close()
+		_ = send.Close()
+		_ = recv.Close()
+		_ = output.Close()
+	})
 	if _, err := acp.New(context.Background(), input, output, acp.Handlers{}, acp.Limits{WriteTimeout: -1}); !errors.Is(err, acp.ErrLimit) {
 		t.Fatal(err)
 	}

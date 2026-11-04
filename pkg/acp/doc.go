@@ -72,17 +72,8 @@
 // Turn writes deliberately use connection lifetime: final updates can be sent
 // after cancellation, and cancelling a permission wait cannot tear a frame.
 // Permission cancellation takes effect after its request write finishes; a
-// stalled peer requires Close (or cancellation of NewAgent's parent context).
-// For unattended peers, configure AgentOptions.Limits.WriteTimeout (or Limits
-// on New). It bounds each active frame write, including the final response,
-// independently of prompt cancellation. Zero preserves unlimited write lifetime.
-// Queued frames do not consume this budget: slow but progressing sessions retain
-// ordered output. Expiry fails closed with ErrWriteTimeout, disconnecting ALL
-// sessions and cancelling their callbacks; it does not drop an update and claim
-// a cancelled response was delivered. At the deadline boundary completion may
-// race with shutdown, so delivery is uncertain on failure. Owned streams must
-// support concurrent Close that promptly interrupts I/O. Wait joins the writer,
-// timeout cleanup and cooperative callbacks, not uncooperative application work.
+// stalled peer requires Close, parent-context cancellation, or a configured
+// AgentOptions.Limits.WriteTimeout (see [Limits]).
 // Callback return cancels outstanding permission waits and joins admitted work.
 // This does not send remote permission cancellation or apply permission policy.
 // Retained Turn values cannot publish into a successor. Raw Conn methods retain

@@ -280,10 +280,9 @@ func (t *Turn) finish() {
 
 // SendUpdate binds the notification to this session (the supplied
 // SessionID is ignored). It remains usable during cooperative cancellation for
-// final updates. Writes use connection lifetime, not turn cancellation; a stuck
-// peer requires connection shutdown. Set AgentOptions.Limits.WriteTimeout to
-// bound active writes and fail the whole connection if the peer stops reading.
-// Completion means written, not rendered.
+// final updates. Writes use connection lifetime, not turn cancellation;
+// see Limits.WriteTimeout to bound active writes. Completion means written,
+// not rendered.
 func (t *Turn) SendUpdate(update protocol.SessionNotification) error {
 	if err := t.begin(); err != nil {
 		return err
@@ -296,11 +295,9 @@ func (t *Turn) SendUpdate(update protocol.SessionNotification) error {
 // RequestPermission binds the request to this session and waits with the turn's
 // context. Cancellation stops waiting only after the entire request frame has
 // been written; it cannot interrupt an active write and corrupt the connection.
-// A blocked writer therefore requires connection shutdown to unblock; configure
-// AgentOptions.Limits.WriteTimeout to bound that wait. Expiry disconnects all
-// sessions, not only this turn. No remote
-// permission cancellation is sent; late replies are discarded. The application
-// must validate selected options and enforce authorization itself.
+// See Limits.WriteTimeout to bound active writes. No remote permission
+// cancellation is sent; late replies are discarded. The application must
+// validate selected options and enforce authorization itself.
 func (t *Turn) RequestPermission(request protocol.RequestPermissionRequest) (protocol.RequestPermissionResponse, error) {
 	var res protocol.RequestPermissionResponse
 	if err := t.begin(); err != nil {

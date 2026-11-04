@@ -34,11 +34,9 @@ type Limits struct {
 	Writes        int
 
 	// WriteTimeout bounds each active frame write, not time in the write queue.
-	// Zero disables the timeout. Expiry closes BOTH streams with ErrWriteTimeout,
-	// cancelling every session and callback on the connection, even without a
-	// prompt cancellation. A partial frame cannot be retried on this connection.
-	// Set a budget sufficient for the largest frame and expected peer latency.
-	// Closing the streams must promptly interrupt active I/O (see New).
+	// Zero disables it. Expiry closes both streams with ErrWriteTimeout and
+	// cancels all sessions and callbacks. Stream Close must interrupt active
+	// I/O (see New); delivery is uncertain on failure.
 	WriteTimeout time.Duration
 }
 
@@ -302,10 +300,8 @@ func (c *Conn) write() {
 	}
 }
 
-// writeFrame never abandons a writer goroutine. The owned stream's Close must
-// interrupt Write. Join the timeout callback too, so Wait includes its cleanup.
-// At the deadline boundary either completion or timeout may win; a timeout
-// winner is always failure, even if Write concurrently reports a full frame.
+// writeFrame joins timeout cleanup so Wait cannot leave it running.
+// If the timeout wins, report failure even if Write returns a full frame.
 func (c *Conn) writeFrame(data []byte) error {
 	var timer *time.Timer
 	var done chan struct{}

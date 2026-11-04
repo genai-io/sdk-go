@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
+	ErrWriteTimeout     = errors.New("acp: frame write timed out")
 	ErrClosed           = errors.New("acp: connection closed")
 	ErrLimit            = errors.New("acp: connection limit exceeded")
 	ErrFrameTooLarge    = errors.New("acp: frame too large")
@@ -22,16 +24,26 @@ var (
 
 // Limits bounds connection-owned work. Defaults are 1 MiB per frame,
 // 8 requests, 32 pending calls, 64 notifications and 16 writes.
-// Zero selects a default; negative values fail. FrameBytes cannot exceed 64 MiB.
+// Zero selects a default (except WriteTimeout); negative values fail.
+// FrameBytes cannot exceed 64 MiB.
 type Limits struct {
 	FrameBytes    int
 	Requests      int
 	PendingCalls  int
 	Notifications int
 	Writes        int
+
+	// WriteTimeout bounds each active frame write, not time in the write queue.
+	// Zero disables it. Expiry closes both streams with ErrWriteTimeout and
+	// cancels all sessions and callbacks. Stream Close must interrupt active
+	// I/O (see New); delivery is uncertain on failure.
+	WriteTimeout time.Duration
 }
 
 func (l Limits) defaults() (Limits, error) {
+	if l.WriteTimeout < 0 {
+		return l, fmt.Errorf("%w: negative write timeout", ErrLimit)
+	}
 	fields := []*int{&l.FrameBytes, &l.Requests, &l.PendingCalls, &l.Notifications, &l.Writes}
 	defaults := []int{1 << 20, 8, 32, 64, 16}
 	for i, field := range fields {
@@ -277,10 +289,7 @@ func (c *Conn) write() {
 			if job.commit != nil {
 				job.commit()
 			}
-			n, err := c.output.Write(job.data)
-			if err == nil && n != len(job.data) {
-				err = io.ErrShortWrite
-			}
+			err := c.writeFrame(job.data)
 			job.done <- err
 			job.state.Store(3)
 			if err != nil {
@@ -289,6 +298,29 @@ func (c *Conn) write() {
 			}
 		}
 	}
+}
+
+// writeFrame joins timeout cleanup so Wait cannot leave it running.
+// If the timeout wins, report failure even if Write returns a full frame.
+func (c *Conn) writeFrame(data []byte) error {
+	var timer *time.Timer
+	var done chan struct{}
+	if c.limits.WriteTimeout > 0 {
+		done = make(chan struct{})
+		timer = time.AfterFunc(c.limits.WriteTimeout, func() {
+			defer close(done)
+			c.shutdown(ErrWriteTimeout)
+		})
+	}
+	n, err := c.output.Write(data)
+	if timer != nil && !timer.Stop() {
+		<-done
+		return c.Err()
+	}
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	return err
 }
 
 func (c *Conn) read() {

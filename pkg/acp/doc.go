@@ -72,7 +72,8 @@
 // Turn writes deliberately use connection lifetime: final updates can be sent
 // after cancellation, and cancelling a permission wait cannot tear a frame.
 // Permission cancellation takes effect after its request write finishes; a
-// stalled peer requires Close (or cancellation of NewAgent's parent context).
+// stalled peer requires Close, parent-context cancellation, or a configured
+// AgentOptions.Limits.WriteTimeout (see [Limits]).
 // Callback return cancels outstanding permission waits and joins admitted work.
 // This does not send remote permission cancellation or apply permission policy.
 // Retained Turn values cannot publish into a successor. Raw Conn methods retain

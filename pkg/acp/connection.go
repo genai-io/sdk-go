@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
+	ErrWriteTimeout     = errors.New("acp: frame write timed out")
 	ErrClosed           = errors.New("acp: connection closed")
 	ErrLimit            = errors.New("acp: connection limit exceeded")
 	ErrFrameTooLarge    = errors.New("acp: frame too large")
@@ -22,16 +24,28 @@ var (
 
 // Limits bounds connection-owned work. Defaults are 1 MiB per frame,
 // 8 requests, 32 pending calls, 64 notifications and 16 writes.
-// Zero selects a default; negative values fail. FrameBytes cannot exceed 64 MiB.
+// Zero selects a default (except WriteTimeout); negative values fail.
+// FrameBytes cannot exceed 64 MiB.
 type Limits struct {
 	FrameBytes    int
 	Requests      int
 	PendingCalls  int
 	Notifications int
 	Writes        int
+
+	// WriteTimeout bounds each active frame write, not time in the write queue.
+	// Zero disables the timeout. Expiry closes BOTH streams with ErrWriteTimeout,
+	// cancelling every session and callback on the connection, even without a
+	// prompt cancellation. A partial frame cannot be retried on this connection.
+	// Set a budget sufficient for the largest frame and expected peer latency.
+	// Closing the streams must promptly interrupt active I/O (see New).
+	WriteTimeout time.Duration
 }
 
 func (l Limits) defaults() (Limits, error) {
+	if l.WriteTimeout < 0 {
+		return l, fmt.Errorf("%w: negative write timeout", ErrLimit)
+	}
 	fields := []*int{&l.FrameBytes, &l.Requests, &l.PendingCalls, &l.Notifications, &l.Writes}
 	defaults := []int{1 << 20, 8, 32, 64, 16}
 	for i, field := range fields {
@@ -277,10 +291,7 @@ func (c *Conn) write() {
 			if job.commit != nil {
 				job.commit()
 			}
-			n, err := c.output.Write(job.data)
-			if err == nil && n != len(job.data) {
-				err = io.ErrShortWrite
-			}
+			err := c.writeFrame(job.data)
 			job.done <- err
 			job.state.Store(3)
 			if err != nil {
@@ -289,6 +300,31 @@ func (c *Conn) write() {
 			}
 		}
 	}
+}
+
+// writeFrame never abandons a writer goroutine. The owned stream's Close must
+// interrupt Write. Join the timeout callback too, so Wait includes its cleanup.
+// At the deadline boundary either completion or timeout may win; a timeout
+// winner is always failure, even if Write concurrently reports a full frame.
+func (c *Conn) writeFrame(data []byte) error {
+	var timer *time.Timer
+	var done chan struct{}
+	if c.limits.WriteTimeout > 0 {
+		done = make(chan struct{})
+		timer = time.AfterFunc(c.limits.WriteTimeout, func() {
+			defer close(done)
+			c.shutdown(ErrWriteTimeout)
+		})
+	}
+	n, err := c.output.Write(data)
+	if timer != nil && !timer.Stop() {
+		<-done
+		return c.Err()
+	}
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	return err
 }
 
 func (c *Conn) read() {

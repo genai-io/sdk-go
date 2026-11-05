@@ -1090,6 +1090,48 @@ func (v *InitializeResponse) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type LoadSessionRequest struct {
+	Meta                  Optional[json.RawMessage]  `json:"_meta"`
+	AdditionalDirectories Optional[[]string]         `json:"additionalDirectories"`
+	CWD                   string                     `json:"cwd"`
+	MCPServers            []MCPServer                `json:"mcpServers"`
+	SessionID             SessionID                  `json:"sessionId"`
+	Extra                 map[string]json.RawMessage `json:"-"`
+}
+
+func (v LoadSessionRequest) MarshalJSON() ([]byte, error) {
+	return marshalObject("LoadSessionRequest", v)
+}
+func (v *LoadSessionRequest) UnmarshalJSON(b []byte) error {
+	type plain LoadSessionRequest
+	var p plain
+	if err := unmarshalObject("LoadSessionRequest", b, &p); err != nil {
+		return err
+	}
+	*v = LoadSessionRequest(p)
+	return nil
+}
+
+type LoadSessionResponse struct {
+	Meta          Optional[json.RawMessage]       `json:"_meta"`
+	ConfigOptions Optional[[]SessionConfigOption] `json:"configOptions"`
+	Modes         Optional[SessionModeState]      `json:"modes"`
+	Extra         map[string]json.RawMessage      `json:"-"`
+}
+
+func (v LoadSessionResponse) MarshalJSON() ([]byte, error) {
+	return marshalObject("LoadSessionResponse", v)
+}
+func (v *LoadSessionResponse) UnmarshalJSON(b []byte) error {
+	type plain LoadSessionResponse
+	var p plain
+	if err := unmarshalObject("LoadSessionResponse", b, &p); err != nil {
+		return err
+	}
+	*v = LoadSessionResponse(p)
+	return nil
+}
+
 type LogoutCapabilities struct {
 	Meta  Optional[json.RawMessage]  `json:"_meta"`
 	Extra map[string]json.RawMessage `json:"-"`
@@ -2765,6 +2807,137 @@ func (v *SessionUpdate) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// SetSessionConfigOptionRequest holds one of its concrete variant types in Value.
+type SetSessionConfigOptionRequest struct{ Value any }
+type SetSessionConfigOptionRequestBooleanVariant struct {
+	Meta      Optional[json.RawMessage]  `json:"_meta"`
+	ConfigID  SessionConfigID            `json:"configId"`
+	SessionID SessionID                  `json:"sessionId"`
+	Type      string                     `json:"type"`
+	Value     bool                       `json:"value"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionConfigOptionRequestBooleanVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionConfigOptionRequest/0", v)
+}
+func (v *SetSessionConfigOptionRequestBooleanVariant) UnmarshalJSON(b []byte) error {
+	type plain SetSessionConfigOptionRequestBooleanVariant
+	var p plain
+	if err := unmarshalObject("SetSessionConfigOptionRequest/0", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionConfigOptionRequestBooleanVariant(p)
+	return nil
+}
+
+type SetSessionConfigOptionRequestValueIDVariant struct {
+	Meta      Optional[json.RawMessage]  `json:"_meta"`
+	ConfigID  SessionConfigID            `json:"configId"`
+	SessionID SessionID                  `json:"sessionId"`
+	Value     SessionConfigValueID       `json:"value"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionConfigOptionRequestValueIDVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionConfigOptionRequest/1", v)
+}
+func (v *SetSessionConfigOptionRequestValueIDVariant) UnmarshalJSON(b []byte) error {
+	type plain SetSessionConfigOptionRequestValueIDVariant
+	var p plain
+	if err := unmarshalObject("SetSessionConfigOptionRequest/1", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionConfigOptionRequestValueIDVariant(p)
+	return nil
+}
+func (v SetSessionConfigOptionRequest) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case SetSessionConfigOptionRequestBooleanVariant, *SetSessionConfigOptionRequestBooleanVariant, SetSessionConfigOptionRequestValueIDVariant, *SetSessionConfigOptionRequestValueIDVariant:
+		return marshalValue("SetSessionConfigOptionRequest", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *SetSessionConfigOptionRequest) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("SetSessionConfigOptionRequest", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p SetSessionConfigOptionRequestBooleanVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p SetSessionConfigOptionRequestValueIDVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
+type SetSessionConfigOptionResponse struct {
+	Meta          Optional[json.RawMessage]  `json:"_meta"`
+	ConfigOptions []SessionConfigOption      `json:"configOptions"`
+	Extra         map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionConfigOptionResponse) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionConfigOptionResponse", v)
+}
+func (v *SetSessionConfigOptionResponse) UnmarshalJSON(b []byte) error {
+	type plain SetSessionConfigOptionResponse
+	var p plain
+	if err := unmarshalObject("SetSessionConfigOptionResponse", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionConfigOptionResponse(p)
+	return nil
+}
+
+type SetSessionModeRequest struct {
+	Meta      Optional[json.RawMessage]  `json:"_meta"`
+	ModeID    SessionModeID              `json:"modeId"`
+	SessionID SessionID                  `json:"sessionId"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionModeRequest) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionModeRequest", v)
+}
+func (v *SetSessionModeRequest) UnmarshalJSON(b []byte) error {
+	type plain SetSessionModeRequest
+	var p plain
+	if err := unmarshalObject("SetSessionModeRequest", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionModeRequest(p)
+	return nil
+}
+
+type SetSessionModeResponse struct {
+	Meta  Optional[json.RawMessage]  `json:"_meta"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionModeResponse) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionModeResponse", v)
+}
+func (v *SetSessionModeResponse) UnmarshalJSON(b []byte) error {
+	type plain SetSessionModeResponse
+	var p plain
+	if err := unmarshalObject("SetSessionModeResponse", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionModeResponse(p)
+	return nil
+}
+
 type StopReason string
 
 func (v StopReason) MarshalJSON() ([]byte, error) {
@@ -3185,6 +3358,8 @@ var supportedDefinitions = definitionSet([]string{
 	"Implementation",
 	"InitializeRequest",
 	"InitializeResponse",
+	"LoadSessionRequest",
+	"LoadSessionResponse",
 	"LogoutCapabilities",
 	"McpCapabilities",
 	"McpServer",
@@ -3238,6 +3413,10 @@ var supportedDefinitions = definitionSet([]string{
 	"SessionNotification",
 	"SessionResumeCapabilities",
 	"SessionUpdate",
+	"SetSessionConfigOptionRequest",
+	"SetSessionConfigOptionResponse",
+	"SetSessionModeRequest",
+	"SetSessionModeResponse",
 	"StopReason",
 	"Terminal",
 	"TerminalId",

@@ -19,7 +19,7 @@ type node map[string]any
 
 var defs map[string]node
 var out bytes.Buffer
-var roots = strings.Fields("InitializeRequest InitializeResponse NewSessionRequest NewSessionResponse PromptRequest PromptResponse CancelNotification SessionNotification RequestPermissionRequest RequestPermissionResponse")
+var roots = strings.Fields("InitializeRequest InitializeResponse NewSessionRequest NewSessionResponse LoadSessionRequest LoadSessionResponse SetSessionModeRequest SetSessionModeResponse SetSessionConfigOptionRequest SetSessionConfigOptionResponse PromptRequest PromptResponse CancelNotification SessionNotification RequestPermissionRequest RequestPermissionResponse")
 
 var sourcePin = struct {
 	WireVersion   int

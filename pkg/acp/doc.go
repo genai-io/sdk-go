@@ -45,7 +45,14 @@
 // Session slots are bounded by [AgentOptions.MaxSessions], including creations
 // in flight. The application allocates unique nonempty session IDs and owns all
 // runtime/storage resources, including cleanup after failed creation or shutdown.
-// There is no automatic eviction, persistence, resume or session-close operation.
+// There is no automatic eviction, persistence or session-close operation.
+// Optional LoadSession reserves the requested identity and a session slot before
+// invoking application code. Its Turn permits ordered history replay. Failed
+// loads release the reservation at the response barrier; cleanup is application
+// owned. SetSessionMode and SetSessionConfigOption optionally admit idle-only
+// changes, mutually exclusive with prompts and other changes through that barrier.
+// session/cancel affects a prompt or load, never a configuration callback; shutdown
+// cancels all callbacks. Nil optional handlers return method-not-found.
 //
 // Admission occurs in wire order on the reader without invoking application
 // callbacks: overlapping prompts for a session are rejected, not queued. Cancel

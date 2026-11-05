@@ -18,8 +18,8 @@ func TestSchemaPin(t *testing.T) {
 	if got := hex.EncodeToString(h.Sum(nil)); got != SchemaBlob {
 		t.Fatal(got)
 	}
-	if got := len(supportedDefinitions); got != 108 {
-		t.Fatalf("generated closure has %d definitions, want 108", got)
+	if got := len(supportedDefinitions); got != 114 {
+		t.Fatalf("generated closure has %d definitions, want 114", got)
 	}
 }
 func TestOptionalAndUnknown(t *testing.T) {

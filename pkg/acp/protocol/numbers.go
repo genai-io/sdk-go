@@ -77,13 +77,20 @@ func projectNumbers(v any, schemas []*jsonschema.Schema, defs map[string]*jsonsc
 		}
 		if integer {
 			c, err := normalizeInteger(string(x))
-			if err != nil {
+			if err == nil {
+				var value any
+				if strings.HasPrefix(c, "-") {
+					value, err = strconv.ParseInt(c, 10, 64)
+				} else {
+					value, err = strconv.ParseUint(c, 10, 64)
+				}
+				if err == nil {
+					return value, nil
+				}
+			}
+			if !number {
 				return nil, err
 			}
-			if strings.HasPrefix(c, "-") {
-				return strconv.ParseInt(c, 10, 64)
-			}
-			return strconv.ParseUint(c, 10, 64)
 		}
 		if number {
 			f, err := strconv.ParseFloat(string(x), 64)
@@ -102,6 +109,8 @@ func projectNumbers(v any, schemas []*jsonschema.Schema, defs map[string]*jsonsc
 			for _, s := range expanded {
 				if child := s.Properties[k]; child != nil {
 					children = append(children, child)
+				} else if s.AdditionalProperties != nil {
+					children = append(children, s.AdditionalProperties)
 				}
 			}
 			p, err := projectNumbers(value, children, defs)

@@ -29,7 +29,7 @@ func (a *Agent) admitSessionChange(c *Conn, m message) (func() (any, error), fun
 			return agentReject(-32001, "Session limit reached")
 		}
 		ctx, cancel := context.WithCancel(c.ctx)
-		turn := &Turn{conn: c, sessionID: req.SessionID, ctx: ctx, cancel: cancel}
+		turn := &Turn{conn: c, sessionID: req.SessionID, ctx: ctx, cancel: cancel, forms: a.forms, urls: a.urls}
 		session := &agentSession{turn: turn}
 		a.sessions[req.SessionID] = session
 		a.slots++

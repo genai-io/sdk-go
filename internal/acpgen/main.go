@@ -19,7 +19,7 @@ type node map[string]any
 
 var defs map[string]node
 var out bytes.Buffer
-var roots = strings.Fields("InitializeRequest InitializeResponse NewSessionRequest NewSessionResponse LoadSessionRequest LoadSessionResponse SetSessionModeRequest SetSessionModeResponse SetSessionConfigOptionRequest SetSessionConfigOptionResponse PromptRequest PromptResponse CancelNotification SessionNotification RequestPermissionRequest RequestPermissionResponse")
+var roots = strings.Fields("InitializeRequest InitializeResponse NewSessionRequest NewSessionResponse LoadSessionRequest LoadSessionResponse SetSessionModeRequest SetSessionModeResponse SetSessionConfigOptionRequest SetSessionConfigOptionResponse PromptRequest PromptResponse CancelNotification SessionNotification RequestPermissionRequest RequestPermissionResponse CreateElicitationRequest CreateElicitationResponse CompleteElicitationNotification")
 
 var sourcePin = struct {
 	WireVersion   int
@@ -136,6 +136,16 @@ func flattenObject(n node) node {
 		}
 		r = append(r, asArray(q["required"])...)
 	}
+	// Nested scope unions contribute optional fields; the schema validator still
+	// enforces which complete branch is required on the wire.
+	for _, v := range asArray(n["anyOf"]) {
+		q := flattenObject(asObject(v))
+		for k, v := range asObject(q["properties"]) {
+			if _, exists := p[k]; !exists {
+				p[k] = v
+			}
+		}
+	}
 	for k, v := range asObject(n["properties"]) {
 		p[k] = v
 	}
@@ -247,7 +257,7 @@ func generate(schema []byte) ([]byte, error) {
 				}
 				variantName := typeName + goName(caseName) + "Variant"
 				variantNames = append(variantNames, variantName)
-				if branch["type"] == "array" {
+				if kind, _ := branch["type"].(string); kind == "array" || kind == "string" || kind == "integer" || kind == "number" || kind == "boolean" || kind == "null" {
 					fmt.Fprintf(&out, "type %s %s\n", variantName, goType(branch))
 					emitScalar(variantName, fmt.Sprintf("%s/%d", definition, index))
 				} else {
@@ -266,6 +276,9 @@ func generate(schema []byte) ([]byte, error) {
 			}
 			fmt.Fprintf(&out, "func (v %s) MarshalJSON() ([]byte,error) { switch v.Value.(type) {case %s: return marshalValue(%q,v.Value);default:return nil,errVariant} }\n", typeName, strings.Join(accepted, ","), definition)
 			fmt.Fprintf(&out, "func (v *%s) UnmarshalJSON(b []byte) error {", typeName)
+			if definition == "ElicitationContentValue" {
+				fmt.Fprintln(&out, "var integer ElicitationContentValueIntegerVariant;if err:=json.Unmarshal(b,&integer);err==nil{v.Value=integer;return nil};var number ElicitationContentValueNumberVariant;if err:=json.Unmarshal(b,&number);err==nil{v.Value=number;return nil}")
+			}
 			if definition == "SessionConfigSelectOptions" {
 				fmt.Fprintln(&out, "if bytes.Equal(bytes.TrimSpace(b),[]byte(\"[]\")) {var p SessionConfigSelectOptionsUngroupedVariant;if err:=json.Unmarshal(b,&p);err!=nil{return err};v.Value=p;return nil}")
 			}

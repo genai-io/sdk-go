@@ -54,6 +54,7 @@ type Agent struct {
 	handlers                  AgentHandlers
 	maxSessions               int
 	mu                        sync.Mutex
+	forms, urls               bool
 	initializing              bool
 	initialized               bool
 	initRequest, initResponse json.RawMessage
@@ -158,6 +159,7 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 				defer a.mu.Unlock()
 				a.initializing = false
 				if encoded != nil {
+					a.forms, a.urls = elicitationCapabilities(req)
 					a.initialized = true
 					a.initRequest = append(json.RawMessage(nil), m.params...)
 					a.initResponse = encoded
@@ -222,7 +224,7 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 		return agentReject(-32001, "Session busy")
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
-	turn := &Turn{conn: c, sessionID: req.SessionID, ctx: ctx, cancel: cancel}
+	turn := &Turn{conn: c, sessionID: req.SessionID, ctx: ctx, cancel: cancel, forms: a.forms, urls: a.urls}
 	session.turn = turn
 	return func() (any, error) {
 			defer turn.finish()
@@ -264,13 +266,14 @@ var ErrTurnFinished = errors.New("acp: turn finished")
 // returning; Agent joins admitted outbound calls, not arbitrary application work.
 // Once Prompt returns, new outbound calls fail with ErrTurnFinished.
 type Turn struct {
-	conn      *Conn
-	sessionID protocol.SessionID
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	finished  bool
-	work      sync.WaitGroup
+	forms, urls bool
+	conn        *Conn
+	sessionID   protocol.SessionID
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	finished    bool
+	work        sync.WaitGroup
 }
 
 func (t *Turn) begin() error {

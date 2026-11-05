@@ -86,6 +86,15 @@
 // Retained Turn values cannot publish into a successor. Raw Conn methods retain
 // their original active-write cancellation semantics.
 //
+// Turn.CreateElicitation additionally checks the client's negotiated form/URL
+// capability and binds session scope. It shares permission cancellation and
+// response-write barriers. CreateElicitationContext also bounds the local wait
+// by a tool/request context. Conn.CreateElicitation supports explicit session or
+// request scopes; ElicitationHandler provides typed client-side dispatch.
+// Accepted content still requires application validation against offered fields
+// and options. Neither permission labels nor ordinary form fields provide a
+// secure password-input channel; the pinned schema has no masked-input format.
+//
 // Applications may supply child-process stdio streams to either constructor.
 //
 // # Test conversation

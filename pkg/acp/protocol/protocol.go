@@ -11,8 +11,9 @@
 // Union Value fields accept only their generated concrete variants. Typed
 // integers decode exactly within their Go bounds; typed numbers use finite
 // float64 values. Arbitrary RawMessages are never numerically converted.
-// Ambiguous untagged inputs are rejected, except empty config-options arrays,
-// which decode as Ungrouped. No server or session policy is implemented here.
+// Ambiguous untagged inputs are rejected, except empty config-options arrays
+// (Ungrouped) and elicitation numeric content (int64 when exactly representable,
+// otherwise finite float64). No server or session policy is implemented here.
 package protocol
 
 //go:generate go run ../../../internal/acpgen

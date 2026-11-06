@@ -370,6 +370,27 @@ func (v *BooleanConfigOptionCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type BooleanPropertySchema struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[bool]             `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Title       Optional[string]           `json:"title"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v BooleanPropertySchema) MarshalJSON() ([]byte, error) {
+	return marshalObject("BooleanPropertySchema", v)
+}
+func (v *BooleanPropertySchema) UnmarshalJSON(b []byte) error {
+	type plain BooleanPropertySchema
+	var p plain
+	if err := unmarshalObject("BooleanPropertySchema", b, &p); err != nil {
+		return err
+	}
+	*v = BooleanPropertySchema(p)
+	return nil
+}
+
 type CancelNotification struct {
 	Meta      Optional[json.RawMessage]  `json:"_meta"`
 	SessionID SessionID                  `json:"sessionId"`
@@ -530,6 +551,25 @@ func (v *CompactionUpdate) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = CompactionUpdate(p)
+	return nil
+}
+
+type CompleteElicitationNotification struct {
+	Meta          Optional[json.RawMessage]  `json:"_meta"`
+	ElicitationID ElicitationID              `json:"elicitationId"`
+	Extra         map[string]json.RawMessage `json:"-"`
+}
+
+func (v CompleteElicitationNotification) MarshalJSON() ([]byte, error) {
+	return marshalObject("CompleteElicitationNotification", v)
+}
+func (v *CompleteElicitationNotification) UnmarshalJSON(b []byte) error {
+	type plain CompleteElicitationNotification
+	var p plain
+	if err := unmarshalObject("CompleteElicitationNotification", b, &p); err != nil {
+		return err
+	}
+	*v = CompleteElicitationNotification(p)
 	return nil
 }
 
@@ -767,6 +807,235 @@ func (v *Cost) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// CreateElicitationRequest holds one of its concrete variant types in Value.
+type CreateElicitationRequest struct{ Value any }
+type CreateElicitationRequestFormVariant struct {
+	Meta            Optional[json.RawMessage]  `json:"_meta"`
+	Message         string                     `json:"message"`
+	Mode            string                     `json:"mode"`
+	RequestID       Optional[RequestID]        `json:"requestId"`
+	RequestedSchema ElicitationSchema          `json:"requestedSchema"`
+	SessionID       Optional[SessionID]        `json:"sessionId"`
+	ToolCallID      Optional[ToolCallID]       `json:"toolCallId"`
+	Extra           map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationRequestFormVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationRequest/0", v)
+}
+func (v *CreateElicitationRequestFormVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationRequestFormVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationRequest/0", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationRequestFormVariant(p)
+	return nil
+}
+
+type CreateElicitationRequestURLVariant struct {
+	Meta          Optional[json.RawMessage]  `json:"_meta"`
+	ElicitationID ElicitationID              `json:"elicitationId"`
+	Message       string                     `json:"message"`
+	Mode          string                     `json:"mode"`
+	RequestID     Optional[RequestID]        `json:"requestId"`
+	SessionID     Optional[SessionID]        `json:"sessionId"`
+	ToolCallID    Optional[ToolCallID]       `json:"toolCallId"`
+	URL           string                     `json:"url"`
+	Extra         map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationRequestURLVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationRequest/1", v)
+}
+func (v *CreateElicitationRequestURLVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationRequestURLVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationRequest/1", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationRequestURLVariant(p)
+	return nil
+}
+
+type CreateElicitationRequestOtherVariant struct {
+	Meta       Optional[json.RawMessage]  `json:"_meta"`
+	Message    string                     `json:"message"`
+	Mode       string                     `json:"mode"`
+	RequestID  Optional[RequestID]        `json:"requestId"`
+	SessionID  Optional[SessionID]        `json:"sessionId"`
+	ToolCallID Optional[ToolCallID]       `json:"toolCallId"`
+	Extra      map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationRequestOtherVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationRequest/2", v)
+}
+func (v *CreateElicitationRequestOtherVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationRequestOtherVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationRequest/2", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationRequestOtherVariant(p)
+	return nil
+}
+func (v CreateElicitationRequest) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case CreateElicitationRequestFormVariant, *CreateElicitationRequestFormVariant, CreateElicitationRequestURLVariant, *CreateElicitationRequestURLVariant, CreateElicitationRequestOtherVariant, *CreateElicitationRequestOtherVariant:
+		return marshalValue("CreateElicitationRequest", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *CreateElicitationRequest) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("CreateElicitationRequest", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p CreateElicitationRequestFormVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p CreateElicitationRequestURLVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 2:
+		var p CreateElicitationRequestOtherVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
+// CreateElicitationResponse holds one of its concrete variant types in Value.
+type CreateElicitationResponse struct{ Value any }
+type CreateElicitationResponseAcceptVariant struct {
+	Meta    Optional[json.RawMessage]  `json:"_meta"`
+	Action  string                     `json:"action"`
+	Content Optional[json.RawMessage]  `json:"content"`
+	Extra   map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationResponseAcceptVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationResponse/0", v)
+}
+func (v *CreateElicitationResponseAcceptVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationResponseAcceptVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationResponse/0", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationResponseAcceptVariant(p)
+	return nil
+}
+
+type CreateElicitationResponseDeclineVariant struct {
+	Meta   Optional[json.RawMessage]  `json:"_meta"`
+	Action string                     `json:"action"`
+	Extra  map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationResponseDeclineVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationResponse/1", v)
+}
+func (v *CreateElicitationResponseDeclineVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationResponseDeclineVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationResponse/1", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationResponseDeclineVariant(p)
+	return nil
+}
+
+type CreateElicitationResponseCancelVariant struct {
+	Meta   Optional[json.RawMessage]  `json:"_meta"`
+	Action string                     `json:"action"`
+	Extra  map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationResponseCancelVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationResponse/2", v)
+}
+func (v *CreateElicitationResponseCancelVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationResponseCancelVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationResponse/2", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationResponseCancelVariant(p)
+	return nil
+}
+
+type CreateElicitationResponseOtherVariant struct {
+	Meta   Optional[json.RawMessage]  `json:"_meta"`
+	Action string                     `json:"action"`
+	Extra  map[string]json.RawMessage `json:"-"`
+}
+
+func (v CreateElicitationResponseOtherVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("CreateElicitationResponse/3", v)
+}
+func (v *CreateElicitationResponseOtherVariant) UnmarshalJSON(b []byte) error {
+	type plain CreateElicitationResponseOtherVariant
+	var p plain
+	if err := unmarshalObject("CreateElicitationResponse/3", b, &p); err != nil {
+		return err
+	}
+	*v = CreateElicitationResponseOtherVariant(p)
+	return nil
+}
+func (v CreateElicitationResponse) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case CreateElicitationResponseAcceptVariant, *CreateElicitationResponseAcceptVariant, CreateElicitationResponseDeclineVariant, *CreateElicitationResponseDeclineVariant, CreateElicitationResponseCancelVariant, *CreateElicitationResponseCancelVariant, CreateElicitationResponseOtherVariant, *CreateElicitationResponseOtherVariant:
+		return marshalValue("CreateElicitationResponse", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *CreateElicitationResponse) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("CreateElicitationResponse", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p CreateElicitationResponseAcceptVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p CreateElicitationResponseDeclineVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 2:
+		var p CreateElicitationResponseCancelVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 3:
+		var p CreateElicitationResponseOtherVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
 type CurrentModeUpdate struct {
 	Meta          Optional[json.RawMessage]  `json:"_meta"`
 	CurrentModeID SessionModeID              `json:"currentModeId"`
@@ -805,6 +1074,24 @@ func (v *Diff) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ElicitationAcceptAction struct {
+	Content Optional[json.RawMessage]  `json:"content"`
+	Extra   map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationAcceptAction) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationAcceptAction", v)
+}
+func (v *ElicitationAcceptAction) UnmarshalJSON(b []byte) error {
+	type plain ElicitationAcceptAction
+	var p plain
+	if err := unmarshalObject("ElicitationAcceptAction", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationAcceptAction(p)
+	return nil
+}
+
 type ElicitationCapabilities struct {
 	Meta  Optional[json.RawMessage]             `json:"_meta"`
 	Form  Optional[ElicitationFormCapabilities] `json:"form"`
@@ -822,6 +1109,160 @@ func (v *ElicitationCapabilities) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ElicitationCapabilities(p)
+	return nil
+}
+
+// ElicitationContentValue holds one of its concrete variant types in Value.
+type ElicitationContentValue struct{ Value any }
+type ElicitationContentValueStringVariant string
+
+func (v ElicitationContentValueStringVariant) MarshalJSON() ([]byte, error) {
+	type plain ElicitationContentValueStringVariant
+	return marshalValue("ElicitationContentValue/0", plain(v))
+}
+func (v *ElicitationContentValueStringVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationContentValue/0", b); err != nil {
+		return err
+	}
+	type plain ElicitationContentValueStringVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationContentValueStringVariant(p)
+	return nil
+}
+
+type ElicitationContentValueIntegerVariant int64
+
+func (v ElicitationContentValueIntegerVariant) MarshalJSON() ([]byte, error) {
+	type plain ElicitationContentValueIntegerVariant
+	return marshalValue("ElicitationContentValue/1", plain(v))
+}
+func (v *ElicitationContentValueIntegerVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationContentValue/1", b); err != nil {
+		return err
+	}
+	type plain ElicitationContentValueIntegerVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationContentValueIntegerVariant(p)
+	return nil
+}
+
+type ElicitationContentValueNumberVariant float64
+
+func (v ElicitationContentValueNumberVariant) MarshalJSON() ([]byte, error) {
+	type plain ElicitationContentValueNumberVariant
+	return marshalValue("ElicitationContentValue/2", plain(v))
+}
+func (v *ElicitationContentValueNumberVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationContentValue/2", b); err != nil {
+		return err
+	}
+	type plain ElicitationContentValueNumberVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationContentValueNumberVariant(p)
+	return nil
+}
+
+type ElicitationContentValueBooleanVariant bool
+
+func (v ElicitationContentValueBooleanVariant) MarshalJSON() ([]byte, error) {
+	type plain ElicitationContentValueBooleanVariant
+	return marshalValue("ElicitationContentValue/3", plain(v))
+}
+func (v *ElicitationContentValueBooleanVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationContentValue/3", b); err != nil {
+		return err
+	}
+	type plain ElicitationContentValueBooleanVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationContentValueBooleanVariant(p)
+	return nil
+}
+
+type ElicitationContentValueStringArrayVariant []string
+
+func (v ElicitationContentValueStringArrayVariant) MarshalJSON() ([]byte, error) {
+	type plain ElicitationContentValueStringArrayVariant
+	return marshalValue("ElicitationContentValue/4", plain(v))
+}
+func (v *ElicitationContentValueStringArrayVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationContentValue/4", b); err != nil {
+		return err
+	}
+	type plain ElicitationContentValueStringArrayVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationContentValueStringArrayVariant(p)
+	return nil
+}
+func (v ElicitationContentValue) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case ElicitationContentValueStringVariant, *ElicitationContentValueStringVariant, ElicitationContentValueIntegerVariant, *ElicitationContentValueIntegerVariant, ElicitationContentValueNumberVariant, *ElicitationContentValueNumberVariant, ElicitationContentValueBooleanVariant, *ElicitationContentValueBooleanVariant, ElicitationContentValueStringArrayVariant, *ElicitationContentValueStringArrayVariant:
+		return marshalValue("ElicitationContentValue", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *ElicitationContentValue) UnmarshalJSON(b []byte) error {
+	var integer ElicitationContentValueIntegerVariant
+	if err := json.Unmarshal(b, &integer); err == nil {
+		v.Value = integer
+		return nil
+	}
+	var number ElicitationContentValueNumberVariant
+	if err := json.Unmarshal(b, &number); err == nil {
+		v.Value = number
+		return nil
+	}
+	i, err := selectVariant("ElicitationContentValue", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p ElicitationContentValueStringVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p ElicitationContentValueIntegerVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 2:
+		var p ElicitationContentValueNumberVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 3:
+		var p ElicitationContentValueBooleanVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 4:
+		var p ElicitationContentValueStringArrayVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
 	return nil
 }
 
@@ -843,6 +1284,372 @@ func (v *ElicitationFormCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// ElicitationFormMode holds one of its concrete variant types in Value.
+type ElicitationFormMode struct{ Value any }
+type ElicitationFormModeSessionVariant struct {
+	RequestedSchema ElicitationSchema          `json:"requestedSchema"`
+	SessionID       SessionID                  `json:"sessionId"`
+	ToolCallID      Optional[ToolCallID]       `json:"toolCallId"`
+	Extra           map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationFormModeSessionVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationFormMode/0", v)
+}
+func (v *ElicitationFormModeSessionVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationFormModeSessionVariant
+	var p plain
+	if err := unmarshalObject("ElicitationFormMode/0", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationFormModeSessionVariant(p)
+	return nil
+}
+
+type ElicitationFormModeRequestVariant struct {
+	RequestID       RequestID                  `json:"requestId"`
+	RequestedSchema ElicitationSchema          `json:"requestedSchema"`
+	Extra           map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationFormModeRequestVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationFormMode/1", v)
+}
+func (v *ElicitationFormModeRequestVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationFormModeRequestVariant
+	var p plain
+	if err := unmarshalObject("ElicitationFormMode/1", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationFormModeRequestVariant(p)
+	return nil
+}
+func (v ElicitationFormMode) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case ElicitationFormModeSessionVariant, *ElicitationFormModeSessionVariant, ElicitationFormModeRequestVariant, *ElicitationFormModeRequestVariant:
+		return marshalValue("ElicitationFormMode", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *ElicitationFormMode) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("ElicitationFormMode", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p ElicitationFormModeSessionVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p ElicitationFormModeRequestVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
+type ElicitationID string
+
+func (v ElicitationID) MarshalJSON() ([]byte, error) {
+	type plain ElicitationID
+	return marshalValue("ElicitationId", plain(v))
+}
+func (v *ElicitationID) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationId", b); err != nil {
+		return err
+	}
+	type plain ElicitationID
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationID(p)
+	return nil
+}
+
+// ElicitationPropertySchema holds one of its concrete variant types in Value.
+type ElicitationPropertySchema struct{ Value any }
+type ElicitationPropertySchemaStringVariant struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[string]           `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Enum        Optional[[]string]         `json:"enum"`
+	Format      Optional[StringFormat]     `json:"format"`
+	MaxLength   Optional[int64]            `json:"maxLength"`
+	MinLength   Optional[int64]            `json:"minLength"`
+	OneOf       Optional[[]EnumOption]     `json:"oneOf"`
+	Pattern     Optional[string]           `json:"pattern"`
+	Title       Optional[string]           `json:"title"`
+	Type        string                     `json:"type"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationPropertySchemaStringVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationPropertySchema/0", v)
+}
+func (v *ElicitationPropertySchemaStringVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationPropertySchemaStringVariant
+	var p plain
+	if err := unmarshalObject("ElicitationPropertySchema/0", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationPropertySchemaStringVariant(p)
+	return nil
+}
+
+type ElicitationPropertySchemaNumberVariant struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[float64]          `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Maximum     Optional[float64]          `json:"maximum"`
+	Minimum     Optional[float64]          `json:"minimum"`
+	Title       Optional[string]           `json:"title"`
+	Type        string                     `json:"type"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationPropertySchemaNumberVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationPropertySchema/1", v)
+}
+func (v *ElicitationPropertySchemaNumberVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationPropertySchemaNumberVariant
+	var p plain
+	if err := unmarshalObject("ElicitationPropertySchema/1", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationPropertySchemaNumberVariant(p)
+	return nil
+}
+
+type ElicitationPropertySchemaIntegerVariant struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[int64]            `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Maximum     Optional[int64]            `json:"maximum"`
+	Minimum     Optional[int64]            `json:"minimum"`
+	Title       Optional[string]           `json:"title"`
+	Type        string                     `json:"type"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationPropertySchemaIntegerVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationPropertySchema/2", v)
+}
+func (v *ElicitationPropertySchemaIntegerVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationPropertySchemaIntegerVariant
+	var p plain
+	if err := unmarshalObject("ElicitationPropertySchema/2", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationPropertySchemaIntegerVariant(p)
+	return nil
+}
+
+type ElicitationPropertySchemaBooleanVariant struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[bool]             `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Title       Optional[string]           `json:"title"`
+	Type        string                     `json:"type"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationPropertySchemaBooleanVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationPropertySchema/3", v)
+}
+func (v *ElicitationPropertySchemaBooleanVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationPropertySchemaBooleanVariant
+	var p plain
+	if err := unmarshalObject("ElicitationPropertySchema/3", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationPropertySchemaBooleanVariant(p)
+	return nil
+}
+
+type ElicitationPropertySchemaArrayVariant struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[[]string]         `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Items       MultiSelectItems           `json:"items"`
+	MaxItems    Optional[uint64]           `json:"maxItems"`
+	MinItems    Optional[uint64]           `json:"minItems"`
+	Title       Optional[string]           `json:"title"`
+	Type        string                     `json:"type"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationPropertySchemaArrayVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationPropertySchema/4", v)
+}
+func (v *ElicitationPropertySchemaArrayVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationPropertySchemaArrayVariant
+	var p plain
+	if err := unmarshalObject("ElicitationPropertySchema/4", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationPropertySchemaArrayVariant(p)
+	return nil
+}
+
+type ElicitationPropertySchemaOtherVariant struct {
+	Type  string                     `json:"type"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationPropertySchemaOtherVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationPropertySchema/5", v)
+}
+func (v *ElicitationPropertySchemaOtherVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationPropertySchemaOtherVariant
+	var p plain
+	if err := unmarshalObject("ElicitationPropertySchema/5", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationPropertySchemaOtherVariant(p)
+	return nil
+}
+func (v ElicitationPropertySchema) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case ElicitationPropertySchemaStringVariant, *ElicitationPropertySchemaStringVariant, ElicitationPropertySchemaNumberVariant, *ElicitationPropertySchemaNumberVariant, ElicitationPropertySchemaIntegerVariant, *ElicitationPropertySchemaIntegerVariant, ElicitationPropertySchemaBooleanVariant, *ElicitationPropertySchemaBooleanVariant, ElicitationPropertySchemaArrayVariant, *ElicitationPropertySchemaArrayVariant, ElicitationPropertySchemaOtherVariant, *ElicitationPropertySchemaOtherVariant:
+		return marshalValue("ElicitationPropertySchema", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *ElicitationPropertySchema) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("ElicitationPropertySchema", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p ElicitationPropertySchemaStringVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p ElicitationPropertySchemaNumberVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 2:
+		var p ElicitationPropertySchemaIntegerVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 3:
+		var p ElicitationPropertySchemaBooleanVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 4:
+		var p ElicitationPropertySchemaArrayVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 5:
+		var p ElicitationPropertySchemaOtherVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
+type ElicitationRequestScope struct {
+	RequestID RequestID                  `json:"requestId"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationRequestScope) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationRequestScope", v)
+}
+func (v *ElicitationRequestScope) UnmarshalJSON(b []byte) error {
+	type plain ElicitationRequestScope
+	var p plain
+	if err := unmarshalObject("ElicitationRequestScope", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationRequestScope(p)
+	return nil
+}
+
+type ElicitationSchema struct {
+	Meta        Optional[json.RawMessage]       `json:"_meta"`
+	Description Optional[string]                `json:"description"`
+	Properties  Optional[json.RawMessage]       `json:"properties"`
+	Required    Optional[[]string]              `json:"required"`
+	Title       Optional[string]                `json:"title"`
+	Type        Optional[ElicitationSchemaType] `json:"type"`
+	Extra       map[string]json.RawMessage      `json:"-"`
+}
+
+func (v ElicitationSchema) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationSchema", v)
+}
+func (v *ElicitationSchema) UnmarshalJSON(b []byte) error {
+	type plain ElicitationSchema
+	var p plain
+	if err := unmarshalObject("ElicitationSchema", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationSchema(p)
+	return nil
+}
+
+type ElicitationSchemaType string
+
+func (v ElicitationSchemaType) MarshalJSON() ([]byte, error) {
+	type plain ElicitationSchemaType
+	return marshalValue("ElicitationSchemaType", plain(v))
+}
+func (v *ElicitationSchemaType) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("ElicitationSchemaType", b); err != nil {
+		return err
+	}
+	type plain ElicitationSchemaType
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationSchemaType(p)
+	return nil
+}
+
+const ElicitationSchemaTypeObject ElicitationSchemaType = "object"
+
+type ElicitationSessionScope struct {
+	SessionID  SessionID                  `json:"sessionId"`
+	ToolCallID Optional[ToolCallID]       `json:"toolCallId"`
+	Extra      map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationSessionScope) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationSessionScope", v)
+}
+func (v *ElicitationSessionScope) UnmarshalJSON(b []byte) error {
+	type plain ElicitationSessionScope
+	var p plain
+	if err := unmarshalObject("ElicitationSessionScope", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationSessionScope(p)
+	return nil
+}
+
 type ElicitationURLCapabilities struct {
 	Meta  Optional[json.RawMessage]  `json:"_meta"`
 	Extra map[string]json.RawMessage `json:"-"`
@@ -858,6 +1665,78 @@ func (v *ElicitationURLCapabilities) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ElicitationURLCapabilities(p)
+	return nil
+}
+
+// ElicitationURLMode holds one of its concrete variant types in Value.
+type ElicitationURLMode struct{ Value any }
+type ElicitationURLModeSessionVariant struct {
+	ElicitationID ElicitationID              `json:"elicitationId"`
+	SessionID     SessionID                  `json:"sessionId"`
+	ToolCallID    Optional[ToolCallID]       `json:"toolCallId"`
+	URL           string                     `json:"url"`
+	Extra         map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationURLModeSessionVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationUrlMode/0", v)
+}
+func (v *ElicitationURLModeSessionVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationURLModeSessionVariant
+	var p plain
+	if err := unmarshalObject("ElicitationUrlMode/0", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationURLModeSessionVariant(p)
+	return nil
+}
+
+type ElicitationURLModeRequestVariant struct {
+	ElicitationID ElicitationID              `json:"elicitationId"`
+	RequestID     RequestID                  `json:"requestId"`
+	URL           string                     `json:"url"`
+	Extra         map[string]json.RawMessage `json:"-"`
+}
+
+func (v ElicitationURLModeRequestVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("ElicitationUrlMode/1", v)
+}
+func (v *ElicitationURLModeRequestVariant) UnmarshalJSON(b []byte) error {
+	type plain ElicitationURLModeRequestVariant
+	var p plain
+	if err := unmarshalObject("ElicitationUrlMode/1", b, &p); err != nil {
+		return err
+	}
+	*v = ElicitationURLModeRequestVariant(p)
+	return nil
+}
+func (v ElicitationURLMode) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case ElicitationURLModeSessionVariant, *ElicitationURLModeSessionVariant, ElicitationURLModeRequestVariant, *ElicitationURLModeRequestVariant:
+		return marshalValue("ElicitationUrlMode", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *ElicitationURLMode) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("ElicitationUrlMode", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p ElicitationURLModeSessionVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p ElicitationURLModeRequestVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
 	return nil
 }
 
@@ -949,6 +1828,25 @@ func (v *EmbeddedResourceResource) UnmarshalJSON(b []byte) error {
 		}
 		v.Value = p
 	}
+	return nil
+}
+
+type EnumOption struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Const       string                     `json:"const"`
+	Description Optional[string]           `json:"description"`
+	Title       string                     `json:"title"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v EnumOption) MarshalJSON() ([]byte, error) { return marshalObject("EnumOption", v) }
+func (v *EnumOption) UnmarshalJSON(b []byte) error {
+	type plain EnumOption
+	var p plain
+	if err := unmarshalObject("EnumOption", b, &p); err != nil {
+		return err
+	}
+	*v = EnumOption(p)
 	return nil
 }
 
@@ -1087,6 +1985,71 @@ func (v *InitializeResponse) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = InitializeResponse(p)
+	return nil
+}
+
+type IntegerPropertySchema struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[int64]            `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Maximum     Optional[int64]            `json:"maximum"`
+	Minimum     Optional[int64]            `json:"minimum"`
+	Title       Optional[string]           `json:"title"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v IntegerPropertySchema) MarshalJSON() ([]byte, error) {
+	return marshalObject("IntegerPropertySchema", v)
+}
+func (v *IntegerPropertySchema) UnmarshalJSON(b []byte) error {
+	type plain IntegerPropertySchema
+	var p plain
+	if err := unmarshalObject("IntegerPropertySchema", b, &p); err != nil {
+		return err
+	}
+	*v = IntegerPropertySchema(p)
+	return nil
+}
+
+type LoadSessionRequest struct {
+	Meta                  Optional[json.RawMessage]  `json:"_meta"`
+	AdditionalDirectories Optional[[]string]         `json:"additionalDirectories"`
+	CWD                   string                     `json:"cwd"`
+	MCPServers            []MCPServer                `json:"mcpServers"`
+	SessionID             SessionID                  `json:"sessionId"`
+	Extra                 map[string]json.RawMessage `json:"-"`
+}
+
+func (v LoadSessionRequest) MarshalJSON() ([]byte, error) {
+	return marshalObject("LoadSessionRequest", v)
+}
+func (v *LoadSessionRequest) UnmarshalJSON(b []byte) error {
+	type plain LoadSessionRequest
+	var p plain
+	if err := unmarshalObject("LoadSessionRequest", b, &p); err != nil {
+		return err
+	}
+	*v = LoadSessionRequest(p)
+	return nil
+}
+
+type LoadSessionResponse struct {
+	Meta          Optional[json.RawMessage]       `json:"_meta"`
+	ConfigOptions Optional[[]SessionConfigOption] `json:"configOptions"`
+	Modes         Optional[SessionModeState]      `json:"modes"`
+	Extra         map[string]json.RawMessage      `json:"-"`
+}
+
+func (v LoadSessionResponse) MarshalJSON() ([]byte, error) {
+	return marshalObject("LoadSessionResponse", v)
+}
+func (v *LoadSessionResponse) UnmarshalJSON(b []byte) error {
+	type plain LoadSessionResponse
+	var p plain
+	if err := unmarshalObject("LoadSessionResponse", b, &p); err != nil {
+		return err
+	}
+	*v = LoadSessionResponse(p)
 	return nil
 }
 
@@ -1300,6 +2263,124 @@ func (v *MessageID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MultiSelectItems holds one of its concrete variant types in Value.
+type MultiSelectItems struct{ Value any }
+type MultiSelectItemsStringVariant struct {
+	Meta  Optional[json.RawMessage]  `json:"_meta"`
+	Enum  []string                   `json:"enum"`
+	Type  string                     `json:"type"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v MultiSelectItemsStringVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("MultiSelectItems/0", v)
+}
+func (v *MultiSelectItemsStringVariant) UnmarshalJSON(b []byte) error {
+	type plain MultiSelectItemsStringVariant
+	var p plain
+	if err := unmarshalObject("MultiSelectItems/0", b, &p); err != nil {
+		return err
+	}
+	*v = MultiSelectItemsStringVariant(p)
+	return nil
+}
+
+type MultiSelectItemsOtherVariant struct {
+	Type  string                     `json:"type"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v MultiSelectItemsOtherVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("MultiSelectItems/1", v)
+}
+func (v *MultiSelectItemsOtherVariant) UnmarshalJSON(b []byte) error {
+	type plain MultiSelectItemsOtherVariant
+	var p plain
+	if err := unmarshalObject("MultiSelectItems/1", b, &p); err != nil {
+		return err
+	}
+	*v = MultiSelectItemsOtherVariant(p)
+	return nil
+}
+
+type MultiSelectItemsTitledVariant struct {
+	Meta  Optional[json.RawMessage]  `json:"_meta"`
+	AnyOf []EnumOption               `json:"anyOf"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v MultiSelectItemsTitledVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("MultiSelectItems/2", v)
+}
+func (v *MultiSelectItemsTitledVariant) UnmarshalJSON(b []byte) error {
+	type plain MultiSelectItemsTitledVariant
+	var p plain
+	if err := unmarshalObject("MultiSelectItems/2", b, &p); err != nil {
+		return err
+	}
+	*v = MultiSelectItemsTitledVariant(p)
+	return nil
+}
+func (v MultiSelectItems) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case MultiSelectItemsStringVariant, *MultiSelectItemsStringVariant, MultiSelectItemsOtherVariant, *MultiSelectItemsOtherVariant, MultiSelectItemsTitledVariant, *MultiSelectItemsTitledVariant:
+		return marshalValue("MultiSelectItems", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *MultiSelectItems) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("MultiSelectItems", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p MultiSelectItemsStringVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p MultiSelectItemsOtherVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 2:
+		var p MultiSelectItemsTitledVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
+type MultiSelectPropertySchema struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[[]string]         `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Items       MultiSelectItems           `json:"items"`
+	MaxItems    Optional[uint64]           `json:"maxItems"`
+	MinItems    Optional[uint64]           `json:"minItems"`
+	Title       Optional[string]           `json:"title"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v MultiSelectPropertySchema) MarshalJSON() ([]byte, error) {
+	return marshalObject("MultiSelectPropertySchema", v)
+}
+func (v *MultiSelectPropertySchema) UnmarshalJSON(b []byte) error {
+	type plain MultiSelectPropertySchema
+	var p plain
+	if err := unmarshalObject("MultiSelectPropertySchema", b, &p); err != nil {
+		return err
+	}
+	*v = MultiSelectPropertySchema(p)
+	return nil
+}
+
 type NewSessionRequest struct {
 	Meta                  Optional[json.RawMessage]  `json:"_meta"`
 	AdditionalDirectories Optional[[]string]         `json:"additionalDirectories"`
@@ -1400,6 +2481,29 @@ func (v *NoticeSeverity) UnmarshalJSON(b []byte) error {
 const NoticeSeverityError NoticeSeverity = "error"
 const NoticeSeverityInfo NoticeSeverity = "info"
 const NoticeSeverityWarning NoticeSeverity = "warning"
+
+type NumberPropertySchema struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[float64]          `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Maximum     Optional[float64]          `json:"maximum"`
+	Minimum     Optional[float64]          `json:"minimum"`
+	Title       Optional[string]           `json:"title"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v NumberPropertySchema) MarshalJSON() ([]byte, error) {
+	return marshalObject("NumberPropertySchema", v)
+}
+func (v *NumberPropertySchema) UnmarshalJSON(b []byte) error {
+	type plain NumberPropertySchema
+	var p plain
+	if err := unmarshalObject("NumberPropertySchema", b, &p); err != nil {
+		return err
+	}
+	*v = NumberPropertySchema(p)
+	return nil
+}
 
 type PermissionOption struct {
 	Meta     Optional[json.RawMessage]  `json:"_meta"`
@@ -1617,6 +2721,100 @@ func (v *ProtocolVersion) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ProtocolVersion(p)
+	return nil
+}
+
+// RequestID holds one of its concrete variant types in Value.
+type RequestID struct{ Value any }
+type RequestIDNullVariant json.RawMessage
+
+func (v RequestIDNullVariant) MarshalJSON() ([]byte, error) {
+	type plain RequestIDNullVariant
+	return marshalValue("RequestId/0", plain(v))
+}
+func (v *RequestIDNullVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("RequestId/0", b); err != nil {
+		return err
+	}
+	type plain RequestIDNullVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = RequestIDNullVariant(p)
+	return nil
+}
+
+type RequestIDNumberVariant int64
+
+func (v RequestIDNumberVariant) MarshalJSON() ([]byte, error) {
+	type plain RequestIDNumberVariant
+	return marshalValue("RequestId/1", plain(v))
+}
+func (v *RequestIDNumberVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("RequestId/1", b); err != nil {
+		return err
+	}
+	type plain RequestIDNumberVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = RequestIDNumberVariant(p)
+	return nil
+}
+
+type RequestIDStrVariant string
+
+func (v RequestIDStrVariant) MarshalJSON() ([]byte, error) {
+	type plain RequestIDStrVariant
+	return marshalValue("RequestId/2", plain(v))
+}
+func (v *RequestIDStrVariant) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("RequestId/2", b); err != nil {
+		return err
+	}
+	type plain RequestIDStrVariant
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = RequestIDStrVariant(p)
+	return nil
+}
+func (v RequestID) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case RequestIDNullVariant, *RequestIDNullVariant, RequestIDNumberVariant, *RequestIDNumberVariant, RequestIDStrVariant, *RequestIDStrVariant:
+		return marshalValue("RequestId", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *RequestID) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("RequestId", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p RequestIDNullVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p RequestIDNumberVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 2:
+		var p RequestIDStrVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
 	return nil
 }
 
@@ -2765,6 +3963,137 @@ func (v *SessionUpdate) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// SetSessionConfigOptionRequest holds one of its concrete variant types in Value.
+type SetSessionConfigOptionRequest struct{ Value any }
+type SetSessionConfigOptionRequestBooleanVariant struct {
+	Meta      Optional[json.RawMessage]  `json:"_meta"`
+	ConfigID  SessionConfigID            `json:"configId"`
+	SessionID SessionID                  `json:"sessionId"`
+	Type      string                     `json:"type"`
+	Value     bool                       `json:"value"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionConfigOptionRequestBooleanVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionConfigOptionRequest/0", v)
+}
+func (v *SetSessionConfigOptionRequestBooleanVariant) UnmarshalJSON(b []byte) error {
+	type plain SetSessionConfigOptionRequestBooleanVariant
+	var p plain
+	if err := unmarshalObject("SetSessionConfigOptionRequest/0", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionConfigOptionRequestBooleanVariant(p)
+	return nil
+}
+
+type SetSessionConfigOptionRequestValueIDVariant struct {
+	Meta      Optional[json.RawMessage]  `json:"_meta"`
+	ConfigID  SessionConfigID            `json:"configId"`
+	SessionID SessionID                  `json:"sessionId"`
+	Value     SessionConfigValueID       `json:"value"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionConfigOptionRequestValueIDVariant) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionConfigOptionRequest/1", v)
+}
+func (v *SetSessionConfigOptionRequestValueIDVariant) UnmarshalJSON(b []byte) error {
+	type plain SetSessionConfigOptionRequestValueIDVariant
+	var p plain
+	if err := unmarshalObject("SetSessionConfigOptionRequest/1", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionConfigOptionRequestValueIDVariant(p)
+	return nil
+}
+func (v SetSessionConfigOptionRequest) MarshalJSON() ([]byte, error) {
+	switch v.Value.(type) {
+	case SetSessionConfigOptionRequestBooleanVariant, *SetSessionConfigOptionRequestBooleanVariant, SetSessionConfigOptionRequestValueIDVariant, *SetSessionConfigOptionRequestValueIDVariant:
+		return marshalValue("SetSessionConfigOptionRequest", v.Value)
+	default:
+		return nil, errVariant
+	}
+}
+func (v *SetSessionConfigOptionRequest) UnmarshalJSON(b []byte) error {
+	i, err := selectVariant("SetSessionConfigOptionRequest", b)
+	if err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		var p SetSessionConfigOptionRequestBooleanVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	case 1:
+		var p SetSessionConfigOptionRequestValueIDVariant
+		if err := json.Unmarshal(b, &p); err != nil {
+			return err
+		}
+		v.Value = p
+	}
+	return nil
+}
+
+type SetSessionConfigOptionResponse struct {
+	Meta          Optional[json.RawMessage]  `json:"_meta"`
+	ConfigOptions []SessionConfigOption      `json:"configOptions"`
+	Extra         map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionConfigOptionResponse) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionConfigOptionResponse", v)
+}
+func (v *SetSessionConfigOptionResponse) UnmarshalJSON(b []byte) error {
+	type plain SetSessionConfigOptionResponse
+	var p plain
+	if err := unmarshalObject("SetSessionConfigOptionResponse", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionConfigOptionResponse(p)
+	return nil
+}
+
+type SetSessionModeRequest struct {
+	Meta      Optional[json.RawMessage]  `json:"_meta"`
+	ModeID    SessionModeID              `json:"modeId"`
+	SessionID SessionID                  `json:"sessionId"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionModeRequest) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionModeRequest", v)
+}
+func (v *SetSessionModeRequest) UnmarshalJSON(b []byte) error {
+	type plain SetSessionModeRequest
+	var p plain
+	if err := unmarshalObject("SetSessionModeRequest", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionModeRequest(p)
+	return nil
+}
+
+type SetSessionModeResponse struct {
+	Meta  Optional[json.RawMessage]  `json:"_meta"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v SetSessionModeResponse) MarshalJSON() ([]byte, error) {
+	return marshalObject("SetSessionModeResponse", v)
+}
+func (v *SetSessionModeResponse) UnmarshalJSON(b []byte) error {
+	type plain SetSessionModeResponse
+	var p plain
+	if err := unmarshalObject("SetSessionModeResponse", b, &p); err != nil {
+		return err
+	}
+	*v = SetSessionModeResponse(p)
+	return nil
+}
+
 type StopReason string
 
 func (v StopReason) MarshalJSON() ([]byte, error) {
@@ -2789,6 +4118,76 @@ const StopReasonEndTurn StopReason = "end_turn"
 const StopReasonMaxTokens StopReason = "max_tokens"
 const StopReasonMaxTurnRequests StopReason = "max_turn_requests"
 const StopReasonRefusal StopReason = "refusal"
+
+type StringFormat string
+
+func (v StringFormat) MarshalJSON() ([]byte, error) {
+	type plain StringFormat
+	return marshalValue("StringFormat", plain(v))
+}
+func (v *StringFormat) UnmarshalJSON(b []byte) error {
+	if err := ValidateJSON("StringFormat", b); err != nil {
+		return err
+	}
+	type plain StringFormat
+	var p plain
+	if err := unmarshalExact(b, &p); err != nil {
+		return err
+	}
+	*v = StringFormat(p)
+	return nil
+}
+
+const StringFormatDate StringFormat = "date"
+const StringFormatDateTime StringFormat = "date-time"
+const StringFormatEmail StringFormat = "email"
+const StringFormatURI StringFormat = "uri"
+
+type StringMultiSelectItems struct {
+	Meta  Optional[json.RawMessage]  `json:"_meta"`
+	Enum  []string                   `json:"enum"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v StringMultiSelectItems) MarshalJSON() ([]byte, error) {
+	return marshalObject("StringMultiSelectItems", v)
+}
+func (v *StringMultiSelectItems) UnmarshalJSON(b []byte) error {
+	type plain StringMultiSelectItems
+	var p plain
+	if err := unmarshalObject("StringMultiSelectItems", b, &p); err != nil {
+		return err
+	}
+	*v = StringMultiSelectItems(p)
+	return nil
+}
+
+type StringPropertySchema struct {
+	Meta        Optional[json.RawMessage]  `json:"_meta"`
+	Default     Optional[string]           `json:"default"`
+	Description Optional[string]           `json:"description"`
+	Enum        Optional[[]string]         `json:"enum"`
+	Format      Optional[StringFormat]     `json:"format"`
+	MaxLength   Optional[int64]            `json:"maxLength"`
+	MinLength   Optional[int64]            `json:"minLength"`
+	OneOf       Optional[[]EnumOption]     `json:"oneOf"`
+	Pattern     Optional[string]           `json:"pattern"`
+	Title       Optional[string]           `json:"title"`
+	Extra       map[string]json.RawMessage `json:"-"`
+}
+
+func (v StringPropertySchema) MarshalJSON() ([]byte, error) {
+	return marshalObject("StringPropertySchema", v)
+}
+func (v *StringPropertySchema) UnmarshalJSON(b []byte) error {
+	type plain StringPropertySchema
+	var p plain
+	if err := unmarshalObject("StringPropertySchema", b, &p); err != nil {
+		return err
+	}
+	*v = StringPropertySchema(p)
+	return nil
+}
 
 type Terminal struct {
 	Meta       Optional[json.RawMessage]  `json:"_meta"`
@@ -2862,6 +4261,25 @@ func (v *TextResourceContents) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = TextResourceContents(p)
+	return nil
+}
+
+type TitledMultiSelectItems struct {
+	Meta  Optional[json.RawMessage]  `json:"_meta"`
+	AnyOf []EnumOption               `json:"anyOf"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (v TitledMultiSelectItems) MarshalJSON() ([]byte, error) {
+	return marshalObject("TitledMultiSelectItems", v)
+}
+func (v *TitledMultiSelectItems) UnmarshalJSON(b []byte) error {
+	type plain TitledMultiSelectItems
+	var p plain
+	if err := unmarshalObject("TitledMultiSelectItems", b, &p); err != nil {
+		return err
+	}
+	*v = TitledMultiSelectItems(p)
 	return nil
 }
 
@@ -3158,6 +4576,7 @@ var supportedDefinitions = definitionSet([]string{
 	"AvailableCommandsUpdate",
 	"BlobResourceContents",
 	"BooleanConfigOptionCapabilities",
+	"BooleanPropertySchema",
 	"CancelNotification",
 	"ClientCapabilities",
 	"ClientSessionCapabilities",
@@ -3166,18 +4585,32 @@ var supportedDefinitions = definitionSet([]string{
 	"CompactionStatus",
 	"CompactionSummaryChunk",
 	"CompactionUpdate",
+	"CompleteElicitationNotification",
 	"ConfigOptionUpdate",
 	"Content",
 	"ContentBlock",
 	"ContentChunk",
 	"Cost",
+	"CreateElicitationRequest",
+	"CreateElicitationResponse",
 	"CurrentModeUpdate",
 	"Diff",
+	"ElicitationAcceptAction",
 	"ElicitationCapabilities",
+	"ElicitationContentValue",
 	"ElicitationFormCapabilities",
+	"ElicitationFormMode",
+	"ElicitationId",
+	"ElicitationPropertySchema",
+	"ElicitationRequestScope",
+	"ElicitationSchema",
+	"ElicitationSchemaType",
+	"ElicitationSessionScope",
 	"ElicitationUrlCapabilities",
+	"ElicitationUrlMode",
 	"EmbeddedResource",
 	"EmbeddedResourceResource",
+	"EnumOption",
 	"EnvVariable",
 	"FileSystemCapabilities",
 	"HttpHeader",
@@ -3185,6 +4618,9 @@ var supportedDefinitions = definitionSet([]string{
 	"Implementation",
 	"InitializeRequest",
 	"InitializeResponse",
+	"IntegerPropertySchema",
+	"LoadSessionRequest",
+	"LoadSessionResponse",
 	"LogoutCapabilities",
 	"McpCapabilities",
 	"McpServer",
@@ -3192,11 +4628,14 @@ var supportedDefinitions = definitionSet([]string{
 	"McpServerSse",
 	"McpServerStdio",
 	"MessageId",
+	"MultiSelectItems",
+	"MultiSelectPropertySchema",
 	"NewSessionRequest",
 	"NewSessionResponse",
 	"Notice",
 	"NoticeCapabilities",
 	"NoticeSeverity",
+	"NumberPropertySchema",
 	"PermissionOption",
 	"PermissionOptionId",
 	"PermissionOptionKind",
@@ -3208,6 +4647,7 @@ var supportedDefinitions = definitionSet([]string{
 	"PromptRequest",
 	"PromptResponse",
 	"ProtocolVersion",
+	"RequestId",
 	"RequestPermissionOutcome",
 	"RequestPermissionRequest",
 	"RequestPermissionResponse",
@@ -3238,11 +4678,19 @@ var supportedDefinitions = definitionSet([]string{
 	"SessionNotification",
 	"SessionResumeCapabilities",
 	"SessionUpdate",
+	"SetSessionConfigOptionRequest",
+	"SetSessionConfigOptionResponse",
+	"SetSessionModeRequest",
+	"SetSessionModeResponse",
 	"StopReason",
+	"StringFormat",
+	"StringMultiSelectItems",
+	"StringPropertySchema",
 	"Terminal",
 	"TerminalId",
 	"TextContent",
 	"TextResourceContents",
+	"TitledMultiSelectItems",
 	"ToolCall",
 	"ToolCallContent",
 	"ToolCallId",

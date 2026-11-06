@@ -20,6 +20,21 @@ func (c *Conn) CreateSession(ctx context.Context, request protocol.NewSessionReq
 	return callProtocol[protocol.NewSessionResponse](ctx, c, "session/new", request)
 }
 
+// LoadSession restores a session, including its preceding history notifications.
+func (c *Conn) LoadSession(ctx context.Context, request protocol.LoadSessionRequest) (protocol.LoadSessionResponse, error) {
+	return callProtocol[protocol.LoadSessionResponse](ctx, c, "session/load", request)
+}
+
+// SetSessionMode requests an application-defined mode at an idle boundary.
+func (c *Conn) SetSessionMode(ctx context.Context, request protocol.SetSessionModeRequest) (protocol.SetSessionModeResponse, error) {
+	return callProtocol[protocol.SetSessionModeResponse](ctx, c, "session/set_mode", request)
+}
+
+// SetSessionConfigOption selects an option offered by the session.
+func (c *Conn) SetSessionConfigOption(ctx context.Context, request protocol.SetSessionConfigOptionRequest) (protocol.SetSessionConfigOptionResponse, error) {
+	return callProtocol[protocol.SetSessionConfigOptionResponse](ctx, c, "session/set_config_option", request)
+}
+
 // Prompt waits for a prompt result and its preceding notifications. It does not
 // serialize prompts for a session. Context cancellation stops the local wait,
 // not remote work; cancellation during an active frame write closes the

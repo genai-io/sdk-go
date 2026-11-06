@@ -15,13 +15,24 @@ import (
 // values transfer ownership to Agent; do not mutate them after returning.
 // Storage, runtime cleanup, authorization, capability-dependent content and
 // MCP server handling belong to the application. Only advertise capabilities
-// implemented by these callbacks; optional protocol methods are not dispatched.
+// implemented by these callbacks; nil optional handlers return Method not found.
 type AgentHandlers struct {
 	// Initialize handles initialize and returns the agent's version and capabilities.
 	Initialize func(ctx context.Context, request protocol.InitializeRequest) (protocol.InitializeResponse, error)
 
 	// CreateSession handles session/new and returns an application-owned session ID.
 	CreateSession func(ctx context.Context, request protocol.NewSessionRequest) (protocol.NewSessionResponse, error)
+
+	// LoadSession optionally restores an existing session and replays its history.
+	// Its turn scopes updates to the loading session; callbacks must join work.
+	LoadSession func(context.Context, *Turn, protocol.LoadSessionRequest) (protocol.LoadSessionResponse, error)
+
+	// Configuration callbacks run only at idle session boundaries. Cancellation
+	// notifications never cancel a configuration change; shutdown cancels its ctx.
+	SetMode func(context.Context, protocol.SetSessionModeRequest) (protocol.SetSessionModeResponse, error)
+
+	// SetConfig changes one session option, not the entire configuration.
+	SetConfig func(context.Context, protocol.SetSessionConfigOptionRequest) (protocol.SetSessionConfigOptionResponse, error)
 
 	// Prompt handles session/prompt and returns its final stop reason. Use turn for
 	// updates and permissions; ctx is cancelled by session/cancel or shutdown.
@@ -45,6 +56,7 @@ type Agent struct {
 	handlers                  AgentHandlers
 	maxSessions               int
 	mu                        sync.Mutex
+	forms, urls               bool
 	initializing              bool
 	initialized               bool
 	initRequest, initResponse json.RawMessage
@@ -53,8 +65,9 @@ type Agent struct {
 }
 
 type agentSession struct {
-	ready bool
-	turn  *Turn
+	ready       bool
+	configuring bool
+	turn        *Turn
 }
 
 // NewAgent starts the typed endpoint. All three callbacks are required. The
@@ -148,11 +161,15 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 				defer a.mu.Unlock()
 				a.initializing = false
 				if encoded != nil {
+					a.forms, a.urls = elicitationCapabilities(req)
 					a.initialized = true
 					a.initRequest = append(json.RawMessage(nil), m.params...)
 					a.initResponse = encoded
 				}
 			}
+	}
+	if m.method == "session/load" || m.method == "session/set_mode" || m.method == "session/set_config_option" {
+		return a.admitSessionChange(c, m)
 	}
 	if m.method != "session/new" && m.method != "session/prompt" {
 		return agentReject(-32601, "Method not found")
@@ -205,11 +222,11 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 	if session == nil || !session.ready {
 		return agentReject(-32002, "Unknown session")
 	}
-	if session.turn != nil {
-		return agentReject(-32001, "Prompt already active")
+	if session.turn != nil || session.configuring {
+		return agentReject(-32001, "Session busy")
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
-	turn := &Turn{conn: c, sessionID: req.SessionID, ctx: ctx, cancel: cancel}
+	turn := &Turn{conn: c, sessionID: req.SessionID, ctx: ctx, cancel: cancel, forms: a.forms, urls: a.urls}
 	session.turn = turn
 	return func() (any, error) {
 			defer turn.finish()
@@ -251,13 +268,14 @@ var ErrTurnFinished = errors.New("acp: turn finished")
 // returning; Agent joins admitted outbound calls, not arbitrary application work.
 // Once Prompt returns, new outbound calls fail with ErrTurnFinished.
 type Turn struct {
-	conn      *Conn
-	sessionID protocol.SessionID
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	finished  bool
-	work      sync.WaitGroup
+	forms, urls bool
+	conn        *Conn
+	sessionID   protocol.SessionID
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	finished    bool
+	work        sync.WaitGroup
 }
 
 func (t *Turn) begin() error {

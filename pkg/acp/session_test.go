@@ -38,7 +38,7 @@ func TestAgentModeBoundaryDoesNotCancelChange(t *testing.T) {
 	ctx := testContext(t)
 	h := agentHandlers()
 	entered, release := make(chan context.Context, 1), make(chan struct{})
-	h.SetSessionMode = func(ctx context.Context, req protocol.SetSessionModeRequest) (protocol.SetSessionModeResponse, error) {
+	h.SetMode = func(ctx context.Context, req protocol.SetSessionModeRequest) (protocol.SetSessionModeResponse, error) {
 		entered <- ctx
 		<-release
 		return protocol.SetSessionModeResponse{}, ctx.Err()
@@ -59,6 +59,22 @@ func TestAgentModeBoundaryDoesNotCancelChange(t *testing.T) {
 	equalJSON(t, p.read(t, ctx)["result"], `{}`)
 	p.send(t, ctx, agentRequest("prompt2", "session/prompt", promptParams))
 	equalJSON(t, p.read(t, ctx)["result"], `{"stopReason":"end_turn"}`)
+}
+
+func TestAgentSetConfigWireMethod(t *testing.T) {
+	ctx := testContext(t)
+	h := agentHandlers()
+	h.SetConfig = func(_ context.Context, req protocol.SetSessionConfigOptionRequest) (protocol.SetSessionConfigOptionResponse, error) {
+		v, ok := req.Value.(protocol.SetSessionConfigOptionRequestValueIDVariant)
+		if !ok || v.SessionID != "s" || v.ConfigID != "model" || v.Value != "other" {
+			t.Errorf("unexpected configuration request: %#v", req)
+		}
+		return protocol.SetSessionConfigOptionResponse{ConfigOptions: []protocol.SessionConfigOption{}}, nil
+	}
+	_, p := rawAgent(t, ctx, h, acp.AgentOptions{})
+	agentReady(t, ctx, p)
+	p.send(t, ctx, agentRequest("config", "session/set_config_option", `{"sessionId":"s","configId":"model","value":"other"}`))
+	equalJSON(t, p.read(t, ctx)["result"], `{"configOptions":[]}`)
 }
 
 func TestAgentLoadReplaysBeforeAdmission(t *testing.T) {

@@ -49,7 +49,7 @@
 // Optional LoadSession reserves the requested identity and a session slot before
 // invoking application code. Its Turn permits ordered history replay. Failed
 // loads release the reservation at the response barrier; cleanup is application
-// owned. SetSessionMode and SetSessionConfigOption optionally admit idle-only
+// owned. SetMode and SetConfig optionally admit idle-only
 // changes, mutually exclusive with prompts and other changes through that barrier.
 // session/cancel affects a prompt or load, never a configuration callback; shutdown
 // cancels all callbacks. Nil optional handlers return method-not-found.

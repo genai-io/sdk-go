@@ -29,8 +29,10 @@ type AgentHandlers struct {
 
 	// Configuration callbacks run only at idle session boundaries. Cancellation
 	// notifications never cancel a configuration change; shutdown cancels its ctx.
-	SetSessionMode         func(context.Context, protocol.SetSessionModeRequest) (protocol.SetSessionModeResponse, error)
-	SetSessionConfigOption func(context.Context, protocol.SetSessionConfigOptionRequest) (protocol.SetSessionConfigOptionResponse, error)
+	SetMode func(context.Context, protocol.SetSessionModeRequest) (protocol.SetSessionModeResponse, error)
+
+	// SetConfig changes one session option, not the entire configuration.
+	SetConfig func(context.Context, protocol.SetSessionConfigOptionRequest) (protocol.SetSessionConfigOptionResponse, error)
 
 	// Prompt handles session/prompt and returns its final stop reason. Use turn for
 	// updates and permissions; ctx is cancelled by session/cancel or shutdown.

@@ -10,8 +10,8 @@ import (
 // Called with a.mu held. Reservations survive until the response write barrier.
 func (a *Agent) admitSessionChange(c *Conn, m message) (func() (any, error), func()) {
 	if (m.method == "session/load" && a.handlers.LoadSession == nil) ||
-		(m.method == "session/set_mode" && a.handlers.SetSessionMode == nil) ||
-		(m.method == "session/set_config_option" && a.handlers.SetSessionConfigOption == nil) {
+		(m.method == "session/set_mode" && a.handlers.SetMode == nil) ||
+		(m.method == "session/set_config_option" && a.handlers.SetConfig == nil) {
 		return agentReject(-32601, "Method not found")
 	}
 	if !a.initialized {
@@ -63,7 +63,7 @@ func (a *Agent) admitSessionChange(c *Conn, m message) (func() (any, error), fun
 			return agentReject(-32602, "Invalid mode parameters")
 		}
 		id = req.SessionID
-		invoke = func() (any, error) { return a.handlers.SetSessionMode(c.ctx, req) }
+		invoke = func() (any, error) { return a.handlers.SetMode(c.ctx, req) }
 	} else {
 		var req protocol.SetSessionConfigOptionRequest
 		if json.Unmarshal(m.params, &req) != nil {
@@ -77,7 +77,7 @@ func (a *Agent) admitSessionChange(c *Conn, m message) (func() (any, error), fun
 		default:
 			return agentReject(-32602, "Invalid configuration variant")
 		}
-		invoke = func() (any, error) { return a.handlers.SetSessionConfigOption(c.ctx, req) }
+		invoke = func() (any, error) { return a.handlers.SetConfig(c.ctx, req) }
 	}
 	session := a.sessions[id]
 	if session == nil || !session.ready {

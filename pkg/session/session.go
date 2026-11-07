@@ -37,12 +37,8 @@
 // it and Save the first k messages to the copy.
 //
 // A process killed mid-write leaves an unterminated last line, which reading
-// ignores and the next writer cuts off. A JSONL reader that holds no writer may
-// see a Save half done: take the writer before Load to resume.
-//
-// OpenSQLite is an optional experimental local database backend with the same
-// records and writer leases. Its Save is an atomic durable transaction, and
-// Records reads a fixed snapshot. Open continues to use JSONL unchanged.
+// ignores and the next writer cuts off. A reader that holds no writer may see
+// a Save half done: take the writer before Load to resume.
 package session
 
 import (
@@ -123,11 +119,8 @@ func conversation(records iter.Seq2[Record, error]) ([]ai.Message, error) {
 
 const ext = ".jsonl"
 
-// Store keeps sessions in a directory or an optional SQLite database.
-type Store struct {
-	dir string
-	sql *sqliteStore
-}
+// Store keeps sessions in a directory.
+type Store struct{ dir string }
 
 // Open returns a store rooted at dir, creating it if needed.
 func Open(dir string) (*Store, error) {
@@ -137,6 +130,10 @@ func Open(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// Close is a no-op: a directory store holds no resources. Writers must be
+// closed separately to flush their files and release their leases.
+func (s *Store) Close() error { return nil }
+
 // Load returns the session's conversation.
 func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
 	return conversation(s.Records(ctx, id))
@@ -145,9 +142,6 @@ func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
 // Records returns the session's records in the order they were written. An
 // unfinished last line is not one; a bad line anywhere else is an error.
 func (s *Store) Records(ctx context.Context, id string) iter.Seq2[Record, error] {
-	if s.sql != nil {
-		return s.sql.records(ctx, id)
-	}
 	return func(yield func(Record, error) bool) {
 		path, err := s.path(ctx, id)
 		if err != nil {
@@ -184,8 +178,16 @@ func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 			if end != nil {
 				*end += int64(len(line))
 			}
-			r, err := decodeRecord(line, id, int64(n))
-			if !yield(r, err) || err != nil {
+			var r Record
+			if err := json.Unmarshal(line, &r); err != nil {
+				yield(Record{}, fmt.Errorf("session: %s line %d: %w", id, n, err))
+				return
+			}
+			if r.Type == "" || r.Type == TypeMessage && r.Message == nil || r.Keep < 0 || r.Type == TypeApp && r.Name == "" {
+				yield(Record{}, fmt.Errorf("session: %s line %d: not a session record", id, n))
+				return
+			}
+			if !yield(r, nil) {
 				return
 			}
 		}
@@ -193,18 +195,6 @@ func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 			yield(Record{}, err)
 		}
 	}
-}
-
-// decodeRecord is shared by JSONL lines and SQLite event payloads.
-func decodeRecord(data []byte, id string, n int64) (Record, error) {
-	var r Record
-	if err := json.Unmarshal(data, &r); err != nil {
-		return Record{}, fmt.Errorf("session: %s line %d: %w", id, n, err)
-	}
-	if r.Type == "" || r.Type == TypeMessage && r.Message == nil || r.Keep < 0 || r.Type == TypeApp && r.Name == "" {
-		return Record{}, fmt.Errorf("session: %s line %d: not a session record", id, n)
-	}
-	return r, nil
 }
 
 // An unterminated tail may still be being written; only complete lines exist.
@@ -222,14 +212,24 @@ func completeLine(data []byte, atEOF bool) (int, []byte, error) {
 type Info struct {
 	ID      string
 	ModTime time.Time // when it was last written
-	Size    int64     // JSONL file bytes, or SQLite logical encoded record bytes
+	Size    int64     // file size in bytes
+}
+
+// Stat returns a session's file metadata without reading its records.
+func (s *Store) Stat(ctx context.Context, id string) (Info, error) {
+	path, err := s.path(ctx, id)
+	if err != nil {
+		return Info{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Info{}, notFound(id, err)
+	}
+	return Info{ID: id, ModTime: info.ModTime(), Size: info.Size()}, nil
 }
 
 // List returns every session, most recently written first.
 func (s *Store) List(ctx context.Context) ([]Info, error) {
-	if s.sql != nil {
-		return s.sql.list(ctx)
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -255,9 +255,6 @@ func (s *Store) List(ctx context.Context) ([]Info, error) {
 
 // Delete removes a session. It is ErrBusy while a writer holds it.
 func (s *Store) Delete(ctx context.Context, id string) (err error) {
-	if s.sql != nil {
-		return s.sql.delete(ctx, id)
-	}
 	path, err := s.path(ctx, id)
 	if err != nil {
 		return err
@@ -273,9 +270,6 @@ func (s *Store) Delete(ctx context.Context, id string) (err error) {
 // Fork copies session from into a new session to. It is an error for to to
 // exist already.
 func (s *Store) Fork(ctx context.Context, from, to string) (err error) {
-	if s.sql != nil {
-		return s.sql.fork(ctx, from, to)
-	}
 	src, err := s.path(ctx, from)
 	if err != nil {
 		return err
@@ -323,9 +317,6 @@ func writeSynced(path string, data []byte) error {
 // exist. It is ErrBusy while another writer, in this process or another,
 // holds it. Close gives it back.
 func (s *Store) Writer(ctx context.Context, id string) (*Writer, error) {
-	if s.sql != nil {
-		return s.sql.writer(ctx, id)
-	}
 	path, err := s.path(ctx, id)
 	if err != nil {
 		return nil, err
@@ -369,14 +360,11 @@ func open(path, id string) (*Writer, error) {
 
 // Writer appends to one session. Its methods are safe for concurrent use.
 type Writer struct {
-	sql    *sqliteStore
-	id     string
-	closed bool
-	mu     sync.Mutex
-	f      *os.File
-	lock   *fileLock
-	saved  [][]byte // the conversation as the file holds it, one encoding per message
-	err    error    // a failed write leaves the file unfit to append to
+	mu    sync.Mutex
+	f     *os.File
+	lock  *fileLock
+	saved [][]byte // the conversation as the file holds it, one encoding per message
+	err   error    // a failed write leaves the file unfit to append to
 }
 
 // Save makes the session hold msgs, appending only what differs from what it
@@ -392,7 +380,7 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.closed {
+	if w.f == nil {
 		return os.ErrClosed
 	}
 	now := time.Now()
@@ -413,11 +401,8 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	if err := w.write(lines...); err != nil {
 		return err
 	}
-	if err := w.sync(); err != nil {
-		return err
-	}
 	w.saved = encs
-	return nil
+	return w.sync()
 }
 
 func encode(msgs []ai.Message) ([][]byte, error) {
@@ -432,7 +417,7 @@ func encode(msgs []ai.Message) ([][]byte, error) {
 }
 
 // Append adds an app record called name, carrying data as JSON. It is durable
-// once Sync, a changed Save or Close follows; SQLite commits each Append durably itself.
+// once Sync, a changed Save or Close follows.
 func (w *Writer) Append(name string, data any) error {
 	if name == "" {
 		return errors.New("session: an app record needs a name")
@@ -447,7 +432,7 @@ func (w *Writer) Append(name string, data any) error {
 }
 
 func (w *Writer) write(records ...Record) error {
-	if w.closed {
+	if w.f == nil {
 		return os.ErrClosed
 	}
 	if w.err != nil {
@@ -461,12 +446,6 @@ func (w *Writer) write(records ...Record) error {
 			return fmt.Errorf("session: encoding %s: %w", r.Type, err)
 		}
 	}
-	if w.sql != nil {
-		return w.sql.append(w.id, buf.Bytes())
-	}
-	if w.f == nil {
-		return os.ErrClosed
-	}
 	if _, err := w.f.Write(buf.Bytes()); err != nil {
 		w.err = err
 		return err
@@ -474,21 +453,28 @@ func (w *Writer) write(records ...Record) error {
 	return nil
 }
 
+// Sync flushes prior appends to disk without changing the conversation.
+func (w *Writer) Sync() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sync()
+}
+
+func (w *Writer) sync() error {
+	if w.f == nil {
+		return os.ErrClosed
+	}
+	if w.err != nil {
+		return w.err
+	}
+	w.err = w.f.Sync()
+	return w.err
+}
+
 // Close flushes the session to disk and gives up the writer.
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.closed {
-		return nil
-	}
-	w.closed = true
-	if w.sql != nil {
-		err := w.lock.unlock()
-		w.sql.mu.Lock()
-		w.sql.writers--
-		w.sql.mu.Unlock()
-		return err
-	}
 	if w.f == nil {
 		return nil
 	}

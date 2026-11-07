@@ -214,6 +214,76 @@ func TestRefused(t *testing.T) {
 	}
 }
 
+func TestFileMetadataAndSync(t *testing.T) {
+	s, dir := open(t)
+	if _, err := s.Stat(ctx, "missing"); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("Stat missing = %v", err)
+	}
+	for _, id := range []string{"", "../escape", "a/b"} {
+		if _, err := s.Stat(ctx, id); err == nil {
+			t.Errorf("Stat(%q) accepted", id)
+		}
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.Stat(canceled, "a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Stat canceled = %v", err)
+	}
+	w := write(t, s, "a")
+	empty, err := s.Stat(ctx, "a")
+	if err != nil || empty.ID != "a" || empty.Size != 0 || empty.ModTime.IsZero() {
+		t.Fatalf("Stat empty = %+v, %v", empty, err)
+	}
+	if err := w.Append("note", "metadata"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Stat(ctx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Stat(filepath.Join(dir, "a.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size <= 0 || before.Size != file.Size() || !before.ModTime.Equal(file.ModTime()) {
+		t.Fatalf("Stat = %+v, file = %v", before, file)
+	}
+	list, err := s.List(ctx)
+	if err != nil || len(list) != 1 || list[0] != before {
+		t.Fatalf("List = %+v, %v; want %+v", list, err, before)
+	}
+	if err := w.Save(nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.Stat(ctx, "a")
+	if err != nil || after != before {
+		t.Fatalf("no-op Save changed metadata: %+v, %v", after, err)
+	}
+	// Store.Close holds no resources and must not release a writer's lease.
+	for range 2 {
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Writer(ctx, "a"); !errors.Is(err, session.ErrBusy) {
+		t.Fatalf("Store.Close released writer: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for name, err := range map[string]error{"Sync": w.Sync(), "Save": w.Save(nil), "Append": w.Append("note", 1)} {
+		if !errors.Is(err, os.ErrClosed) {
+			t.Errorf("%s after Close = %v", name, err)
+		}
+	}
+}
+
 func TestApply(t *testing.T) {
 	a := msg("1", "a")
 	var got []ai.Message

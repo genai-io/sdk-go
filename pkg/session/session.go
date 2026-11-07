@@ -130,6 +130,10 @@ func Open(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// Close is a no-op: a directory store holds no resources. Writers must be
+// closed separately to flush their files and release their leases.
+func (s *Store) Close() error { return nil }
+
 // Load returns the session's conversation.
 func (s *Store) Load(ctx context.Context, id string) ([]ai.Message, error) {
 	return conversation(s.Records(ctx, id))
@@ -204,10 +208,24 @@ func completeLine(data []byte, atEOF bool) (int, []byte, error) {
 	return 0, nil, nil
 }
 
-// Info is a session as List reports it.
+// Info is the metadata returned by List and Stat.
 type Info struct {
 	ID      string
 	ModTime time.Time // when it was last written
+	Size    int64     // file size in bytes
+}
+
+// Stat returns a session's file metadata without reading its records.
+func (s *Store) Stat(ctx context.Context, id string) (Info, error) {
+	path, err := s.path(ctx, id)
+	if err != nil {
+		return Info{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Info{}, notFound(id, err)
+	}
+	return Info{ID: id, ModTime: info.ModTime(), Size: info.Size()}, nil
 }
 
 // List returns every session, most recently written first.
@@ -229,7 +247,7 @@ func (s *Store) List(ctx context.Context) ([]Info, error) {
 		if err != nil {
 			continue // removed while listing
 		}
-		out = append(out, Info{ID: id, ModTime: info.ModTime()})
+		out = append(out, Info{ID: id, ModTime: info.ModTime(), Size: info.Size()})
 	}
 	slices.SortFunc(out, func(a, b Info) int { return b.ModTime.Compare(a.ModTime) })
 	return out, nil
@@ -351,8 +369,9 @@ type Writer struct {
 
 // Save makes the session hold msgs, appending only what differs from what it
 // holds: the messages after the longest unchanged prefix, behind a truncate
-// to that prefix when anything after it changed. It flushes the session to
-// disk. Messages are compared by their encodings, so an edit that keeps its
+// to that prefix when anything after it changed. A changed save flushes the
+// session to disk; use Sync to flush app records after an unchanged save.
+// Messages are compared by their encodings, so an edit that keeps its
 // ID is saved, and a message read back from disk is not taken for an edit.
 func (w *Writer) Save(msgs []ai.Message) error {
 	encs, err := encode(msgs)
@@ -361,6 +380,9 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.f == nil {
+		return os.ErrClosed
+	}
 	now := time.Now()
 	keep := 0
 	for keep < min(len(w.saved), len(encs)) && bytes.Equal(w.saved[keep], encs[keep]) {
@@ -380,10 +402,7 @@ func (w *Writer) Save(msgs []ai.Message) error {
 		return err
 	}
 	w.saved = encs
-	if err := w.f.Sync(); err != nil {
-		w.err = err
-	}
-	return w.err
+	return w.sync()
 }
 
 func encode(msgs []ai.Message) ([][]byte, error) {
@@ -397,8 +416,8 @@ func encode(msgs []ai.Message) ([][]byte, error) {
 	return encs, nil
 }
 
-// Append adds an app record called name, carrying data as JSON. It is on
-// disk once a Save or Close follows.
+// Append adds an app record called name, carrying data as JSON. It is durable
+// once Sync, a changed Save or Close follows.
 func (w *Writer) Append(name string, data any) error {
 	if name == "" {
 		return errors.New("session: an app record needs a name")
@@ -413,6 +432,9 @@ func (w *Writer) Append(name string, data any) error {
 }
 
 func (w *Writer) write(records ...Record) error {
+	if w.f == nil {
+		return os.ErrClosed
+	}
 	if w.err != nil {
 		return w.err
 	}
@@ -424,14 +446,29 @@ func (w *Writer) write(records ...Record) error {
 			return fmt.Errorf("session: encoding %s: %w", r.Type, err)
 		}
 	}
-	if w.f == nil {
-		return os.ErrClosed
-	}
 	if _, err := w.f.Write(buf.Bytes()); err != nil {
 		w.err = err
 		return err
 	}
 	return nil
+}
+
+// Sync flushes prior appends to disk without changing the conversation.
+func (w *Writer) Sync() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sync()
+}
+
+func (w *Writer) sync() error {
+	if w.f == nil {
+		return os.ErrClosed
+	}
+	if w.err != nil {
+		return w.err
+	}
+	w.err = w.f.Sync()
+	return w.err
 }
 
 // Close flushes the session to disk and gives up the writer.

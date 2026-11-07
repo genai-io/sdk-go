@@ -383,6 +383,11 @@ for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 
 `pkg/session` 给每份对话一个只追加的文件，应用自己的记录也写在消息旁边。
 
+`Store.Stat` 无需重放记录即可返回会话文件的大小和修改时间，`List` 返回的 `Info` 也包含
+相同元数据。`Writer.Sync` 可以在不改变对话的情况下将追加的应用记录刷入磁盘。有变化的
+`Save` 和 `Writer.Close` 也会刷盘；无变化的 `Save` 仍为空操作，不会同步。
+目录存储的 `Store.Close` 是空操作，不会关闭 writer；应分别关闭每个 writer，完成刷盘并释放租约。
+
 压缩不需要任何额外处理：下一次保存存的就是压缩后的对话。
 
 事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；

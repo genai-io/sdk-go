@@ -473,6 +473,13 @@ complete records through a reusable buffer; opening a writer does not buffer the
 whole log. A partial final record is ignored by readers and removed by the next
 writer, while a malformed complete record fails without changing the file.
 
+`Store.Stat` returns a session's file size and modification time without replaying
+its records; `List` includes the same metadata in `Info`. Use `Writer.Sync` to
+flush appended app records without changing the conversation. A changed `Save`
+and `Writer.Close` also flush the file; an unchanged `Save` remains a no-op and
+does not sync. `Store.Close` is a no-op for directory stores and does not close
+writers: close each writer to flush its file and release its lease.
+
 Compaction needs nothing more: the next save is the compacted conversation.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition

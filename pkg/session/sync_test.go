@@ -31,13 +31,13 @@ func TestUnchangedSaveDoesNotSync(t *testing.T) {
 	if !errors.Is(failure, os.ErrClosed) {
 		t.Fatalf("Sync = %v, want closed file error", failure)
 	}
-	if err := w.Sync(); err != failure {
+	if err := w.Sync(); !errors.Is(err, failure) {
 		t.Fatalf("Sync lost sticky error: %v", err)
 	}
-	if err := w.Save(nil); err != failure {
+	if err := w.Save(nil); !errors.Is(err, failure) {
 		t.Fatalf("Save lost sticky error: %v", err)
 	}
-	if err := w.Append("note", 2); err != failure {
+	if err := w.Append("note", 2); !errors.Is(err, failure) {
 		t.Fatalf("Append lost sticky error: %v", err)
 	}
 }

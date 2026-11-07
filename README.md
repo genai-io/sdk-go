@@ -473,6 +473,19 @@ complete records through a reusable buffer; opening a writer does not buffer the
 whole log. A partial final record is ignored by readers and removed by the next
 writer, while a malformed complete record fails without changing the file.
 
+`OpenSQLite(path)` is an opt-in local backend with the same native records and
+writer API. It uses shared session/event tables, atomic Save/Fork, WAL and FULL
+synchronous commits (including fullfsync where supported). JSONL `Open(dir)` stays
+the default; neither constructor imports the other format. SQLite has one concurrent
+write transaction; per-session leases are separate OS locks. Symlink paths are
+canonicalized; hard-link aliases and network filesystems are unsupported.
+
+`Stat` returns per-session size/mtime, not shared database-file metadata. Call
+`Store.Close` after all writers close. JSONL appends become durable after `Sync`,
+a changed Save or Close; SQLite appends commit durably themselves. An unchanged
+Save preserves JSONL's no-op behavior. The optional backend adds a pure-Go SQLite
+driver dependency; it is not a claim that every workload is faster.
+
 Compaction needs nothing more: the next save is the compacted conversation.
 
 See [the Agent SDK](docs/agent.md) for the event contract, the hook composition

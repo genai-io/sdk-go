@@ -383,6 +383,15 @@ for e, err := range a.Run(ctx, ai.UserMessage(line)) {
 
 `pkg/session` 给每份对话一个只追加的文件，应用自己的记录也写在消息旁边。
 
+`OpenSQLite(path)` 是显式选择的本地后端，复用原生记录和 writer API，使用共享会话/事件表、
+原子 Save/Fork、WAL 和 FULL 同步提交（支持时启用 fullfsync）。JSONL `Open(dir)` 仍为默认；
+两种构造器都不导入另一种格式。SQLite 同时只有一个写事务，会话租约由独立 OS 锁管理。
+符号链接路径会规范化；不支持硬链接别名或网络文件系统。
+
+`Stat` 返回每会话的大小/修改时间，而非共享数据库文件属性。关闭全部 writer 后再调用
+`Store.Close`。JSONL 追加在 `Sync`、有变化的 Save 或 Close 后持久化；SQLite 追加自行持久提交。
+无变化的 Save 保留 JSONL 的空操作行为。可选后端引入纯 Go SQLite 驱动依赖，不代表所有负载都更快。
+
 压缩不需要任何额外处理：下一次保存存的就是压缩后的对话。
 
 事件契约、hook 的组合规则、工具与会话，见 [Agent SDK](docs/agent.zh-CN.md)；

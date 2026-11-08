@@ -22,28 +22,26 @@ var (
 	ErrTail = errors.New("session: committed tail mismatch")
 )
 
-// Tail identifies a validated prefix. Its zero value denotes an empty log.
-// Hash binds the entire prefix; Sequence counts batches and Count cumulatively
-// counts all logical records, including truncates and app records (not the
-// current conversation length). The hash is integrity detection, not a MAC.
+// Tail identifies the end of the checked log; zero means empty. Sequence counts
+// batches, Count counts all records (not current messages), and Hash checks the
+// log so far for damage. It does not protect against deliberate rewriting.
 type Tail struct {
 	Sequence uint64 `json:"sequence"`
 	Count    uint64 `json:"count"`
 	Hash     string `json:"hash"`
 }
 
-// Batch is an atomic group of native session records. ID must be stable across
-// retries. Callers supply record timestamps; Commit never changes the payload.
-// Expected must equal the current tail for a new ID. For a retry, the original
-// Expected and identically JSON-encoded Records must be supplied.
+// Batch groups records so readers never see half the group. Expected must match
+// the current Tail for a new ID. Retry with the same ID, Expected and JSON-encoded
+// Records, including timestamps; Commit does not fill them in.
 type Batch struct {
 	ID       string   `json:"id"`
 	Expected Tail     `json:"previous"`
 	Records  []Record `json:"records"`
 }
 
-// Receipt identifies a complete validated batch. A receipt returned by Commit
-// additionally acknowledges successful file Sync, including on retry.
+// Receipt identifies a complete batch. Commit returns it after file Sync succeeds;
+// Batches can return it before the writer has finished Sync.
 type Receipt struct {
 	ID   string
 	Tail Tail
@@ -174,8 +172,7 @@ func (s *batchState) decode(line []byte) ([]Record, *CommittedBatch, error) {
 	return []Record{r}, nil, nil
 }
 
-// Tail returns the writer's last validated committed prefix. Legacy logs have
-// no committed tail and return ErrMode.
+// Tail returns the end of the checked batch log, or ErrMode for a legacy log.
 func (w *Writer) Tail() (Tail, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -191,15 +188,13 @@ func (w *Writer) Tail() (Tail, error) {
 	return w.batches.tail, nil
 }
 
-// Commit appends a whole batch, then Syncs before acknowledging it. Matching
-// retries are checked before Expected, and Sync again even after reopening.
-// Legacy Save/Append cannot be mixed with Commit in a nonempty session.
+// Commit writes a batch and syncs the file before returning success. An identical
+// retry syncs again without appending, even after reopening or later batches.
+// Do not mix Commit with Save/Append in one log, or edit b during the call.
 //
-// Unlocked readers can observe a complete batch before Sync returns: validated
-// visibility is not a durability acknowledgment. Cancellation or I/O failure
-// after writing starts is ambiguous, never a rollback. Such a writer is sticky
-// failed: close, reopen, and retry the same batch to resolve the outcome.
-// Inputs must not be mutated concurrently with this call.
+// Readers may see the complete batch before Sync finishes. An error after writing
+// starts does not mean nothing was saved: close the failed writer, reopen it and
+// retry the same batch. The failed writer will not accept more writes.
 func (w *Writer) Commit(ctx context.Context, b Batch) (Receipt, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -282,9 +277,8 @@ func (w *Writer) Commit(ctx context.Context, b Batch) (Receipt, error) {
 	return Receipt{b.ID, e.Tail}, nil
 }
 
-// Batches returns whole validated batches, never physical framing records.
-// Legacy logs return ErrMode. An incomplete final line is ignored. A receipt
-// here describes integrity, not whether another process has finished Sync.
+// Batches reads complete, checked batches, ignoring an unfinished last line.
+// Legacy logs return ErrMode. Reading a batch does not prove Sync has finished.
 func (s *Store) Batches(ctx context.Context, id string) iter.Seq2[CommittedBatch, error] {
 	return func(yield func(CommittedBatch, error) bool) {
 		path, err := s.path(ctx, id)

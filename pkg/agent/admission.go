@@ -8,11 +8,9 @@ import (
 	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
-// InferenceAdmission describes one finalized provider request, after client
-// defaults, PreInfer options, history repair and validation. Request is detached:
-// editing or retaining it does not change dispatch. Model identifies the selected
-// client, including routing changes made by PreInfer. Attempt starts at one per
-// step; neither it nor Turn is a durable globally unique execution identity.
+// InferenceAdmission contains the selected model and prepared request, after
+// options, hooks and history repair. Request is a copy; edits do not affect the
+// call. Attempt restarts at one each step; Turn/Attempt are not durable IDs.
 type InferenceAdmission struct {
 	Turn    int
 	Attempt int
@@ -20,40 +18,32 @@ type InferenceAdmission struct {
 	Request *ai.Request
 }
 
-// WithInferenceAdmission installs an owner-supplied boundary before each provider
-// dispatch (including retries). Failure is fatal, bypassing retry/recovery hooks.
-// InferenceStart is a notification, not evidence of admission or dispatch. A
-// successful admission cannot guarantee dispatch or exactly-once remote effects.
+// WithInferenceAdmission calls admit before each model call, including retries.
+// An error stops the turn without retry or recovery. InferenceStart is only a
+// notification; it does not mean the request was sent.
 func WithInferenceAdmission(admit func(context.Context, InferenceAdmission) error) Option {
 	return func(a *Agent) { a.admitInference = admit }
 }
 
-// ToolAdmission is a finalized, validated call after all permission gates and
-// argument rewrites. Call is a detached snapshot; editing it cannot change execution.
-// Turn and the model-supplied Call.ID are correlation values, not globally unique IDs.
+// ToolAdmission holds a copy of the checked tool call, after permissions and
+// argument rewrites. Edits do not affect execution; Call.ID is not a global ID.
 type ToolAdmission struct {
 	Turn int
 	Call ai.ToolCall
 }
 
-// WithToolAdmission installs an owner-supplied execution admission boundary.
-// Returning an error ends the turn, without running this tool or dispatching any
-// more tools in the batch. Already dispatched parallel tools are drained, not
-// rolled back. Admission runs serially on Run's goroutine, after gates and before
-// dispatch, independently of ToolStart (which still precedes gates).
-// Successful admission is not proof that execution occurred: cancellation or a
-// process failure can intervene. The owner supplies persistence and identity policy.
+// WithToolAdmission calls admit before running each allowed tool. An error stops
+// this and later calls in the batch; already-started tools finish, not roll back.
+// Callbacks run one at a time on Run's goroutine. ToolStart still precedes
+// permission checks; neither it nor a successful callback proves the tool ran.
 func WithToolAdmission(admit func(context.Context, ToolAdmission) error) Option {
 	return func(a *Agent) { a.admitTool = admit }
 }
 
-// OutputAdmission is a candidate model-visible output after post-hooks and after
-// assigning its message ID when WithMessageIDs is configured. Message is detached
-// from the conversation. Response,
-// when non-nil, is a detached successful inference response; otherwise Message
-// contains the complete tool-result batch in model order. Terminate is the batch's
-// final termination vote. These values let an owner commit output and completion
-// together before the SDK appends the message.
+// OutputAdmission holds copies of output after hooks, before it joins history.
+// WithMessageIDs assigns Message.ID first. Response accompanies model output;
+// otherwise Message contains the tool results in call order, and Terminate says
+// whether the batch ends the turn.
 type OutputAdmission struct {
 	Turn      int
 	Message   ai.Message
@@ -61,18 +51,16 @@ type OutputAdmission struct {
 	Terminate bool
 }
 
-// WithOutputAdmission installs an owner-supplied accepted-output boundary.
-// An error is fatal: the candidate is not appended, MessageAdded is not emitted,
-// and it is not sent to a later inference. Streaming fragments, InferenceEnd and
-// ToolEnd remain speculative notifications and may already have been delivered.
-// This is not a transaction over provider/tool effects, input messages, history
-// replacement, or TurnEnd. SetMessages and replay do not invoke it.
+// WithOutputAdmission calls admit before adding output to history. An error stops
+// the turn: no MessageAdded, and later model calls will not see that output.
+// Stream fragments and end notifications may already have reached the UI.
+// It does not cover inputs, history replacement or replay, or undo executed work.
 func WithOutputAdmission(admit func(context.Context, OutputAdmission) error) Option {
 	return func(a *Agent) { a.admitOutput = admit }
 }
 
-// AdmissionError identifies an owner boundary failure. It is never a model-facing
-// tool error and is never offered to inference retry/recovery hooks.
+// AdmissionError means an admission callback failed. It stops the turn instead
+// of becoming a tool result or triggering inference retry/recovery.
 type AdmissionError struct {
 	Boundary string
 	Err      error
@@ -115,8 +103,7 @@ func (a *Agent) acceptOutput(ctx context.Context, emit func(Event), msg ai.Messa
 		if err := a.admitOutput(ctx, OutputAdmission{Turn: a.turnNow(), Message: snapshot, Response: response, Terminate: terminate}); err != nil {
 			return ai.Message{}, &AdmissionError{Boundary: "output", Err: err}
 		}
-		// A successful durable commit remains accepted even if cancellation races
-		// with its return; do not leave the owner committed and the SDK unpublished.
+		// Once saved, add it to history even if cancellation just arrived.
 	}
 	a.add(emit, msg)
 	return msg, nil

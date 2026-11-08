@@ -8,24 +8,20 @@ import (
 	"iter"
 )
 
-// AdmissionError means dispatch was refused, not that the provider failed.
-// Callers must not automatically retry it as a provider/network error, even
-// when its cause is retryable. A successful admission does not prove dispatch
-// happened: cancellation or process death can still intervene.
+// AdmissionError means the callback stopped the request before it was sent.
+// It is not a provider failure and must not trigger a provider retry.
 type AdmissionError struct{ Err error }
 
 func (e *AdmissionError) Error() string { return fmt.Sprintf("ai: inference admission: %v", e.Err) }
 func (e *AdmissionError) Unwrap() error { return e.Err }
 
-// StreamAdmitted is Stream with a synchronous boundary after request preparation
-// and validation, before driver dispatch. admit receives a detached, JSON-normalized
-// snapshot of the SDK request (not provider wire bytes). Editing it cannot change
-// the dispatched request. It may contain sensitive input; persistence/redaction
-// policy belongs to the caller. A nil callback is equivalent to Stream.
+// StreamAdmitted calls admit with the prepared request before calling the model.
+// For example, admit can save a start record; an error stops the call and returns
+// AdmissionError. Nil admit behaves like Stream.
 //
-// Admission errors stop dispatch and are wrapped in AdmissionError. The callback
-// runs once per consumed iterator; replaying an iterator is a new invocation.
-// Streaming events remain speculative, not acceptance of durable output.
+// The callback gets a JSON-normalized copy, not wire bytes; edits cannot change
+// the request. Remove secrets before saving it. Each iteration makes a new call.
+// Cancellation can still stop a request after admit succeeds.
 func (c *Client) StreamAdmitted(ctx context.Context, messages []Message, admit func(context.Context, *Request) error, opts ...Option) iter.Seq2[Event, error] {
 	return c.stream(ctx, messages, admit, opts...)
 }

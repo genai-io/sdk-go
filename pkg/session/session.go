@@ -40,20 +40,17 @@
 // ignores and the next writer cuts off. A reader that holds no writer may see
 // a Save half done: take the writer before Load to resume.
 //
-// For atomic groups of records, start an empty session with Writer.Commit.
-// Batch sessions use versioned, integrity-chained, single-line envelopes, not
-// additional application record types. Records and Load transparently validate
-// and replay them; Batches preserves their boundaries and receipts. Legacy and
-// batch lines cannot be mixed, including after Fork. No automatic migration is
-// performed. Save and Append retain their legacy behavior on legacy sessions.
+// To write records as a group, use Writer.Commit on an empty session. Each batch
+// is one JSONL line with a checksum. Readers check the whole batch before returning
+// any of it: Records/Load read its contents; Batches keeps the groups. Do not mix
+// batch and Save/Append logs, including after Fork; nothing is migrated for you.
 //
-// Complete batch visibility is not a durability acknowledgment: a concurrent
-// reader can see a line before its writer finishes Sync. Commit acknowledges
-// only after file Sync succeeds. This is not a directory-sync or hardware
-// power-loss guarantee, nor an authentication scheme. A removed whole suffix
-// cannot be detected without an externally retained Tail. Readers validate the
-// prefix they consume, not unread later lines. Recovery under the writer lease
-// removes only an unterminated tail; a corrupt complete line is a hard error.
+// Commit returns success after file Sync. Readers can see a complete batch before
+// that finishes. Sync does not sync the directory or guarantee survival of power
+// loss. Checksums detect damage, not deliberate rewriting; detecting deletion of
+// whole trailing batches requires a separately saved Tail. Readers check only
+// what they read. The next writer cuts off an unfinished last line, but reports
+// an error for a corrupt complete line.
 package session
 
 import (

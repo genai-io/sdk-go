@@ -41,50 +41,40 @@ Events arrive on the ranging goroutine, so an agent that must run ahead of a
 slow reader is one whose caller forwards them to a buffer of its own — how
 deep, and what to drop when it fills, being theirs to decide.
 
-## Durable admission (optional)
+## Save before running (optional)
 
-UI events report activity; they are not persistence acknowledgements. An owner
-that must durably record work before dispatch can install narrow error-returning
-callbacks with `WithInferenceAdmission`, `WithToolAdmission`, and
-`WithOutputAdmission`. Without these options the existing loop is unchanged.
+Use admission callbacks when work must be recorded before it runs. The SDK calls
+your function; your application saves the record. An error stops the turn.
+Without these callbacks, the loop behaves as before.
 
-- **Inference admission** receives the selected model and a detached, finalized
-  SDK request, after `PreInfer`, client defaults, all options, history repair and
-  validation. Options run once. Each actual attempt, including retries, is
-  admitted before the provider driver is called. This is the SDK request, not
-  protocol-specific wire bytes; redact sensitive request data before storing it.
-- **Tool admission** receives a detached call after permission gates, argument
-  rewrites and final schema validation. Blocked or invalid calls are not admitted.
-  `ToolStart` still precedes gates: do not use that notification as dispatch proof.
-- **Output admission** receives the ID-assigned message after `PostInfer` or all
-  `PostTool` transformations. Inference output includes the response (usage and
-  stop reason); tool output is the entire result batch in model order plus its
-  termination vote. The owner can commit these together before `MessageAdded`,
-  history insertion, or any following inference sees the output. Use
-  `WithMessageIDs` to assign IDs if durable output identity is needed.
+```text
+prepare request / check tool -> callback -> call model / run tool
+                                  | error: stop, do not run
 
-Callbacks execute serially on the goroutine ranging over `Run`. An admission
-error is a fatal `TurnEnd.Err` (`*agent.AdmissionError`, supporting `errors.Is`),
-not a tool error for the model to retry. Inference rejection bypasses retry and
-recovery hooks. Cancellation is checked before dispatch; success is not proof of
-execution. Parallel tools already dispatched are drained, not rolled back; a
-failure prevents further admission/dispatch. Sequential tools are admitted one
-at a time after the previous tool finishes.
+output -> post-hooks -> callback -> history + MessageAdded -> next model call
+                          | error: stop, do not add output
+```
 
-Streaming fragments, `InferenceEnd`, and raw `ToolEnd` remain speculative UI
-notifications: output rejection does not retract them. Output admission protects
-model-visible conversation publication, not streaming rendering. A successful
-output commit is published even if cancellation races with its return. Pure
-history restoration (`SetMessages`), queued input, continuation prompts and
-history replacement do not invoke these boundaries; they are not a generic
-transaction over all conversation mutations or `TurnEnd`.
+| Option | What the callback receives |
+| --- | --- |
+| `WithInferenceAdmission` | Selected model and prepared SDK request, after options, hooks, repair and validation; called before each attempt, including retries. Not provider wire bytes. |
+| `WithToolAdmission` | Allowed tool call after argument rewrites and validation. Blocked calls do not reach it. |
+| `WithOutputAdmission` | Final assistant message plus response, or the tool results in call order plus the termination flag. `WithMessageIDs` assigns the message ID first. |
 
-The owner supplies durable identities and storage transactions. Turn/attempt
-numbers and model tool-call IDs are correlation values, not globally unique
-execution IDs. A process can fail after a successful commit and before dispatch,
-or after a remote effect and before output acceptance. These APIs do **not**
-provide exactly-once dispatch, rollback, or cross-system atomicity. Tests live in
-`pkg/agent/admission_test.go`; implementation is in `admission.go` and `run.go`.
+Inputs are copies; editing them does not change execution. Callbacks run one at
+a time on `Run`'s goroutine. Remove secrets before saving. Applications choose
+storage and durable IDs; turn/attempt numbers and tool-call IDs are not global IDs.
+
+Errors become `TurnEnd.Err` (`*agent.AdmissionError`), not provider retries or
+model-facing tool results. Already-started parallel tools are waited for, not
+undone. Start/end events and streamed text may already have reached the UI; they
+do not prove anything was saved. Successfully saved output joins history even
+if cancellation just arrived.
+
+This does not cover queued input, continuation prompts, history replacement or
+replay. A crash can happen between saving and running, or between running and
+saving the result: these callbacks cannot promise that work runs exactly once.
+Tests: `pkg/agent/admission_test.go`.
 
 ## Two levels, two words
 

@@ -45,7 +45,9 @@ deep, and what to drop when it fills, being theirs to decide.
 
 Use admission callbacks when work must be recorded before it runs. The SDK calls
 your function; your application saves the record. An error stops the turn.
-Without these callbacks, the loop behaves as before.
+Without these callbacks, there are no request snapshots or extra disk writes.
+Snapshots share immutable text and image strings, copying only mutable data.
+Saving still takes time: a callback that syncs to disk makes execution wait.
 
 ```text
 prepare request / check tool -> callback -> call model / run tool

@@ -84,27 +84,24 @@ func (a *Agent) admitToolCall(ctx context.Context, c ai.ToolCall) error {
 	return ctx.Err()
 }
 
-func (a *Agent) acceptOutput(ctx context.Context, emit func(Event), msg ai.Message, resp *ai.Response, terminate bool) (ai.Message, error) {
-	if a.admitOutput != nil {
-		if err := ctx.Err(); err != nil {
-			return ai.Message{}, err
-		}
-		if msg.ID == "" && a.mintID != nil {
-			msg.ID = a.mintID()
-		}
-		snapshot := msg
-		snapshot.Content = msg.Content.Clone()
-		var response *ai.Response
-		if resp != nil {
-			copy := *resp
-			copy.Content = resp.Content.Clone()
-			response = &copy
-		}
-		if err := a.admitOutput(ctx, OutputAdmission{Turn: a.turnNow(), Message: snapshot, Response: response, Terminate: terminate}); err != nil {
-			return ai.Message{}, &AdmissionError{Boundary: "output", Err: err}
-		}
-		// Once saved, add it to history even if cancellation just arrived.
+func (a *Agent) prepareOutput(ctx context.Context, msg ai.Message, resp *ai.Response, terminate bool) (ai.Message, error) {
+	if err := ctx.Err(); err != nil {
+		return ai.Message{}, err
 	}
-	a.add(emit, msg)
+	if msg.ID == "" && a.mintID != nil {
+		msg.ID = a.mintID()
+	}
+	snapshot := msg
+	snapshot.Content = msg.Content.Clone()
+	var response *ai.Response
+	if resp != nil {
+		copy := *resp
+		copy.Content = resp.Content.Clone()
+		response = &copy
+	}
+	if err := a.admitOutput(ctx, OutputAdmission{Turn: a.turnNow(), Message: snapshot, Response: response, Terminate: terminate}); err != nil {
+		return ai.Message{}, &AdmissionError{Boundary: "output", Err: err}
+	}
+	// Once saved, the caller adds it to history even if cancellation just arrived.
 	return msg, nil
 }

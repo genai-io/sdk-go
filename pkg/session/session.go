@@ -189,7 +189,13 @@ func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 				yield(Record{}, err)
 				return
 			}
-			for _, r := range group.Batch.Records {
+			if group.batch == nil {
+				if !yield(group.record, nil) {
+					return
+				}
+				continue
+			}
+			for _, r := range group.batch.Batch.Records {
 				if !yield(r, nil) {
 					return
 				}
@@ -198,9 +204,16 @@ func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 	}
 }
 
+// logLine holds either a legacy record or a committed batch. Keeping the
+// legacy case separate avoids allocating a one-record batch for every line.
+type logLine struct {
+	record Record
+	batch  *CommittedBatch
+}
+
 // scanLog validates a complete physical line before exposing any of its records.
-func scanLog(f io.Reader, id string, end *int64, state *batchState) iter.Seq2[*CommittedBatch, error] {
-	return func(yield func(*CommittedBatch, error) bool) {
+func scanLog(f io.Reader, id string, end *int64, state *batchState) iter.Seq2[logLine, error] {
+	return func(yield func(logLine, error) bool) {
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 4096), math.MaxInt)
 		scanner.Split(completeLine)
@@ -211,20 +224,17 @@ func scanLog(f io.Reader, id string, end *int64, state *batchState) iter.Seq2[*C
 			if end != nil {
 				*end += int64(len(line))
 			}
-			records, group, err := state.decode(line)
+			record, group, err := state.decode(line)
 			if err != nil {
-				yield(nil, fmt.Errorf("session: %s line %d: %w", id, n, err))
+				yield(logLine{}, fmt.Errorf("session: %s line %d: %w", id, n, err))
 				return
 			}
-			if group == nil {
-				group = &CommittedBatch{Batch: Batch{Records: records}}
-			}
-			if !yield(group, nil) {
+			if !yield(logLine{record: record, batch: group}, nil) {
 				return
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			yield(nil, err)
+			yield(logLine{}, err)
 		}
 	}
 }
@@ -386,12 +396,7 @@ func open(path, id string) (*Writer, error) {
 		if w.batches.mode == "batch" {
 			continue
 		} // accept already validates replay; Save is disabled.
-		for _, r := range group.Batch.Records {
-			msgs, err = r.Apply(msgs)
-			if err != nil {
-				break
-			}
-		}
+		msgs, err = group.record.Apply(msgs)
 		if err != nil {
 			break
 		}

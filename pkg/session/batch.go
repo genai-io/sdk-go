@@ -11,6 +11,9 @@ import (
 	"io"
 	"iter"
 	"os"
+	"time"
+
+	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 var (
@@ -64,6 +67,7 @@ type batchState struct {
 	tail     Tail
 	seen     map[string]Tail
 	messages int
+	wire     wireRecord // decode scratch, cleared before returning any record
 }
 
 func batchHash(b Batch, t Tail) (string, error) {
@@ -141,35 +145,51 @@ func (s *batchState) accept(e envelope) error {
 	return nil
 }
 
-func (s *batchState) decode(line []byte) ([]Record, *CommittedBatch, error) {
-	var tag map[string]json.RawMessage
-	if err := json.Unmarshal(line, &tag); err != nil {
-		return nil, nil, err
+// wireRecord decodes legacy fields and the batch discriminator together. Keep
+// the Record fields flat: embedding adds reflection work and allocations to
+// every legacy line. TestWireRecordFields guards their correspondence.
+type wireRecord struct {
+	Type    string          `json:"type"`
+	Time    time.Time       `json:"time"`
+	Message *ai.Message     `json:"message,omitempty"`
+	Keep    int             `json:"keep,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+	Version json.RawMessage `json:"batch_version"`
+}
+
+func (s *batchState) decode(line []byte) (Record, *CommittedBatch, error) {
+	// RawMessage distinguishes an absent tag from an explicit null. JSON
+	// decoding recognizes the tag regardless of order, whitespace, or escaping.
+	err := json.Unmarshal(line, &s.wire)
+	wire := s.wire
+	// Never reuse payload storage or retain the last decoded message. Returned
+	// records own their Message/Data even when this state decodes another line.
+	s.wire = wireRecord{}
+	if err != nil {
+		return Record{}, nil, err
 	}
-	if _, ok := tag["batch_version"]; ok {
+	if wire.Version != nil {
 		var e envelope
 		d := json.NewDecoder(bytes.NewReader(line))
 		d.DisallowUnknownFields()
 		if err := d.Decode(&e); err != nil {
-			return nil, nil, err
+			return Record{}, nil, err
 		}
 		if err := s.accept(e); err != nil {
-			return nil, nil, err
+			return Record{}, nil, err
 		}
-		return e.Batch.Records, &CommittedBatch{e.Batch, Receipt{e.Batch.ID, e.Tail}}, nil
+		return Record{}, &CommittedBatch{e.Batch, Receipt{e.Batch.ID, e.Tail}}, nil
 	}
 	if s.mode == "batch" {
-		return nil, nil, ErrMode
+		return Record{}, nil, ErrMode
 	}
-	var r Record
-	if err := json.Unmarshal(line, &r); err != nil {
-		return nil, nil, err
-	}
+	r := Record{Type: wire.Type, Time: wire.Time, Message: wire.Message, Keep: wire.Keep, Name: wire.Name, Data: wire.Data}
 	if err := validRecord(r); err != nil {
-		return nil, nil, err
+		return Record{}, nil, err
 	}
 	s.mode = "legacy"
-	return []Record{r}, nil, nil
+	return r, nil, nil
 }
 
 // Tail returns the end of the checked batch log, or ErrMode for a legacy log.
@@ -304,7 +324,7 @@ func (s *Store) Batches(ctx context.Context, id string) iter.Seq2[CommittedBatch
 				yield(CommittedBatch{}, err)
 				return
 			}
-			if !yield(*group, nil) {
+			if !yield(*group.batch, nil) {
 				return
 			}
 		}

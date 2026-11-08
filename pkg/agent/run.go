@@ -373,20 +373,13 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference, at
 	streamCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 
-	// Persistence admission is not provider silence. With admission enabled,
-	// arm the provider timer only once the owner has accepted dispatch.
-	var quiet *time.Timer
-	startTimer := func() {
-		quiet = time.AfterFunc(a.streamFirst, func() { stop(errStalled) })
+	// Start the provider timeout after admission, not while saving its record.
+	firstTimeout := a.streamFirst
+	if a.admitInference != nil {
+		firstTimeout = never
 	}
-	if a.admitInference == nil {
-		startTimer()
-	}
-	defer func() {
-		if quiet != nil {
-			quiet.Stop()
-		}
-	}()
+	quiet := time.AfterFunc(firstTimeout, func() { stop(errStalled) })
+	defer quiet.Stop()
 
 	var resp *ai.Response
 	var err error
@@ -398,7 +391,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference, at
 			}); err != nil {
 				return err
 			}
-			startTimer()
+			quiet.Reset(a.streamFirst)
 			return nil
 		}
 	}
@@ -421,10 +414,11 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference, at
 		}
 	}
 
-	var admissionErr *ai.AdmissionError
-	if errors.As(err, &admissionErr) {
-		// An owner failure is fatal even if a timeout races with its return.
-		return resp, err
+	if err != nil {
+		if _, ok := errors.AsType[*ai.AdmissionError](err); ok {
+			// An owner failure is fatal even if a timeout races with its return.
+			return resp, err
+		}
 	}
 	switch {
 	case errors.Is(context.Cause(streamCtx), errStalled):
@@ -789,11 +783,15 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			return out.failed(err)
 		}
 
-		msg, err := a.acceptOutput(turnCtx, emit, resp.Message(), resp, false)
-		if err != nil {
-			return out.failed(err)
+		msg := resp.Message()
+		if a.admitOutput != nil {
+			msg, err = a.prepareOutput(turnCtx, msg, resp, false)
+			if err != nil {
+				return out.failed(err)
+			}
 		}
 		out.Message = msg
+		a.add(emit, msg)
 
 		calls := msg.ToolCalls()
 		if len(calls) == 0 {
@@ -821,9 +819,14 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			// unanswered call is ai.Repair's to tidy on the next use.
 			return out.failed(err)
 		}
-		if _, err := a.acceptOutput(turnCtx, emit, ai.ToolResultsMessage(results...), nil, terminate); err != nil {
-			return out.failed(err)
+		resultMessage := ai.ToolResultsMessage(results...)
+		if a.admitOutput != nil {
+			resultMessage, err = a.prepareOutput(turnCtx, resultMessage, nil, terminate)
+			if err != nil {
+				return out.failed(err)
+			}
 		}
+		a.add(emit, resultMessage)
 		if terminate {
 			return out.stopped(StopTerminated)
 		}

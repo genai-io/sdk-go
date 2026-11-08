@@ -28,7 +28,10 @@ type Agent struct {
 	streamIdle  time.Duration
 	// mintID is nil when messages are not named. Called without the lock: it
 	// is the caller's code.
-	mintID func() string
+	mintID         func() string
+	admitTool      func(context.Context, ToolAdmission) error
+	admitOutput    func(context.Context, OutputAdmission) error
+	admitInference func(context.Context, InferenceAdmission) error
 
 	// mu guards everything below it.
 	mu       sync.Mutex

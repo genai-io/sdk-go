@@ -41,6 +41,43 @@ Events arrive on the ranging goroutine, so an agent that must run ahead of a
 slow reader is one whose caller forwards them to a buffer of its own — how
 deep, and what to drop when it fills, being theirs to decide.
 
+## Save before running (optional)
+
+Use admission callbacks when work must be recorded before it runs. The SDK calls
+your function; your application saves the record. An error stops the turn.
+Without these callbacks, there are no request snapshots or extra disk writes.
+Snapshots share immutable text and image strings, copying only mutable data.
+Saving still takes time: a callback that syncs to disk makes execution wait.
+
+```text
+prepare request / check tool -> callback -> call model / run tool
+                                  | error: stop, do not run
+
+output -> post-hooks -> callback -> history + MessageAdded -> next model call
+                          | error: stop, do not add output
+```
+
+| Option | What the callback receives |
+| --- | --- |
+| `WithInferenceAdmission` | Selected model and prepared SDK request, after options, hooks, repair and validation; called before each attempt, including retries. Not provider wire bytes. |
+| `WithToolAdmission` | Allowed tool call after argument rewrites and validation. Blocked calls do not reach it. |
+| `WithOutputAdmission` | Final assistant message plus response, or the tool results in call order plus the termination flag. `WithMessageIDs` assigns the message ID first. |
+
+Inputs are copies; editing them does not change execution. Callbacks run one at
+a time on `Run`'s goroutine. Remove secrets before saving. Applications choose
+storage and durable IDs; turn/attempt numbers and tool-call IDs are not global IDs.
+
+Errors become `TurnEnd.Err` (`*agent.AdmissionError`), not provider retries or
+model-facing tool results. Already-started parallel tools are waited for, not
+undone. Start/end events and streamed text may already have reached the UI; they
+do not prove anything was saved. Successfully saved output joins history even
+if cancellation just arrived.
+
+This does not cover queued input, continuation prompts, history replacement or
+replay. A crash can happen between saving and running, or between running and
+saving the result: these callbacks cannot promise that work runs exactly once.
+Tests: `pkg/agent/admission_test.go`.
+
 ## Two levels, two words
 
 Both words are used precisely, because agent frameworks disagree about them:

@@ -289,7 +289,7 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 		})
 		emit(InferenceStart{Turn: a.turnNow(), Attempt: attempt, Inference: inf})
 
-		resp, err := a.stream(ctx, emit, inf)
+		resp, err := a.stream(ctx, emit, inf, attempt)
 
 		// A failed call is paid for too, and so is an abandoned one.
 		if resp != nil {
@@ -316,6 +316,10 @@ func (a *Agent) reason(ctx context.Context, emit func(Event)) (*ai.Response, ai.
 
 		if err == nil {
 			return resp, spent, tools, nil
+		}
+		var admissionErr *ai.AdmissionError
+		if errors.As(err, &admissionErr) {
+			return nil, spent, nil, &AdmissionError{Boundary: "inference", Err: admissionErr}
 		}
 		if callErr == nil {
 			// PostInfer objected to an answer that arrived. Neither budget
@@ -363,18 +367,35 @@ var errNoResponse = &ai.Error{Kind: ai.KindNetwork, Message: "agent: the stream 
 // before the endpoint says anything, streamIdle between events once it has —
 // and running out cancels the stream, only the stream, with errStalled as the
 // cause. Why a call ended is then read off the context that ended it.
-func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*ai.Response, error) {
+func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference, attempt int) (*ai.Response, error) {
 	client := a.clientFor(inf)
 
 	streamCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 
-	quiet := time.AfterFunc(a.streamFirst, func() { stop(errStalled) })
+	// Start the provider timeout after admission, not while saving its record.
+	firstTimeout := a.streamFirst
+	if a.admitInference != nil {
+		firstTimeout = never
+	}
+	quiet := time.AfterFunc(firstTimeout, func() { stop(errStalled) })
 	defer quiet.Stop()
 
 	var resp *ai.Response
 	var err error
-	for evt, streamErr := range client.Stream(streamCtx, inf.Messages, inf.options()...) {
+	var admit func(context.Context, *ai.Request) error
+	if a.admitInference != nil {
+		admit = func(ctx context.Context, req *ai.Request) error {
+			if err := a.admitInference(ctx, InferenceAdmission{
+				Turn: a.turnNow(), Attempt: attempt, Model: client.Model(), Request: req,
+			}); err != nil {
+				return err
+			}
+			quiet.Reset(a.streamFirst)
+			return nil
+		}
+	}
+	for evt, streamErr := range client.StreamAdmitted(streamCtx, inf.Messages, admit, inf.options()...) {
 		if evt.Type == ai.EventProgress || evt.Type == ai.EventBlockStart || evt.Type == ai.EventBlockDelta || evt.Type == ai.EventBlockEnd {
 			quiet.Reset(a.streamIdle)
 		}
@@ -393,6 +414,12 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference) (*
 		}
 	}
 
+	if err != nil {
+		if _, ok := errors.AsType[*ai.AdmissionError](err); ok {
+			// An owner failure is fatal even if a timeout races with its return.
+			return resp, err
+		}
+	}
 	switch {
 	case errors.Is(context.Cause(streamCtx), errStalled):
 		return resp, errStalled
@@ -417,6 +444,8 @@ type call struct {
 
 	// err before the call runs is why it never did; after, how it failed.
 	err error
+	// unadmitted calls close their UI spans but have no post-execution hooks.
+	unadmitted bool
 	// stop is the Terminate votes on this call — gate, tool, hook — or'd
 	// together in finish.
 	stop bool
@@ -513,6 +542,10 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 		emit(ToolEnd{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input,
 			Result: c.result, Err: c.err})
 
+		if c.unadmitted {
+			return
+		}
+
 		// Chained: each hook is handed what the one before it produced.
 		for _, h := range a.hookSet() {
 			if h.PostTool == nil {
@@ -524,7 +557,9 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 			if err != nil {
 				// The batch is still drained — the tools running are writing
 				// to a channel this loop reads — and then the turn ends.
-				hookErr = err
+				if hookErr == nil || a.admitTool == nil {
+					hookErr = err
+				}
 				break
 			}
 			if replacement != nil {
@@ -587,8 +622,35 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 			ch <- update{index: i}
 		}
 
-		// Both modes feed the same channel, so sequential is a pool of one.
-		if parallel {
+		// Admission and dispatch are serialized on the turn goroutine, while
+		// admitted tools may run concurrently. Never run owner callbacks from
+		// workers, or turn a persistence failure into a retryable tool result.
+		launch := func(i int) {
+			c := &batch[i]
+			if hookErr != nil {
+				c.err = errAbandoned
+			} else if err := a.admitToolCall(ctx, c.ToolCall); err != nil {
+				c.err, hookErr = err, err
+			} else {
+				go run(i)
+				return
+			}
+			c.unadmitted = true
+			go func() { ch <- update{index: i} }()
+		}
+		next := 0
+		if a.admitTool != nil {
+			if parallel {
+				for _, i := range pending {
+					launch(i)
+				}
+				next = len(pending)
+			} else {
+				launch(pending[0])
+				next = 1
+			}
+			// Both modes feed the same channel, so sequential is a pool of one.
+		} else if parallel {
 			for _, i := range pending {
 				go run(i)
 			}
@@ -617,6 +679,10 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 			}
 			remaining--
 			finish(&batch[u.index])
+			if a.admitTool != nil && !parallel && next < len(pending) {
+				launch(pending[next])
+				next++
+			}
 		}
 	}
 
@@ -718,6 +784,12 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 		}
 
 		msg := resp.Message()
+		if a.admitOutput != nil {
+			msg, err = a.prepareOutput(turnCtx, msg, resp, false)
+			if err != nil {
+				return out.failed(err)
+			}
+		}
 		out.Message = msg
 		a.add(emit, msg)
 
@@ -747,7 +819,14 @@ func (a *Agent) turn(ctx context.Context, emit func(Event), in []ai.Message) (ou
 			// unanswered call is ai.Repair's to tidy on the next use.
 			return out.failed(err)
 		}
-		a.add(emit, ai.ToolResultsMessage(results...))
+		resultMessage := ai.ToolResultsMessage(results...)
+		if a.admitOutput != nil {
+			resultMessage, err = a.prepareOutput(turnCtx, resultMessage, nil, terminate)
+			if err != nil {
+				return out.failed(err)
+			}
+		}
+		a.add(emit, resultMessage)
 		if terminate {
 			return out.stopped(StopTerminated)
 		}

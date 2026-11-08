@@ -101,12 +101,16 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Err }
 
 // IsRetryable reports whether err is a transient failure worth retrying.
+// Admission failures are never provider retries, regardless of their cause.
 //
 // A classified error answers from its kind. Anything else is put to the same
 // transport test a driver applies: a dropped connection or a timeout is worth
 // another attempt whether or not it passed through a driver on the way here,
 // and an application should not have to reconstruct an *Error to be told so.
 func IsRetryable(err error) bool {
+	if _, ok := errors.AsType[*AdmissionError](err); ok {
+		return false
+	}
 	kind, ok := ErrorKind(""), true
 	if e, isErr := errors.AsType[*Error](err); isErr {
 		kind = e.Kind

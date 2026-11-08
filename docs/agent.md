@@ -41,6 +41,51 @@ Events arrive on the ranging goroutine, so an agent that must run ahead of a
 slow reader is one whose caller forwards them to a buffer of its own — how
 deep, and what to drop when it fills, being theirs to decide.
 
+## Durable admission (optional)
+
+UI events report activity; they are not persistence acknowledgements. An owner
+that must durably record work before dispatch can install narrow error-returning
+callbacks with `WithInferenceAdmission`, `WithToolAdmission`, and
+`WithOutputAdmission`. Without these options the existing loop is unchanged.
+
+- **Inference admission** receives the selected model and a detached, finalized
+  SDK request, after `PreInfer`, client defaults, all options, history repair and
+  validation. Options run once. Each actual attempt, including retries, is
+  admitted before the provider driver is called. This is the SDK request, not
+  protocol-specific wire bytes; redact sensitive request data before storing it.
+- **Tool admission** receives a detached call after permission gates, argument
+  rewrites and final schema validation. Blocked or invalid calls are not admitted.
+  `ToolStart` still precedes gates: do not use that notification as dispatch proof.
+- **Output admission** receives the ID-assigned message after `PostInfer` or all
+  `PostTool` transformations. Inference output includes the response (usage and
+  stop reason); tool output is the entire result batch in model order plus its
+  termination vote. The owner can commit these together before `MessageAdded`,
+  history insertion, or any following inference sees the output. Use
+  `WithMessageIDs` to assign IDs if durable output identity is needed.
+
+Callbacks execute serially on the goroutine ranging over `Run`. An admission
+error is a fatal `TurnEnd.Err` (`*agent.AdmissionError`, supporting `errors.Is`),
+not a tool error for the model to retry. Inference rejection bypasses retry and
+recovery hooks. Cancellation is checked before dispatch; success is not proof of
+execution. Parallel tools already dispatched are drained, not rolled back; a
+failure prevents further admission/dispatch. Sequential tools are admitted one
+at a time after the previous tool finishes.
+
+Streaming fragments, `InferenceEnd`, and raw `ToolEnd` remain speculative UI
+notifications: output rejection does not retract them. Output admission protects
+model-visible conversation publication, not streaming rendering. A successful
+output commit is published even if cancellation races with its return. Pure
+history restoration (`SetMessages`), queued input, continuation prompts and
+history replacement do not invoke these boundaries; they are not a generic
+transaction over all conversation mutations or `TurnEnd`.
+
+The owner supplies durable identities and storage transactions. Turn/attempt
+numbers and model tool-call IDs are correlation values, not globally unique
+execution IDs. A process can fail after a successful commit and before dispatch,
+or after a remote effect and before output acceptance. These APIs do **not**
+provide exactly-once dispatch, rollback, or cross-system atomicity. Tests live in
+`pkg/agent/admission_test.go`; implementation is in `admission.go` and `run.go`.
+
 ## Two levels, two words
 
 Both words are used precisely, because agent frameworks disagree about them:

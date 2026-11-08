@@ -304,11 +304,11 @@ Between `client.Complete(ctx, messages, opts...)` and bytes on the wire:
         |  | validate           settings, then what this model cannot do   |
         |  +--------------------------------------------------------------+
         v
-    *ai.Request  ------------->  Driver.Stream
-                                      |   translate to the wire format,
-                                      |   send, and yield while reading
-                                      v
-                               iter.Seq2[Delta, error]      raw fragments
+    *ai.Request --> optional StreamAdmitted callback
+                         | reject: no dispatch
+                         | accept: recheck cancellation
+                         v
+                    Driver.Stream --> iter.Seq2[Delta, error] raw fragments
                                       |
                                       |   blockTracker assembles
                                       v
@@ -322,6 +322,13 @@ Everything in the box happens once, for every protocol. That is the line a
 driver sits behind: it translates and streams, and does nothing else. It is
 also why `Client.Complete` is not a second code path — it drains `Stream`, so
 a request reaches an endpoint exactly one way.
+
+`StreamAdmitted` gives an optional persistence owner a detached snapshot after
+preparation, before dispatch. Rejection returns `AdmissionError`, never a provider
+retry. The snapshot is an SDK request, not wire bytes; callers own redaction.
+Admission cannot guarantee dispatch or exactly-once execution. Agent admission
+also covers post-gate tool inputs and accepted post-hook output; UI notifications
+remain speculative (see [agent](agent.md)).
 
 The same `*ai.Request` is what `CountTokens` measures, so a prompt cannot be
 sized differently from how it is sent.

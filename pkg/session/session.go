@@ -1,7 +1,7 @@
 // Package session keeps conversations on disk, one append-only log each.
 //
-// A store is a directory, and a session is one file in it, <id>.jsonl, with
-// one Record per line:
+// A store is a directory, and a session is one file in it, <id>.jsonl. Legacy
+// Save/Append sessions have one Record per line:
 //
 //	{"type":"message","time":…,"message":{…}}               a message joined the conversation
 //	{"type":"truncate","time":…,"keep":3}                   the conversation is cut to its first 3 messages
@@ -39,6 +39,21 @@
 // A process killed mid-write leaves an unterminated last line, which reading
 // ignores and the next writer cuts off. A reader that holds no writer may see
 // a Save half done: take the writer before Load to resume.
+//
+// For atomic groups of records, start an empty session with Writer.Commit.
+// Batch sessions use versioned, integrity-chained, single-line envelopes, not
+// additional application record types. Records and Load transparently validate
+// and replay them; Batches preserves their boundaries and receipts. Legacy and
+// batch lines cannot be mixed, including after Fork. No automatic migration is
+// performed. Save and Append retain their legacy behavior on legacy sessions.
+//
+// Complete batch visibility is not a durability acknowledgment: a concurrent
+// reader can see a line before its writer finishes Sync. Commit acknowledges
+// only after file Sync succeeds. This is not a directory-sync or hardware
+// power-loss guarantee, nor an authentication scheme. A removed whole suffix
+// cannot be detected without an externally retained Tail. Readers validate the
+// prefix they consume, not unread later lines. Recovery under the writer lease
+// removes only an unterminated tail; a corrupt complete line is a hard error.
 package session
 
 import (
@@ -76,7 +91,7 @@ const (
 	TypeApp      = "app"      // the application's record, called Name, carrying Data
 )
 
-// Record is one line of a session.
+// Record is one logical session record (a legacy line or a member of a batch).
 type Record struct {
 	Type    string          `json:"type"`
 	Time    time.Time       `json:"time"`
@@ -89,6 +104,9 @@ type Record struct {
 // Apply returns the conversation msgs becomes after r: a message is appended,
 // a truncate cuts, and an app record leaves it as it is.
 func (r Record) Apply(msgs []ai.Message) ([]ai.Message, error) {
+	if err := validRecord(r); err != nil {
+		return nil, err
+	}
 	switch r.Type {
 	case TypeMessage:
 		return append(msgs, *r.Message), nil
@@ -168,6 +186,24 @@ func (s *Store) Records(ctx context.Context, id string) iter.Seq2[Record, error]
 // read decodes complete lines from f.
 func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 	return func(yield func(Record, error) bool) {
+		state := &batchState{}
+		for group, err := range scanLog(f, id, end, state) {
+			if err != nil {
+				yield(Record{}, err)
+				return
+			}
+			for _, r := range group.Batch.Records {
+				if !yield(r, nil) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// scanLog validates a complete physical line before exposing any of its records.
+func scanLog(f io.Reader, id string, end *int64, state *batchState) iter.Seq2[*CommittedBatch, error] {
+	return func(yield func(*CommittedBatch, error) bool) {
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 4096), math.MaxInt)
 		scanner.Split(completeLine)
@@ -178,21 +214,20 @@ func read(f io.Reader, id string, end *int64) iter.Seq2[Record, error] {
 			if end != nil {
 				*end += int64(len(line))
 			}
-			var r Record
-			if err := json.Unmarshal(line, &r); err != nil {
-				yield(Record{}, fmt.Errorf("session: %s line %d: %w", id, n, err))
+			records, group, err := state.decode(line)
+			if err != nil {
+				yield(nil, fmt.Errorf("session: %s line %d: %w", id, n, err))
 				return
 			}
-			if r.Type == "" || r.Type == TypeMessage && r.Message == nil || r.Keep < 0 || r.Type == TypeApp && r.Name == "" {
-				yield(Record{}, fmt.Errorf("session: %s line %d: not a session record", id, n))
-				return
+			if group == nil {
+				group = &CommittedBatch{Batch: Batch{Records: records}}
 			}
-			if !yield(r, nil) {
+			if !yield(group, nil) {
 				return
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			yield(Record{}, err)
+			yield(nil, err)
 		}
 	}
 }
@@ -330,6 +365,9 @@ func (s *Store) Writer(ctx context.Context, id string) (*Writer, error) {
 		return nil, errors.Join(err, l.unlock())
 	}
 	w.lock = l
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, w.Close())
+	}
 	return w, nil
 }
 
@@ -342,7 +380,25 @@ func open(path, id string) (*Writer, error) {
 	}
 	w := &Writer{f: f}
 	var end int64
-	msgs, err := conversation(read(f, id, &end))
+	var msgs []ai.Message
+	for group, readErr := range scanLog(f, id, &end, &w.batches) {
+		if readErr != nil {
+			err = readErr
+			break
+		}
+		if w.batches.mode == "batch" {
+			continue
+		} // accept already validates replay; Save is disabled.
+		for _, r := range group.Batch.Records {
+			msgs, err = r.Apply(msgs)
+			if err != nil {
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
 	if err == nil {
 		w.saved, err = encode(msgs)
 	}
@@ -360,11 +416,12 @@ func open(path, id string) (*Writer, error) {
 
 // Writer appends to one session. Its methods are safe for concurrent use.
 type Writer struct {
-	mu    sync.Mutex
-	f     *os.File
-	lock  *fileLock
-	saved [][]byte // the conversation as the file holds it, one encoding per message
-	err   error    // a failed write leaves the file unfit to append to
+	batches batchState
+	mu      sync.Mutex
+	f       *os.File
+	lock    *fileLock
+	saved   [][]byte // the conversation as the file holds it, one encoding per message
+	err     error    // a failed write leaves the file unfit to append to
 }
 
 // Save makes the session hold msgs, appending only what differs from what it
@@ -382,6 +439,12 @@ func (w *Writer) Save(msgs []ai.Message) error {
 	defer w.mu.Unlock()
 	if w.f == nil {
 		return os.ErrClosed
+	}
+	if w.err != nil {
+		return w.err
+	}
+	if w.batches.mode == "batch" {
+		return ErrMode
 	}
 	now := time.Now()
 	keep := 0
@@ -438,6 +501,9 @@ func (w *Writer) write(records ...Record) error {
 	if w.err != nil {
 		return w.err
 	}
+	if w.batches.mode == "batch" {
+		return ErrMode
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -446,6 +512,7 @@ func (w *Writer) write(records ...Record) error {
 			return fmt.Errorf("session: encoding %s: %w", r.Type, err)
 		}
 	}
+	w.batches.mode = "legacy"
 	if _, err := w.f.Write(buf.Bytes()); err != nil {
 		w.err = err
 		return err

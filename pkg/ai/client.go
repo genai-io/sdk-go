@@ -48,6 +48,10 @@ func (c *Client) Models(ctx context.Context) ([]Model, error) {
 
 // Stream runs one inference call and yields events as they arrive.
 func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option) iter.Seq2[Event, error] {
+	return c.stream(ctx, messages, nil, opts...)
+}
+
+func (c *Client) stream(ctx context.Context, messages []Message, admit func(context.Context, *Request) error, opts ...Option) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		resp := &Response{Model: c.model.ID}
 
@@ -79,6 +83,12 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...Option)
 		}
 
 		req, err := c.prepare(ctx, messages, opts)
+		if err == nil && admit != nil {
+			req, err = admitRequest(ctx, req, admit)
+		}
+		if err == nil && ctx.Err() != nil {
+			err = &Error{Kind: KindCanceled, Err: ctx.Err()}
+		}
 		if err != nil {
 			yield(Event{Type: EventDone, Response: finish(err)}, err)
 			return

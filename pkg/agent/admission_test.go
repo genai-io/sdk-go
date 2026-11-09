@@ -200,7 +200,19 @@ func TestParallelAdmissionFailureDrainsAdmittedWork(t *testing.T) {
 		}
 		return nil
 	}))
-	_, err := outcome(t, a, ai.UserMessage("go"))
+	events, err := collect(t, a, ai.UserMessage("go"))
+	ends := 0
+	for _, event := range events {
+		if end, ok := event.(agent.ToolEnd); ok {
+			ends++
+			if end.Started != (end.ID == "1") {
+				t.Errorf("call %s Started=%v", end.ID, end.Started)
+			}
+		}
+	}
+	if ends != 3 {
+		t.Errorf("ToolEnd count=%d, want 3", ends)
+	}
 	if !errors.Is(err, failure) || ran.Load() != 1 || !reflect.DeepEqual(admitted, []string{"1", "2"}) || len(a.Messages()) != 2 {
 		t.Fatalf("err=%v ran=%d admitted=%v history=%v", err, ran.Load(), admitted, a.Messages())
 	}
@@ -254,7 +266,17 @@ func TestCancellationDuringAdmissionPreventsDispatch(t *testing.T) {
 				opts = append(opts, agent.WithInferenceAdmission(func(context.Context, agent.InferenceAdmission) error { cancel(); return nil }))
 			}
 			a := newAgent(t, d, opts...)
-			for range a.Run(ctx, ai.UserMessage("go")) {
+			ends := 0
+			for event := range a.Run(ctx, ai.UserMessage("go")) {
+				if end, ok := event.(agent.ToolEnd); ok {
+					ends++
+					if end.Started {
+						t.Error("cancelled-before-dispatch call reported Started")
+					}
+				}
+			}
+			if toolAdmission && ends != 1 {
+				t.Errorf("ToolEnd count=%d, want 1", ends)
 			}
 			wantCalls := 0
 			if toolAdmission {

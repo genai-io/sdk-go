@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 )
@@ -151,6 +153,53 @@ func ToolChoiceNamed(name string) ToolChoice {
 
 // Tool returns the tool this choice requires, and whether it requires one.
 func (c ToolChoice) Tool() (string, bool) { return c.name, c.mode == choiceNamed }
+
+// MarshalJSON writes a vendor-neutral mode or a named tool object.
+func (c ToolChoice) MarshalJSON() ([]byte, error) {
+	switch c.mode {
+	case choiceAuto:
+		return json.Marshal("auto")
+	case choiceNone:
+		return json.Marshal("none")
+	case choiceRequired:
+		return json.Marshal("required")
+	case choiceNamed:
+		if c.name != "" {
+			return json.Marshal(struct {
+				Tool string `json:"tool"`
+			}{c.name})
+		}
+	}
+	return nil, fmt.Errorf("ai: invalid tool choice")
+}
+
+// UnmarshalJSON reads a mode or {"tool":"name"}. Invalid input leaves c unchanged.
+func (c *ToolChoice) UnmarshalJSON(data []byte) error {
+	var mode string
+	if err := json.Unmarshal(data, &mode); err == nil {
+		switch mode {
+		case "auto":
+			*c = ToolChoice{}
+		case "none":
+			*c = ToolChoice{mode: choiceNone}
+		case "required":
+			*c = ToolChoice{mode: choiceRequired}
+		default:
+			return fmt.Errorf("ai: invalid tool choice mode %q", mode)
+		}
+		return nil
+	}
+	var named map[string]json.RawMessage
+	if err := json.Unmarshal(data, &named); err != nil {
+		return fmt.Errorf("ai: invalid tool choice: %w", err)
+	}
+	var name string
+	if len(named) != 1 || json.Unmarshal(named["tool"], &name) != nil || name == "" {
+		return fmt.Errorf("ai: tool choice requires only a nonempty tool name")
+	}
+	*c = ToolChoiceNamed(name)
+	return nil
+}
 
 // Effort is a reasoning rung, named the same way whichever vendor serves it.
 type Effort string

@@ -444,6 +444,8 @@ type call struct {
 
 	// err before the call runs is why it never did; after, how it failed.
 	err error
+	// started is worker-owned until its completion is received on ch.
+	started bool
 	// unadmitted calls close their UI spans but have no post-execution hooks.
 	unadmitted bool
 	// stop is the Terminate votes on this call — gate, tool, hook — or'd
@@ -531,7 +533,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 				c.err = errAbandoned
 			}
 			emit(ToolEnd{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input,
-				Result: c.result, Err: c.err})
+				Result: c.result, Err: c.err, Started: c.started})
 		}
 		return nil, false, hookErr
 	}
@@ -540,7 +542,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 	// finished below, it closes the same way.
 	finish := func(c *call) {
 		emit(ToolEnd{Turn: a.turnNow(), ID: c.ID, Name: c.Name, Args: c.Input,
-			Result: c.result, Err: c.err})
+			Result: c.result, Err: c.err, Started: c.started})
 
 		if c.unadmitted {
 			return
@@ -618,6 +620,7 @@ func (a *Agent) act(ctx context.Context, emit func(Event), calls []ai.ToolCall, 
 				default:
 				}
 			})
+			c.started = true
 			c.result, c.err = c.tool.Run(rctx, c.ToolCall)
 			ch <- update{index: i}
 		}

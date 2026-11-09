@@ -129,12 +129,15 @@ func (ToolUpdate) event() {}
 // not waiting on hooks: a hook that replaces the result changes what the model
 // is told, not this.
 type ToolEnd struct {
-	Turn   int
-	ID     string
-	Name   string
-	Args   string
-	Result Result
-	Err    error
+	// Started reports whether Tool.Run was invoked, even if it failed or panicked.
+	// False means the call closed without executing (for example, denied or unadmitted).
+	Started bool
+	Turn    int
+	ID      string
+	Name    string
+	Args    string
+	Result  Result
+	Err     error
 }
 
 func (ToolEnd) event() {}

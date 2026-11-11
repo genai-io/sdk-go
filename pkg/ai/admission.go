@@ -30,6 +30,13 @@ func (c *Client) StreamAdmitted(ctx context.Context, messages []Message, admit f
 	return c.stream(ctx, messages, admit, opts...)
 }
 
+// CompleteAdmitted runs one inference call with the admission behavior of
+// StreamAdmitted and returns the aggregated response, discarding intermediate
+// events. Nil admit behaves like Complete.
+func (c *Client) CompleteAdmitted(ctx context.Context, messages []Message, admit func(context.Context, *Request) error, opts ...Option) (*Response, error) {
+	return collect(c.StreamAdmitted(ctx, messages, admit, opts...))
+}
+
 func admitRequest(ctx context.Context, req *Request, admit func(context.Context, *Request) error) (*Request, error) {
 	frozen, snapshot, err := admissionCopies(req)
 	if err != nil {

@@ -8,6 +8,114 @@ import (
 	"testing"
 )
 
+func TestCompleteAdmittedPreparedDetachedRequest(t *testing.T) {
+	for i, choice := range []ToolChoice{ToolChoiceAuto, ToolChoiceNone, ToolChoiceRequired, ToolChoiceNamed("search")} {
+		t.Run([]string{"auto", "none", "required", "named"}[i], func(t *testing.T) {
+			driver := &scripted{scripts: []script{{deltas: []Delta{{Block: TextBlock("answer")}}}}}
+			client := NewClientWithDriver(driver, stubModel(), WithMaxTokens(100), WithSystem("system"))
+			messages := []Message{UserMessage("hi\xffthere")}
+			opts := []Option{
+				WithMaxTokens(200), WithTemperature(0), WithEffort(EffortHigh),
+				WithTools(Schema{Name: "search", Definition: map[string]any{"type": "object"}}),
+				WithToolChoice(choice), WithStopSequences("stop"),
+				WithSchema(&Schema{Name: "answer", Definition: map[string]any{"type": "object"}}),
+				func(req *Request) {
+					req.CacheRetention = "short"
+					req.SamplingParams = map[string]any{"seed": 42}
+				},
+			}
+			prepared, err := client.prepare(context.Background(), messages, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			resp, err := client.CompleteAdmitted(context.Background(), messages, func(_ context.Context, req *Request) error {
+				calls++
+				got, err := json.Marshal(req)
+				if err != nil || string(got) != string(want) || req.Messages[0].Content[0].Text != "hi�there" || req.MaxTokens != 200 || req.System != "system" {
+					t.Fatalf("prepared request=%s, want=%s (%v)", got, want, err)
+				}
+				req.Messages[0].Content[0].Text = "changed snapshot"
+				req.Tools[0].Definition.(map[string]any)["type"] = "changed"
+				req.Schema.Definition.(map[string]any)["type"] = "changed"
+				req.StopSequences[0] = "changed"
+				req.SamplingParams["seed"] = 0
+				*req.Temperature = 1
+				req.ToolChoice = ToolChoiceNone
+				messages[0].Content[0].Text = "changed input"
+				return nil
+			}, opts...)
+			if err != nil || resp == nil || resp.Content.Text() != "answer" || calls != 1 || driver.calls != 1 {
+				t.Fatalf("response=%+v error=%v admission calls=%d driver calls=%d", resp, err, calls, driver.calls)
+			}
+			got, err := json.Marshal(driver.reqs[0])
+			if err != nil || string(got) != string(want) {
+				t.Fatalf("dispatch=%s, want=%s (%v)", got, want, err)
+			}
+		})
+	}
+}
+
+func TestCompleteAdmittedRejectsBeforeDriver(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rejected", true: "canceled"}[canceled], func(t *testing.T) {
+			driver := &scripted{scripts: []script{{}}}
+			client := NewClientWithDriver(driver, stubModel())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			want := errors.New("admission failed")
+			calls := 0
+			resp, err := client.CompleteAdmitted(ctx, []Message{UserMessage("hi")}, func(context.Context, *Request) error {
+				calls++
+				if canceled {
+					cancel()
+					return nil
+				}
+				return want
+			})
+			if canceled {
+				if !errors.Is(err, context.Canceled) || !IsKind(err, KindCanceled) || resp == nil || resp.StopReason != StopAborted {
+					t.Fatalf("response=%+v error=%v", resp, err)
+				}
+			} else {
+				var admission *AdmissionError
+				if !errors.As(err, &admission) || !errors.Is(err, want) || IsRetryable(err) || resp == nil || !errors.Is(resp.Err, want) || resp.StopReason != StopError {
+					t.Fatalf("response=%+v error=%v", resp, err)
+				}
+			}
+			if calls != 1 || driver.calls != 0 {
+				t.Fatalf("admission calls=%d driver calls=%d", calls, driver.calls)
+			}
+		})
+	}
+}
+
+func TestCompleteNilAdmissionMatchesComplete(t *testing.T) {
+	failure := errors.New("stream failed")
+	for _, terminal := range []error{nil, failure} {
+		name := "success"
+		if terminal != nil {
+			name = "partial-failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			client := drive(script{deltas: []Delta{{Block: TextBlock("answer"), Usage: &Usage{Input: 10, Output: 3}}}, err: terminal})
+			messages := []Message{UserMessage("hi")}
+			plain, plainErr := client.Complete(context.Background(), messages)
+			admitted, err := client.CompleteAdmitted(context.Background(), messages, nil)
+			if !errors.Is(err, terminal) || !errors.Is(plainErr, terminal) || !reflect.DeepEqual(plain, admitted) {
+				t.Fatalf("responses=%+v / %+v errors=%v / %v", plain, admitted, plainErr, err)
+			}
+			if admitted == nil || admitted.Content.Text() != "answer" || admitted.Usage.Input != 10 || admitted.Usage.Output != 3 {
+				t.Fatalf("lost content or usage: %+v", admitted)
+			}
+		})
+	}
+}
+
 func TestStreamAdmissionRejectsBeforeDriver(t *testing.T) {
 	driver := &scripted{scripts: []script{{}}}
 	client := NewClientWithDriver(driver, stubModel())

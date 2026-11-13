@@ -47,24 +47,24 @@ func TestAgentSessionReservationsAndFailures(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
 	var calls atomic.Int32
-	h.CreateSession = func(ctx context.Context, _ protocol.NewSessionRequest) (acp.NewSessionResult, error) {
+	h.CreateSession = func(ctx context.Context, _ protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
 		switch calls.Add(1) {
 		case 1:
 			close(started)
 			select {
 			case <-release:
 			case <-ctx.Done():
-				return acp.NewSessionResult{}, ctx.Err()
+				return acp.CreateSessionResult{}, ctx.Err()
 			}
-			return acp.NewSessionResult{}, errors.New("failed creation")
+			return acp.CreateSessionResult{}, errors.New("failed creation")
 		case 2:
 			panic("application panic")
 		case 3:
-			return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
+			return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
 		case 4:
-			return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
+			return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
 		default:
-			return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "other"}}, nil
+			return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "other"}}, nil
 		}
 	}
 	_, p := rawAgent(t, ctx, h, acp.AgentOptions{MaxSessions: 2})

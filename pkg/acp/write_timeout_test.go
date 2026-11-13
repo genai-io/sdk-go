@@ -46,9 +46,9 @@ func finalUpdate() protocol.SessionNotification {
 func TestInitialCommandsWriteTimeout(t *testing.T) {
 	ctx := testContext(t)
 	h := agentHandlers()
-	h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.NewSessionResult, error) {
-		return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"},
-			InitialCommands: []protocol.AvailableCommand{{Name: "check", Description: "Check project"}}}, nil
+	h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
+		return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"},
+			Commands: []protocol.AvailableCommand{{Name: "check", Description: "Check project"}}}, nil
 	}
 	started := make(chan struct{})
 	a, p := timeoutAgent(t, h, 100*time.Millisecond, started)

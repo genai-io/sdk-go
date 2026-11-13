@@ -10,12 +10,10 @@ import (
 	"github.com/genai-io/sdk-go/pkg/acp/protocol"
 )
 
-// NewSessionResult adds local initial-command data to the wire response.
-// A non-nil InitialCommands sends a catalog immediately after the response,
-// before subsequent session output. Nil omits the notification.
-type NewSessionResult struct {
+// CreateSessionResult pairs the wire response with an optional command list.
+type CreateSessionResult struct {
 	protocol.NewSessionResponse
-	InitialCommands []protocol.AvailableCommand
+	Commands []protocol.AvailableCommand // nil omits the update
 }
 
 // AgentHandlers implement the stable receiving-side ACP core. Callbacks run
@@ -29,7 +27,7 @@ type AgentHandlers struct {
 	Initialize func(ctx context.Context, request protocol.InitializeRequest) (protocol.InitializeResponse, error)
 
 	// CreateSession handles session/new and returns an application-owned session ID.
-	CreateSession func(ctx context.Context, request protocol.NewSessionRequest) (NewSessionResult, error)
+	CreateSession func(ctx context.Context, request protocol.NewSessionRequest) (CreateSessionResult, error)
 
 	// LoadSession optionally restores an existing session and replays its history.
 	// Its turn scopes updates to the loading session; callbacks must join work.
@@ -205,11 +203,11 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 					return nil, err
 				}
 				var catalog []byte
-				if res.InitialCommands != nil {
+				if res.Commands != nil {
 					catalog, err = requestFrame(nil, "session/update", protocol.SessionNotification{
 						SessionID: res.SessionID,
 						Update: protocol.SessionUpdate{Value: protocol.SessionUpdateAvailableCommandsUpdateVariant{
-							SessionUpdate: "available_commands_update", AvailableCommands: res.InitialCommands,
+							SessionUpdate: "available_commands_update", AvailableCommands: res.Commands,
 						}},
 					})
 					if err != nil {

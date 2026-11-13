@@ -19,8 +19,8 @@ func agentHandlers() acp.AgentHandlers {
 		Initialize: func(context.Context, protocol.InitializeRequest) (protocol.InitializeResponse, error) {
 			return protocol.InitializeResponse{ProtocolVersion: 1}, nil
 		},
-		CreateSession: func(context.Context, protocol.NewSessionRequest) (acp.NewSessionResult, error) {
-			return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
+		CreateSession: func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
+			return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
 		},
 		Prompt: func(context.Context, *acp.Turn, protocol.PromptRequest) (protocol.PromptResponse, error) {
 			return protocol.PromptResponse{StopReason: protocol.StopReasonEndTurn}, nil
@@ -84,13 +84,14 @@ func TestAgentInitialCommands(t *testing.T) {
 			ctx := testContext(t)
 			h := agentHandlers()
 			commands := []protocol.AvailableCommand{{Name: "check", Description: "Check project"}}
-			if mode == "empty" {
+			switch mode {
+			case "empty":
 				commands = []protocol.AvailableCommand{}
-			} else if mode == "omitted" {
+			case "omitted":
 				commands = nil
 			}
-			h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.NewSessionResult, error) {
-				return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}, InitialCommands: commands}, nil
+			h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
+				return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}, Commands: commands}, nil
 			}
 			h.Prompt = func(ctx context.Context, turn *acp.Turn, _ protocol.PromptRequest) (protocol.PromptResponse, error) {
 				if mode == "prompt-error" {
@@ -143,9 +144,9 @@ func TestAgentInvalidInitialCommandsReleaseSlot(t *testing.T) {
 			ctx := testContext(t)
 			h := agentHandlers()
 			calls := 0
-			h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.NewSessionResult, error) {
+			h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
 				calls++
-				result := acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}
+				result := acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}
 				if calls == 1 {
 					c := protocol.AvailableCommand{Name: "check", Description: "Check project"}
 					if oversized {
@@ -153,7 +154,7 @@ func TestAgentInvalidInitialCommandsReleaseSlot(t *testing.T) {
 					} else {
 						c.Extra = map[string]json.RawMessage{"invalid": json.RawMessage(`{`)}
 					}
-					result.InitialCommands = []protocol.AvailableCommand{c}
+					result.Commands = []protocol.AvailableCommand{c}
 				}
 				return result, nil
 			}

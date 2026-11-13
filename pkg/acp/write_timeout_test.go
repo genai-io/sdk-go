@@ -43,6 +43,23 @@ func finalUpdate() protocol.SessionNotification {
 	return u
 }
 
+func TestInitialCommandsWriteTimeout(t *testing.T) {
+	ctx := testContext(t)
+	h := agentHandlers()
+	h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.NewSessionResult, error) {
+		return acp.NewSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"},
+			InitialCommands: []protocol.AvailableCommand{{Name: "check", Description: "Check project"}}}, nil
+	}
+	started := make(chan struct{})
+	a, p := timeoutAgent(t, h, 100*time.Millisecond, started)
+	agentReady(t, ctx, p)
+	receive(t, ctx, started)
+	p.send(t, ctx, cancelFrame)
+	if err := a.Wait(ctx); !errors.Is(err, acp.ErrWriteTimeout) {
+		t.Fatalf("initial catalog write: %v", err)
+	}
+}
+
 func TestAgentWriteTimeoutCancellation(t *testing.T) {
 	for _, permission := range []bool{false, true} {
 		for _, partial := range []bool{false, true} {

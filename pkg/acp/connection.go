@@ -87,12 +87,18 @@ type notification struct {
 
 type incoming struct{ release sync.Once }
 
+type responseWithCatalog struct {
+	result  any
+	catalog []byte
+}
+
 type write struct {
-	ctx    context.Context
-	data   []byte
-	done   chan error
-	commit func()
-	state  atomic.Int32 // queued, writing, cancelled, finished
+	ctx     context.Context
+	data    []byte
+	catalog []byte
+	done    chan error
+	commit  func()
+	state   atomic.Int32 // queued, writing, cancelled, finished
 }
 
 // Conn is a bidirectional, newline-delimited JSON-RPC connection for ACP.
@@ -237,11 +243,11 @@ func (c *Conn) Notify(ctx context.Context, method string, params any) error {
 }
 
 func (c *Conn) send(ctx context.Context, frame []byte) error {
-	return c.sendCommit(ctx, frame, nil)
+	return c.sendCommit(ctx, frame, nil, nil)
 }
 
-func (c *Conn) sendCommit(ctx context.Context, frame []byte, commit func()) error {
-	if len(frame) > c.limits.FrameBytes {
+func (c *Conn) sendCommit(ctx context.Context, frame, catalog []byte, commit func()) error {
+	if len(frame) > c.limits.FrameBytes || len(catalog) > c.limits.FrameBytes {
 		return ErrFrameTooLarge
 	}
 	if err := ctx.Err(); err != nil {
@@ -251,6 +257,9 @@ func (c *Conn) sendCommit(ctx context.Context, frame []byte, commit func()) erro
 		return err
 	}
 	job := &write{ctx: ctx, data: append(frame, '\n'), done: make(chan error, 1), commit: commit}
+	if catalog != nil {
+		job.catalog = append(catalog, '\n')
+	}
 	select {
 	case c.writes <- job:
 	default:
@@ -290,6 +299,9 @@ func (c *Conn) write() {
 				job.commit()
 			}
 			err := c.writeFrame(job.data)
+			if err == nil && job.catalog != nil {
+				err = c.writeFrame(job.catalog)
+			}
 			job.done <- err
 			job.state.Store(3)
 			if err != nil {
@@ -405,11 +417,16 @@ func (c *Conn) dispatch(m message) error {
 		defer c.wg.Done()
 		defer release()
 		result, failure := c.invoke(m, work)
+		var catalog []byte
+		if prepared, ok := result.(responseWithCatalog); ok && failure == nil {
+			result, catalog = prepared.result, prepared.catalog
+		}
 		frame, err := responseFrame(m.id, result, failure)
 		if err != nil {
+			catalog = nil
 			frame, _ = responseFrame(m.id, nil, &Error{Code: -32603, Message: "Internal error"})
 		}
-		if err := c.sendCommit(c.ctx, frame, func() {
+		if err := c.sendCommit(c.ctx, frame, catalog, func() {
 			release()
 			if commit != nil {
 				commit()

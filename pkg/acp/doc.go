@@ -45,6 +45,7 @@
 // Session slots are bounded by [AgentOptions.MaxSessions], including creations
 // in flight. The application allocates unique nonempty session IDs and owns all
 // runtime/storage resources, including cleanup after failed creation or shutdown.
+// [CreateSessionResult.Commands] follows the creation response before prompt output.
 // There is no automatic eviction, persistence or session-close operation.
 // Optional LoadSession reserves the requested identity and a session slot before
 // invoking application code. Its Turn permits ordered history replay. Failed

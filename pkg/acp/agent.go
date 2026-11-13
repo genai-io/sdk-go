@@ -10,6 +10,12 @@ import (
 	"github.com/genai-io/sdk-go/pkg/acp/protocol"
 )
 
+// CreateSessionResult pairs the wire response with an optional command list.
+type CreateSessionResult struct {
+	protocol.NewSessionResponse
+	Commands []protocol.AvailableCommand // nil omits the update
+}
+
 // AgentHandlers implement the stable receiving-side ACP core. Callbacks run
 // concurrently across sessions and must cooperate with cancellation. Returned
 // values transfer ownership to Agent; do not mutate them after returning.
@@ -21,7 +27,7 @@ type AgentHandlers struct {
 	Initialize func(ctx context.Context, request protocol.InitializeRequest) (protocol.InitializeResponse, error)
 
 	// CreateSession handles session/new and returns an application-owned session ID.
-	CreateSession func(ctx context.Context, request protocol.NewSessionRequest) (protocol.NewSessionResponse, error)
+	CreateSession func(ctx context.Context, request protocol.NewSessionRequest) (CreateSessionResult, error)
 
 	// LoadSession optionally restores an existing session and replays its history.
 	// Its turn scopes updates to the loading session; callbacks must join work.
@@ -192,9 +198,24 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 				if err != nil {
 					return nil, err
 				}
-				b, err := json.Marshal(res)
+				b, err := json.Marshal(res.NewSessionResponse)
 				if err != nil {
 					return nil, err
+				}
+				var catalog []byte
+				if res.Commands != nil {
+					catalog, err = requestFrame(nil, "session/update", protocol.SessionNotification{
+						SessionID: res.SessionID,
+						Update: protocol.SessionUpdate{Value: protocol.SessionUpdateAvailableCommandsUpdateVariant{
+							SessionUpdate: "available_commands_update", AvailableCommands: res.Commands,
+						}},
+					})
+					if err != nil {
+						return nil, err
+					}
+					if len(catalog) > c.limits.FrameBytes {
+						return nil, ErrFrameTooLarge
+					}
 				}
 				a.mu.Lock()
 				defer a.mu.Unlock()
@@ -203,7 +224,7 @@ func (a *Agent) admit(c *Conn, m message) (func() (any, error), func()) {
 				}
 				session = &agentSession{}
 				a.sessions[res.SessionID] = session
-				return json.RawMessage(b), nil
+				return responseWithCatalog{result: json.RawMessage(b), catalog: catalog}, nil
 			}, func() {
 				a.mu.Lock()
 				defer a.mu.Unlock()

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -18,8 +19,8 @@ func agentHandlers() acp.AgentHandlers {
 		Initialize: func(context.Context, protocol.InitializeRequest) (protocol.InitializeResponse, error) {
 			return protocol.InitializeResponse{ProtocolVersion: 1}, nil
 		},
-		CreateSession: func(context.Context, protocol.NewSessionRequest) (protocol.NewSessionResponse, error) {
-			return protocol.NewSessionResponse{SessionID: "s"}, nil
+		CreateSession: func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
+			return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}, nil
 		},
 		Prompt: func(context.Context, *acp.Turn, protocol.PromptRequest) (protocol.PromptResponse, error) {
 			return protocol.PromptResponse{StopReason: protocol.StopReasonEndTurn}, nil
@@ -74,6 +75,97 @@ func assertRPCError(t *testing.T, m map[string]json.RawMessage, id string, code 
 	var e acp.Error
 	if err := json.Unmarshal(m["error"], &e); err != nil || e.Code != int64(code) {
 		t.Fatalf("error = %s, want %d", m["error"], code)
+	}
+}
+
+func TestAgentInitialCommands(t *testing.T) {
+	for _, mode := range []string{"commands", "empty", "omitted", "prompt-error", "prompt-cancelled"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := testContext(t)
+			h := agentHandlers()
+			commands := []protocol.AvailableCommand{{Name: "check", Description: "Check project"}}
+			switch mode {
+			case "empty":
+				commands = []protocol.AvailableCommand{}
+			case "omitted":
+				commands = nil
+			}
+			h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
+				return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}, Commands: commands}, nil
+			}
+			h.Prompt = func(ctx context.Context, turn *acp.Turn, _ protocol.PromptRequest) (protocol.PromptResponse, error) {
+				if mode == "prompt-error" {
+					return protocol.PromptResponse{}, errors.New("provider failed")
+				}
+				if mode == "prompt-cancelled" {
+					<-ctx.Done()
+					return protocol.PromptResponse{}, ctx.Err()
+				}
+				return protocol.PromptResponse{StopReason: protocol.StopReasonEndTurn}, turn.SendUpdate(finalUpdate())
+			}
+			_, p := rawAgent(t, ctx, h, acp.AgentOptions{})
+			agentReady(t, ctx, p)
+			prompt := agentRequest("prompt", "session/prompt", promptParams)
+			if mode == "prompt-cancelled" {
+				prompt += cancelFrame
+			}
+			p.send(t, ctx, prompt)
+			if commands != nil {
+				frame := p.read(t, ctx)
+				equalJSON(t, frame["method"], `"session/update"`)
+				var update protocol.SessionNotification
+				if err := json.Unmarshal(frame["params"], &update); err != nil {
+					t.Fatal(err)
+				}
+				catalog, ok := update.Update.Value.(protocol.SessionUpdateAvailableCommandsUpdateVariant)
+				if !ok || update.SessionID != "s" || len(catalog.AvailableCommands) != len(commands) {
+					t.Fatalf("initial catalog: %s", frame["params"])
+				}
+				if len(commands) != 0 && catalog.AvailableCommands[0].Name != "check" {
+					t.Fatal("lost initial command")
+				}
+			}
+			switch mode {
+			case "prompt-error":
+				assertRPCError(t, p.read(t, ctx), "prompt", -32603)
+			case "prompt-cancelled":
+				equalJSON(t, p.read(t, ctx)["result"], `{"stopReason":"cancelled"}`)
+			default:
+				equalJSON(t, p.read(t, ctx)["method"], `"session/update"`)
+				equalJSON(t, p.read(t, ctx)["result"], `{"stopReason":"end_turn"}`)
+			}
+		})
+	}
+}
+
+func TestAgentInvalidInitialCommandsReleaseSlot(t *testing.T) {
+	for _, oversized := range []bool{false, true} {
+		t.Run(map[bool]string{false: "encoding", true: "frame-limit"}[oversized], func(t *testing.T) {
+			ctx := testContext(t)
+			h := agentHandlers()
+			calls := 0
+			h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
+				calls++
+				result := acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: "s"}}
+				if calls == 1 {
+					c := protocol.AvailableCommand{Name: "check", Description: "Check project"}
+					if oversized {
+						c.Description = strings.Repeat("x", 2048)
+					} else {
+						c.Extra = map[string]json.RawMessage{"invalid": json.RawMessage(`{`)}
+					}
+					result.Commands = []protocol.AvailableCommand{c}
+				}
+				return result, nil
+			}
+			_, p := rawAgent(t, ctx, h, acp.AgentOptions{MaxSessions: 1, Limits: acp.Limits{FrameBytes: 1024}})
+			p.send(t, ctx, agentRequest("init", "initialize", initParams))
+			p.read(t, ctx)
+			p.send(t, ctx, agentRequest("bad", "session/new", newParams))
+			assertRPCError(t, p.read(t, ctx), "bad", -32603)
+			p.send(t, ctx, agentRequest("retry", "session/new", newParams))
+			equalJSON(t, p.read(t, ctx)["result"], `{"sessionId":"s"}`)
+		})
 	}
 }
 

@@ -15,10 +15,10 @@ func TestWriteTimeoutSlowSessionsDrainInOrder(t *testing.T) {
 	ctx := testContext(t)
 	h := agentHandlers()
 	next := 0 // Creations below are sequential request/response exchanges.
-	h.CreateSession = func(context.Context, protocol.NewSessionRequest) (protocol.NewSessionResponse, error) {
+	h.CreateSession = func(context.Context, protocol.NewSessionRequest) (acp.CreateSessionResult, error) {
 		id := protocol.SessionID(fmt.Sprintf("s%d", next))
 		next++
-		return protocol.NewSessionResponse{SessionID: id}, nil
+		return acp.CreateSessionResult{NewSessionResponse: protocol.NewSessionResponse{SessionID: id}}, nil
 	}
 	h.Prompt = func(ctx context.Context, turn *acp.Turn, _ protocol.PromptRequest) (protocol.PromptResponse, error) {
 		if err := turn.SendUpdate(finalUpdate()); err != nil {

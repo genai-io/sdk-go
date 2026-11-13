@@ -304,7 +304,7 @@ Between `client.Complete(ctx, messages, opts...)` and bytes on the wire:
         |  | validate           settings, then what this model cannot do   |
         |  +--------------------------------------------------------------+
         v
-    *ai.Request --> optional StreamAdmitted callback
+    *ai.Request --> optional StreamWithAdmission callback
                          | reject: no dispatch
                          | accept: recheck cancellation
                          v
@@ -323,9 +323,10 @@ driver sits behind: it translates and streams, and does nothing else. It is
 also why `Client.Complete` is not a second code path — it drains `Stream`, so
 a request reaches an endpoint exactly one way.
 
-`StreamAdmitted` lets your application save the prepared request before calling
+`StreamWithAdmission` lets your application save the prepared request before calling
 the model. If the callback fails, the request is not sent or retried. It receives
 a copy of the SDK request, not wire bytes; remove secrets before saving.
+`CompleteWithAdmission` collects `StreamWithAdmission` with the same gate.
 [Agent callbacks](agent.md#save-before-running-optional) also cover tools and output.
 
 The same `*ai.Request` is what `CountTokens` measures, so a prompt cannot be

@@ -395,7 +395,7 @@ func (a *Agent) stream(ctx context.Context, emit func(Event), inf *Inference, at
 			return nil
 		}
 	}
-	for evt, streamErr := range client.StreamAdmitted(streamCtx, inf.Messages, admit, inf.options()...) {
+	for evt, streamErr := range client.StreamWithAdmission(streamCtx, inf.Messages, admit, inf.options()...) {
 		if evt.Type == ai.EventProgress || evt.Type == ai.EventBlockStart || evt.Type == ai.EventBlockDelta || evt.Type == ai.EventBlockEnd {
 			quiet.Reset(a.streamIdle)
 		}

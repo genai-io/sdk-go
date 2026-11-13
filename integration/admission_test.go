@@ -24,7 +24,7 @@ func TestInferenceAdmissionBlocksNetwork(t *testing.T) {
 			refused := errors.New("cannot durably record attempt")
 			calls := 0
 			var got error
-			for _, err := range client.StreamAdmitted(context.Background(), []ai.Message{ai.UserMessage("hello")}, func(_ context.Context, req *ai.Request) error {
+			for _, err := range client.StreamWithAdmission(context.Background(), []ai.Message{ai.UserMessage("hello")}, func(_ context.Context, req *ai.Request) error {
 				calls++
 				if req.MaxTokens != 128 || req.System != "policy" {
 					t.Fatalf("not finalized: %+v", req)

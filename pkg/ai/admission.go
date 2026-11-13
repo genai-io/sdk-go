@@ -17,7 +17,7 @@ type AdmissionError struct{ Err error }
 func (e *AdmissionError) Error() string { return fmt.Sprintf("ai: inference admission: %v", e.Err) }
 func (e *AdmissionError) Unwrap() error { return e.Err }
 
-// StreamAdmitted calls admit with the prepared request before calling the model.
+// StreamWithAdmission calls admit with the prepared request before calling the model.
 // For example, admit can save a start record; an error stops the call and returns
 // AdmissionError. Nil admit behaves like Stream.
 //
@@ -26,8 +26,15 @@ func (e *AdmissionError) Unwrap() error { return e.Err }
 // numbers preserved as json.Number. Remove secrets before saving it. Each
 // iteration makes a new call.
 // Cancellation can still stop a request after admit succeeds.
-func (c *Client) StreamAdmitted(ctx context.Context, messages []Message, admit func(context.Context, *Request) error, opts ...Option) iter.Seq2[Event, error] {
+func (c *Client) StreamWithAdmission(ctx context.Context, messages []Message, admit func(context.Context, *Request) error, opts ...Option) iter.Seq2[Event, error] {
 	return c.stream(ctx, messages, admit, opts...)
+}
+
+// CompleteWithAdmission runs one inference call with the admission behavior of
+// StreamWithAdmission and returns the aggregated response, discarding intermediate
+// events. Nil admit behaves like Complete.
+func (c *Client) CompleteWithAdmission(ctx context.Context, messages []Message, admit func(context.Context, *Request) error, opts ...Option) (*Response, error) {
+	return collect(c.StreamWithAdmission(ctx, messages, admit, opts...))
 }
 
 func admitRequest(ctx context.Context, req *Request, admit func(context.Context, *Request) error) (*Request, error) {

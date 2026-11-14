@@ -10,6 +10,7 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/wirejson"
 )
 
 // validToolID matches the tool_use ID shape the Messages API accepts.
@@ -174,7 +175,7 @@ func (d *driver) buildParams(req *ai.Request) (*sdk.MessageNewParams, error) {
 	// Structured output shares output_config with the effort level, so it is
 	// set on the same struct rather than replacing it.
 	if req.Schema != nil {
-		if def := req.Schema.DefinitionMap(); def != nil {
+		if def := wirejson.Object(req.Schema.DefinitionMap()); def != nil {
 			params.OutputConfig.Format = sdk.JSONOutputFormatParam{Schema: def}
 		}
 	}
@@ -325,7 +326,7 @@ func convertTools(tools []ai.Schema) []sdk.ToolUnionParam {
 	out := make([]sdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		schema := sdk.ToolInputSchemaParam{}
-		if props := t.DefinitionMap(); props != nil {
+		if props := wirejson.Object(t.DefinitionMap()); props != nil {
 			if properties, ok := props["properties"]; ok {
 				schema.Properties = properties
 			}

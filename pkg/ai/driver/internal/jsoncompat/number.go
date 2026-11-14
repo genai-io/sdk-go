@@ -1,12 +1,12 @@
-// Package wirejson adapts dynamic JSON values for provider serializers.
-package wirejson
+// Package jsoncompat adapts dynamic JSON values for provider serializers.
+package jsoncompat
 
 import "encoding/json"
 
-// Object copies JSON maps and slices, preserving standard-library Numbers at
+// PreserveNumbers copies JSON maps and slices, preserving standard-library Numbers at
 // provider boundaries. The providers' private JSON forks otherwise treat those
 // numbers as strings. Other strings must retain their original JSON type.
-func Object(src map[string]any) map[string]any {
+func PreserveNumbers(src map[string]any) map[string]any {
 	if src == nil {
 		return nil
 	}
@@ -22,7 +22,7 @@ func value(v any) any {
 	case json.Number:
 		return number(v)
 	case map[string]any:
-		return Object(v)
+		return PreserveNumbers(v)
 	case []any:
 		if v == nil {
 			return v

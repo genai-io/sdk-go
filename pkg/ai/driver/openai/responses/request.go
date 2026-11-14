@@ -6,7 +6,7 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
-	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/wirejson"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/jsoncompat"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
@@ -46,7 +46,7 @@ func (d *driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 		params.ToolChoice = *choice
 	}
 	if schema := req.Schema; schema != nil {
-		if def := wirejson.Object(schema.DefinitionMap()); def != nil {
+		if def := jsoncompat.PreserveNumbers(schema.DefinitionMap()); def != nil {
 			params.Text.Format = wire.ResponseFormatTextConfigUnionParam{
 				OfJSONSchema: &wire.ResponseFormatTextJSONSchemaConfigParam{
 					Name:        schema.WireName(),
@@ -70,7 +70,7 @@ func (d *driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 				OfFunction: &wire.FunctionToolParam{
 					Name:        t.Name,
 					Description: sdk.Opt(t.Description),
-					Parameters:  wirejson.Object(t.DefinitionMap()),
+					Parameters:  jsoncompat.PreserveNumbers(t.DefinitionMap()),
 				},
 			}
 		}
@@ -79,7 +79,7 @@ func (d *driver) buildParams(req *ai.Request) wire.ResponseNewParams {
 	// Extension fields land last so they can deliberately override normalized
 	// fields, matching the Chat Completions driver's escape-hatch semantics.
 	if len(req.SamplingParams) > 0 {
-		params.SetExtraFields(wirejson.Object(req.SamplingParams))
+		params.SetExtraFields(jsoncompat.PreserveNumbers(req.SamplingParams))
 	}
 	return params
 }

@@ -1,4 +1,4 @@
-package wirejson
+package jsoncompat
 
 import (
 	"encoding/json"
@@ -9,13 +9,13 @@ import (
 	openai "github.com/openai/openai-go/v3"
 )
 
-func TestObject(t *testing.T) {
+func TestPreserveNumbers(t *testing.T) {
 	src := map[string]any{"nullSlice": []any(nil), "nullMap": map[string]any(nil), "nested": []any{map[string]any{"n": json.Number("9007199254740993")}, json.Number("1.234567890123456789"), "8", "001", "1.25"}}
 	before, err := json.Marshal(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := Object(src)
+	out := PreserveNumbers(src)
 	for name, marshal := range map[string]func(map[string]any) ([]byte, error){
 		"standard": func(m map[string]any) ([]byte, error) { return json.Marshal(m) },
 		"openai": func(m map[string]any) ([]byte, error) {
@@ -45,7 +45,7 @@ func TestObject(t *testing.T) {
 					t.Fatalf("got %s, want %s in %s", raw, key, before)
 				}
 			}
-			if _, err := marshal(Object(map[string]any{"bad": json.Number(`1,"injected":true`)})); err == nil {
+			if _, err := marshal(PreserveNumbers(map[string]any{"bad": json.Number(`1,"injected":true`)})); err == nil {
 				t.Fatal("invalid Number accepted")
 			}
 		})
@@ -55,7 +55,7 @@ func TestObject(t *testing.T) {
 	if string(after) != string(before) {
 		t.Fatal("source was mutated")
 	}
-	if Object(nil) != nil {
+	if PreserveNumbers(nil) != nil {
 		t.Fatal("nil map changed")
 	}
 }

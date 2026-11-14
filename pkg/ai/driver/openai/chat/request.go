@@ -7,6 +7,7 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
+	"github.com/genai-io/sdk-go/pkg/ai/driver/internal/jsoncompat"
 	"github.com/genai-io/sdk-go/pkg/ai/driver/openai/internal/oai"
 )
 
@@ -32,7 +33,7 @@ func (d *driver) buildParams(req *ai.Request) sdk.ChatCompletionNewParams {
 		}
 	}
 	if schema := req.Schema; schema != nil {
-		if def := schema.DefinitionMap(); def != nil {
+		if def := jsoncompat.PreserveNumbers(schema.DefinitionMap()); def != nil {
 			params.ResponseFormat = sdk.ChatCompletionNewParamsResponseFormatUnion{
 				OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
 					JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
@@ -50,7 +51,7 @@ func (d *driver) buildParams(req *ai.Request) sdk.ChatCompletionNewParams {
 	// Caller and model sampling parameters land last so they can reach fields
 	// this driver does not model, and override the ones it does.
 	if len(req.SamplingParams) > 0 {
-		params.SetExtraFields(req.SamplingParams)
+		params.SetExtraFields(jsoncompat.PreserveNumbers(req.SamplingParams))
 	}
 	return params
 }
@@ -241,7 +242,7 @@ func convertToolCalls(calls []ai.ToolCall) []sdk.ChatCompletionMessageToolCallUn
 func convertTools(tools []ai.Schema) []sdk.ChatCompletionToolUnionParam {
 	out := make([]sdk.ChatCompletionToolUnionParam, 0, len(tools))
 	for _, t := range tools {
-		params := sdk.FunctionParameters(t.DefinitionMap())
+		params := sdk.FunctionParameters(jsoncompat.PreserveNumbers(t.DefinitionMap()))
 		out = append(out, sdk.ChatCompletionToolUnionParam{
 			OfFunction: &sdk.ChatCompletionFunctionToolParam{
 				Function: sdk.FunctionDefinitionParam{

@@ -147,7 +147,7 @@ func TestACPWireConversation(t *testing.T) {
 func TestACPCancelDuringPermission(t *testing.T) {
 	var mu sync.Mutex
 	var stop context.CancelFunc
-	_, _, peer := acpPipe(t, acp.Handlers{
+	ctx, conn, peer := acpPipe(t, acp.Handlers{
 		Request: func(ctx context.Context, c *acp.Conn, _ string, _ json.RawMessage) (any, error) {
 			turn, cancel := context.WithCancel(ctx)
 			defer cancel()
@@ -173,6 +173,13 @@ func TestACPCancelDuringPermission(t *testing.T) {
 	})
 	peer.send(t, &jsonrpc.Request{ID: acpID(t, "prompt"), Method: "session/prompt", Params: json.RawMessage(`{"sessionId":"fixture","prompt":[]}`)})
 	permission := peer.read(t).(*jsonrpc.Request)
+	// Finish the permission write before cancellation, which can close an active write.
+	if err := conn.Notify(ctx, "test/flush", nil); err != nil {
+		t.Fatal(err)
+	}
+	if flush, ok := peer.read(t).(*jsonrpc.Request); !ok || flush.Method != "test/flush" || flush.IsCall() {
+		t.Fatalf("flush notification: %+v", flush)
+	}
 	peer.send(t, &jsonrpc.Request{Method: "session/cancel", Params: json.RawMessage(`{"sessionId":"fixture"}`)})
 	response, ok := peer.read(t).(*jsonrpc.Response)
 	if !ok || response.Error != nil || string(response.Result) != `{"stopReason":"cancelled"}` {

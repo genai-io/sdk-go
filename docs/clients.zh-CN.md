@@ -161,6 +161,14 @@ client, err := e.Client("llama4")
 
 **"读列表"和"拉列表"是两个动词**，这是故意的：选择器直接从目录立刻渲染，而一个挂掉的 host 卡不住它。目录里没有的 host，用 `endpoint.New(endpoint.Config{…})`。
 
+Codex 订阅列表使用公开 npm `@openai/codex/latest` 元数据发现稳定版
+`client_version`，不使用 provider 的认证客户端。版本在进程内共享缓存 24 小时；
+查询失败后五分钟再试，沿用上次解析的版本或内置兜底。发现请求遵循调用方的
+截止时间，最多耗时两秒。设置 `OpenAIResponsesCompat.CodexClientVersion`
+可固定版本并跳过这次额外查询。
+Codex 返回的模型描述通过 `ai.Model.Description` 暴露；非空的实时描述覆盖基线，
+未提供时保留基线描述。SDK 不会为未列出的模型编造描述。
+
 ## 默认值与覆盖
 
 不管你停在哪，**同一个 `Option` 在构造时是默认值、在调用处是覆盖值**：

@@ -84,6 +84,10 @@ type OpenAIResponsesCompat struct {
 	// /models?client_version= — as the ChatGPT/Codex subscription endpoint
 	// does. Its protocol's /models answers 401 there.
 	CodexModelListing bool `json:"codex_model_listing,omitempty"`
+
+	// CodexClientVersion pins the subscription catalog's client version.
+	// Empty discovers the latest stable Codex CLI version, with an offline fallback.
+	CodexClientVersion string `json:"codex_client_version,omitempty"`
 }
 
 // GoogleCompat is the behavior a Google GenAI endpoint needs.

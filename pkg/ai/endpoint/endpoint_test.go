@@ -91,6 +91,29 @@ func TestMergeListing(t *testing.T) {
 	}
 }
 
+func TestMergeListingDescription(t *testing.T) {
+	for _, tc := range []struct {
+		name, baseline, live, want string
+	}{
+		{"live wins", "Baseline description", "Live description", "Live description"},
+		{"omitted keeps baseline", "Baseline description", "", "Baseline description"},
+		{"live fills missing baseline", "", "Live description", "Live description"},
+		{"unknown stays empty", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := ai.Model{ID: "unrecognized-model", Description: tc.baseline}
+			live := ai.Model{ID: base.ID, Description: tc.live}
+			got := MergeListing(base, live)
+			if got.Description != tc.want {
+				t.Fatalf("Description = %q, want %q", got.Description, tc.want)
+			}
+			if base.Description != tc.baseline || live.Description != tc.live {
+				t.Fatal("merge mutated its inputs")
+			}
+		})
+	}
+}
+
 func TestMergeListingDoesNotAliasEitherSide(t *testing.T) {
 	base := ai.Model{ID: "acme", Input: []ai.Modality{ai.ModalityText}}
 	live := ai.Model{ID: "acme", Reasoning: []ai.ReasoningLevel{{Effort: ai.EffortHigh}}}

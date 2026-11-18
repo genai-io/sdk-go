@@ -196,6 +196,16 @@ Reading the list and fetching it are separate verbs on purpose: a picker
 renders immediately from the catalog, and a host that is down cannot hang it.
 For a host the catalog does not know about, use `endpoint.New(endpoint.Config{…})`.
 
+Codex subscription listings discover the stable CLI `client_version` from the
+public npm `@openai/codex/latest` metadata, never through the provider's authenticated
+client. A shared in-process cache lasts 24 hours; failed lookups retry after five
+minutes and use the last resolved version or a bundled fallback. Discovery adds
+at most two seconds within the caller's deadline. To avoid the extra lookup or
+pin a compatible version, set `OpenAIResponsesCompat.CodexClientVersion`.
+Provider-supplied Codex descriptions are exposed as `ai.Model.Description`.
+A nonempty live description overrides the baseline; an omitted one preserves it.
+The SDK does not invent descriptions for unlisted models.
+
 ## Defaults and overrides
 
 Wherever you stopped, the same `Option` is a default at construction and an

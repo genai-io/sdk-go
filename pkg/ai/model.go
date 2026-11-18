@@ -83,6 +83,9 @@ type Model struct {
 	API  API    `json:"api"`
 	Name string `json:"name,omitempty"`
 
+	// Description is optional model metadata supplied by the provider or caller.
+	Description string `json:"description,omitempty"`
+
 	// Vendor is the catalog vendor this model came from, e.g. "deepseek". It
 	// is informational: routing keys off API.
 	Vendor string `json:"vendor,omitempty"`

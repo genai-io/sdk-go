@@ -219,6 +219,9 @@ func MergeListing(base, live ai.Model) ai.Model {
 	if live.Name != "" && live.Name != live.ID {
 		out.Name = live.Name
 	}
+	if live.Description != "" {
+		out.Description = live.Description
+	}
 	if live.ContextWindow > 0 {
 		out.ContextWindow = live.ContextWindow
 	}

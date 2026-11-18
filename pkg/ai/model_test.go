@@ -14,6 +14,7 @@ func fullModel() Model {
 		ID:            "claude-opus-5",
 		API:           APIAnthropicMessages,
 		Name:          "Claude Opus 5",
+		Description:   "Provider-supplied model description",
 		Vendor:        "anthropic",
 		BaseURL:       "https://example.invalid",
 		ContextWindow: 200_000,

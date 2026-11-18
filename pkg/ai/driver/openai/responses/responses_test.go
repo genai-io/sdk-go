@@ -536,14 +536,15 @@ func TestACodexBackendIsListedFromItsOwnCatalog(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	lister := driverFor(t, ai.Config{Model: ai.Model{BaseURL: srv.URL + "/backend-api/codex",
-		ID: "-", API: ai.APIOpenAIResponses, Compat: ai.OpenAIResponsesCompat{CodexModelListing: true},
+		ID: "-", API: ai.APIOpenAIResponses,
+		Compat: ai.OpenAIResponsesCompat{CodexModelListing: true, CodexClientVersion: "0.169.1"},
 	}}).(ai.ModelLister)
 
 	models, err := lister.Models(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if query != "/backend-api/codex/models?client_version="+codexClientVersion {
+	if query != "/backend-api/codex/models?client_version=0.169.1" {
 		t.Errorf("asked %s, want the Codex catalog", query)
 	}
 	if len(models) != 1 || models[0].ID != "gpt-5.5-codex" || models[0].ContextWindow != 272000 {

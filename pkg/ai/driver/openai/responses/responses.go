@@ -4,14 +4,14 @@
 //
 // # Where things live
 //
-//	responses.go  construction, Stream and Models
+//	responses.go  construction and Stream
+//	codex.go      subscription model discovery
 //	request.go    an ai.Request translated into Responses params
 //	errors.go     this protocol's failures, including the ones that arrive
 //	              inside a 200
 package responses
 
 import (
-	"cmp"
 	"context"
 	"io"
 	"iter"
@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	sdk "github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	wire "github.com/openai/openai-go/v3/responses"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -33,18 +32,20 @@ func init() { ai.RegisterAPI(ai.APIOpenAIResponses, New) }
 
 // driver talks to one Responses endpoint.
 type driver struct {
-	client sdk.Client
-	model  ai.Model
-	compat ai.OpenAIResponsesCompat
+	client   sdk.Client
+	model    ai.Model
+	compat   ai.OpenAIResponsesCompat
+	versions *codexVersionCache
 }
 
 // New builds a driver from a Config. Registered as the factory for
 // ai.APIOpenAIResponses.
 func New(cfg ai.Config) (ai.Driver, error) {
 	return &driver{
-		client: oai.NewClient(cfg),
-		model:  cfg.Model,
-		compat: ai.CompatOf[ai.OpenAIResponsesCompat](cfg.Model),
+		client:   oai.NewClient(cfg),
+		model:    cfg.Model,
+		compat:   ai.CompatOf[ai.OpenAIResponsesCompat](cfg.Model),
+		versions: codexVersions,
 	}, nil
 }
 
@@ -300,60 +301,6 @@ func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 		out = append(out, ai.Model{ID: m.ID, Name: m.ID, API: ai.APIOpenAIResponses, Vendor: d.model.Vendor})
 	}
 	slices.SortFunc(out, func(a, b ai.Model) int { return strings.Compare(a.ID, b.ID) })
-	return out, nil
-}
-
-// codexClientVersion is the Codex CLI release this driver presents itself as
-// when listing. The backend returns the lineup for the version it is told;
-// bump it if the list goes stale.
-const codexClientVersion = "0.161.0"
-
-// codexModels reads the lineup a ChatGPT subscription is entitled to.
-func (d *driver) codexModels(ctx context.Context) ([]ai.Model, error) {
-	var listing struct {
-		Models []struct {
-			Slug                     string `json:"slug"`
-			DisplayName              string `json:"display_name"`
-			ContextWindow            int    `json:"context_window"`
-			ShowInPicker             *bool  `json:"show_in_picker"`
-			DefaultReasoningLevel    string `json:"default_reasoning_level"`
-			SupportedReasoningLevels []struct {
-				Effort string `json:"effort"`
-			} `json:"supported_reasoning_levels"`
-		} `json:"models"`
-	}
-	err := d.client.Get(ctx, "models", nil, &listing, option.WithQuery("client_version", codexClientVersion))
-	if err != nil {
-		return nil, fail.Wrap(err)
-	}
-	out := make([]ai.Model, 0, len(listing.Models))
-	for _, m := range listing.Models {
-		// A null show_in_picker means shown; only an explicit false hides one.
-		if m.Slug == "" || (m.ShowInPicker != nil && !*m.ShowInPicker) {
-			continue
-		}
-		model := ai.Model{
-			ID:            m.Slug,
-			Name:          cmp.Or(m.DisplayName, m.Slug),
-			API:           ai.APIOpenAIResponses,
-			Vendor:        d.model.Vendor,
-			ContextWindow: m.ContextWindow,
-		}
-		for _, level := range m.SupportedReasoningLevels {
-			if level.Effort == "" {
-				continue
-			}
-			model.Reasoning = append(model.Reasoning, ai.ReasoningLevel{
-				Effort:  ai.Effort(level.Effort),
-				Value:   level.Effort,
-				Default: level.Effort == m.DefaultReasoningLevel,
-			})
-		}
-		out = append(out, model)
-	}
-	if len(out) == 0 {
-		return nil, &ai.Error{Driver: name, Kind: ai.KindUnknown, Message: "the subscription catalog listed no models"}
-	}
 	return out, nil
 }
 

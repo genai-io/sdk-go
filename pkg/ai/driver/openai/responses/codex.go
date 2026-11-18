@@ -96,7 +96,7 @@ func fetchCodexVersion(ctx context.Context, client *http.Client, url string) (st
 	if err != nil {
 		return "", err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("codex version: http %d", res.StatusCode)
 	}

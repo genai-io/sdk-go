@@ -32,7 +32,7 @@ func TestCodexCatalogDiscoversLatestVersionWithoutCredentials(t *testing.T) {
 				t.Errorf("provider header %s reached metadata discovery", header)
 			}
 		}
-		fmt.Fprint(w, `{"version":"0.200.0"}`)
+		_, _ = fmt.Fprint(w, `{"version":"0.200.0"}`)
 	}))
 	t.Cleanup(metadata.Close)
 	cache := &codexVersionCache{fetch: func(ctx context.Context) (string, error) {
@@ -47,7 +47,7 @@ func TestCodexCatalogDiscoversLatestVersionWithoutCredentials(t *testing.T) {
 			t.Error("catalog credential missing")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"models":[{"slug":"new-model"}]}`)
+		_, _ = fmt.Fprint(w, `{"models":[{"slug":"new-model"}]}`)
 	}))
 	t.Cleanup(catalog.Close)
 	client := &http.Client{Transport: codexRoundTripper(func(r *http.Request) (*http.Response, error) {
@@ -85,7 +85,7 @@ func TestCodexCatalogVersionFallbackAndOverride(t *testing.T) {
 					t.Errorf("catalog version = %q, want %q", got, want)
 				}
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"models":[{"slug":"new-model"}]}`)
+				_, _ = fmt.Fprint(w, `{"models":[{"slug":"new-model"}]}`)
 			}))
 			t.Cleanup(srv.Close)
 			d := driverFor(t, ai.Config{Model: ai.Model{
@@ -252,7 +252,7 @@ func TestFetchCodexVersionValidatesMetadata(t *testing.T) {
 				if tt.status != 0 {
 					w.WriteHeader(tt.status)
 				}
-				io.WriteString(w, tt.body)
+				_, _ = io.WriteString(w, tt.body)
 			}))
 			t.Cleanup(srv.Close)
 			got, err := fetchCodexVersion(context.Background(), srv.Client(), srv.URL)

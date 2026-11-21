@@ -198,11 +198,7 @@ func (d *driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion
 			})
 		}
 	}
-	return sdk.ChatCompletionMessageParamUnion{
-		OfUser: &sdk.ChatCompletionUserMessageParam{
-			Content: sdk.ChatCompletionUserMessageParamContentUnion{OfArrayOfContentParts: parts},
-		},
-	}
+	return sdk.UserMessage(parts)
 }
 
 func (d *driver) assistantMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {

@@ -192,7 +192,7 @@ func toolOutput(r *ai.ToolResult) wire.ResponseInputItemFunctionCallOutputOutput
 
 func (d *driver) messageParam(role wire.EasyInputMessageRole, content ai.Content) *wire.EasyInputMessageParam {
 	param := &wire.EasyInputMessageParam{Role: role}
-	textParts := role == wire.EasyInputMessageRoleUser && d.compat.TextParts && oai.HasMultipleTextBlocks(content)
+	textParts := role == wire.EasyInputMessageRoleUser && !d.compat.FlattenUserText && oai.HasMultipleTextBlocks(content)
 	if !content.HasImages() && !textParts {
 		param.Content = wire.EasyInputMessageContentUnionParam{OfString: sdk.Opt(content.Text())}
 		return param

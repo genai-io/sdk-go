@@ -204,19 +204,30 @@ func TestOpenAIUserTextPartsOnWire(t *testing.T) {
 				}
 				return fmt.Sprintf(`{"type":%q,"text":%s}`, route.textType, text)
 			}
+			parts := "[" + strings.Join([]string{part(original), part(reminder1), part(reminder2)}, ",") + "]"
 			for _, tc := range []struct {
 				name, want string
 				content    ai.Content
-				fallback   bool
+				flatten    bool
 			}{
 				{"single", `"prompt"`, ai.Content{original, ai.TextBlock("")}, false},
-				{"parts", "[" + strings.Join([]string{part(original), part(reminder1), part(reminder2)}, ",") + "]", ai.Content{original, reminder1, reminder2}, false},
+				{"parts", parts, ai.Content{original, reminder1, reminder2}, false},
+				{"no-compat", parts, ai.Content{original, reminder1, reminder2}, false},
 				{"fallback", `"prompt\n\nfirst\n\nsecond"`, ai.Content{original, reminder1, reminder2}, true},
 				{"mixed", "[" + strings.Join([]string{part(original), route.image, part(reminder1)}, ",") + "]", ai.Content{original, image, reminder1}, true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					m := model
-					if tc.fallback {
+					switch {
+					case tc.flatten && m.API == ai.APIOpenAIChat:
+						compat := ai.CompatOf[ai.OpenAIChatCompat](m)
+						compat.FlattenUserText = true
+						m.Compat = compat
+					case tc.flatten:
+						compat := ai.CompatOf[ai.OpenAIResponsesCompat](m)
+						compat.FlattenUserText = true
+						m.Compat = compat
+					case tc.name == "no-compat":
 						m.Compat = nil
 					}
 					e := sse(t, false, [2]string{"", route.done})

@@ -172,7 +172,7 @@ func toolResultImages(results []ai.ToolResult) ai.Content {
 }
 
 func (d *driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
-	if !msg.Content.HasImages() && !(d.compat.TextParts && oai.HasMultipleTextBlocks(msg.Content)) {
+	if !msg.Content.HasImages() && (!d.compat.TextParts || !oai.HasMultipleTextBlocks(msg.Content)) {
 		return sdk.UserMessage(msg.Content.Text())
 	}
 	parts := make([]sdk.ChatCompletionContentPartUnionParam, 0, len(msg.Content))

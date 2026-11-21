@@ -66,10 +66,18 @@ type OpenAIChatCompat struct {
 	// message, empty when there is none. Moonshot and Z.ai reject a
 	// thinking-enabled request whose history omits it.
 	ReasoningContent bool `json:"reasoning_content,omitempty"`
+
+	// TextParts keeps multiple text blocks in one user message as separate
+	// content parts. Otherwise a text-only message is sent as a string.
+	TextParts bool `json:"text_parts,omitempty"`
 }
 
 // OpenAIResponsesCompat is the behavior an OpenAI Responses endpoint needs.
 type OpenAIResponsesCompat struct {
+	// TextParts keeps multiple text blocks in one user message as separate
+	// input_text items. Otherwise a text-only message is sent as a string.
+	TextParts bool `json:"text_parts,omitempty"`
+
 	// NoLongCacheRetention marks an endpoint that rejects
 	// prompt_cache_retention. A request asking for CacheLong falls back to the
 	// default lifetime rather than failing.

@@ -34,7 +34,9 @@
     "key_env": [
       "OPENAI_API_KEY"
     ],
-    "compat": {}
+    "compat": {
+      "text_parts": true
+    }
   },
   {
     "id": "azure-openai",
@@ -219,7 +221,9 @@
     "display_name": "GitHub Copilot",
     "api": "openai-chat-completions",
     "base_url": "https://api.individual.githubcopilot.com",
-    "compat": {},
+    "compat": {
+      "text_parts": true
+    },
     "headers": {
       "Copilot-Integration-Id": "vscode-chat",
       "Editor-Plugin-Version": "copilot-chat/0.35.0",

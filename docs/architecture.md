@@ -265,6 +265,10 @@ it is the only package all three can depend on. Moving them into the driver
 packages would force `catalog` to import every driver, and with it every
 vendor SDK — destroying the blank-import selectivity the registry exists for.
 
+`TextParts` on either OpenAI compat type keeps multiple text blocks as separate
+parts in one user message. Without it, text-only messages use a string for
+compatibility. Single text blocks still use a string, and images still use parts.
+
 ## What the SDK will not do
 
 It ships no execution policy. Every driver disables its vendor SDK's retry, so

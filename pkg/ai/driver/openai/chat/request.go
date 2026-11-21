@@ -172,9 +172,7 @@ func toolResultImages(results []ai.ToolResult) ai.Content {
 }
 
 func (d *driver) userMessage(msg ai.Message) sdk.ChatCompletionMessageParamUnion {
-	// A text-only turn takes the simple string form, which every
-	// implementation accepts; the array form is only needed for images.
-	if !msg.Content.HasImages() {
+	if !msg.Content.HasImages() && !(d.compat.TextParts && oai.HasMultipleTextBlocks(msg.Content)) {
 		return sdk.UserMessage(msg.Content.Text())
 	}
 	parts := make([]sdk.ChatCompletionContentPartUnionParam, 0, len(msg.Content))

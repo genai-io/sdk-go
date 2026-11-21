@@ -42,7 +42,7 @@ var vendors = []Vendor{
 		API:         ai.APIOpenAIResponses,
 		BaseURLEnv:  "OPENAI_BASE_URL",
 		KeyEnv:      []string{"OPENAI_API_KEY"},
-		Compat:      ai.OpenAIResponsesCompat{},
+		Compat:      ai.OpenAIResponsesCompat{TextParts: true},
 	},
 	{
 		ID:          "azure-openai",
@@ -239,7 +239,7 @@ var vendors = []Vendor{
 		// talks to during sign-in, and an enterprise account's is not this
 		// one. auth records it on the credential and prefers it.
 		BaseURL: "https://api.individual.githubcopilot.com",
-		Compat:  ai.OpenAIChatCompat{},
+		Compat:  ai.OpenAIChatCompat{TextParts: true},
 		Headers: copilotHeaders,
 		Note: "Copilot authenticates a person, not a service: there is no API key. " +
 			"Sign in with auth.Login(ctx, \"copilot\", ...), which runs GitHub's device-code " +

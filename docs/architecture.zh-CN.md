@@ -185,6 +185,9 @@ Compat: ai.AnthropicCompat{BearerAuth: true}                        // 火山引
 
 Compat 值由 `catalog` 写入、由各 driver 读取，而 `pkg/ai` 自己在校验时也要读它。这就是这些类型必须待在 `pkg/ai` 的原因：**它是三方都能依赖的唯一一个包**。把它们挪进 driver 包，就会逼着 `catalog` import 每一个 driver，连带把每家厂商的 SDK 拖进来——注册表存在的意义（按需 blank import）就毁了。
 
+两种 OpenAI Compat 都可设置 `TextParts`，在同一条用户消息里保留多个独立文本块。
+未开启时，纯文本消息仍用字符串以保持兼容。单个文本块始终用字符串，含图片的消息仍用内容块数组。
+
 ## 这个 SDK 拒绝做的事
 
 **不自带执行策略。** 每个 driver 都关掉了厂商 SDK 自带的重试，所以一次调用只试一次；重试是 `agent.WithRetry`，因为只有 agent 能安全地重放——已经产出 delta 的调用不能在看过它的调用方底下重放。缓存、日志、成本计量仍然归调用方，形式是包一层的 `Driver`——只有应用知道一轮的预算、什么可以缓存、什么绝不能记日志。

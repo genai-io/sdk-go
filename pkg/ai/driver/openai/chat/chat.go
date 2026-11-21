@@ -270,7 +270,10 @@ func (d *driver) Models(ctx context.Context) ([]ai.Model, error) {
 					// Uncapped like the Codex backend: nothing says the gateway
 					// takes max_output_tokens.
 					model.API = ai.APIOpenAIResponses
-					model.Compat = ai.OpenAIResponsesCompat{NoMaxOutputTokens: true}
+					model.Compat = ai.OpenAIResponsesCompat{
+						NoMaxOutputTokens: true,
+						TextParts:         d.model.Vendor == "copilot",
+					}
 				}
 			}
 		}

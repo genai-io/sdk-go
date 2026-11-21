@@ -265,6 +265,10 @@ it is the only package all three can depend on. Moving them into the driver
 packages would force `catalog` to import every driver, and with it every
 vendor SDK — destroying the blank-import selectivity the registry exists for.
 
+Both OpenAI drivers keep multiple text blocks in one user message by default.
+Set `FlattenUserText` only when an endpoint requires a string for text-only
+messages. A single text block still uses a string, and images still use parts.
+
 ## What the SDK will not do
 
 It ships no execution policy. Every driver disables its vendor SDK's retry, so

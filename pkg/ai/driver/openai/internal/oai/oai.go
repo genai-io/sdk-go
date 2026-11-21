@@ -82,6 +82,20 @@ func Details(err error) errs.Details {
 	}
 }
 
+// HasMultipleTextBlocks counts only blocks that would be sent as parts.
+func HasMultipleTextBlocks(content ai.Content) bool {
+	seen := false
+	for _, block := range content {
+		if block.Type == ai.BlockText && block.Text != "" {
+			if seen {
+				return true
+			}
+			seen = true
+		}
+	}
+	return false
+}
+
 // DataURI frames an inline image the way both protocols take one.
 func DataURI(mediaType, data string) string {
 	return "data:" + mediaType + ";base64," + data

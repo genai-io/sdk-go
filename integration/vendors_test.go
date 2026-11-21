@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -154,6 +155,105 @@ func TestReachingEachVendor(t *testing.T) {
 			}
 			if path == "" {
 				t.Error("no request reached the endpoint")
+			}
+		})
+	}
+}
+
+func TestOpenAIUserTextPartsOnWire(t *testing.T) {
+	const listing = `{"object":"list","data":[
+		{"id":"gpt-chat","object":"model","supported_endpoints":["/chat/completions"]},
+		{"id":"gpt-responses","object":"model","supported_endpoints":["/responses"]}]}`
+	const chatDone = `{"id":"m","model":"gpt-chat","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	const responsesDone = `{"type":"response.completed","response":{"id":"r","status":"completed","output":[]}}`
+
+	for _, route := range []struct {
+		ref, path, field, textType, image, done string
+	}{
+		{"copilot/gpt-chat", "/chat/completions", "messages", "text",
+			`{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}`, chatDone},
+		{"copilot/gpt-responses", "/responses", "input", "input_text",
+			`{"type":"input_image","image_url":"data:image/png;base64,aW1n","detail":"auto"}`, responsesDone},
+		{"openai/gpt-4.1", "/responses", "input", "input_text",
+			`{"type":"input_image","image_url":"data:image/png;base64,aW1n","detail":"auto"}`, responsesDone},
+	} {
+		t.Run(route.ref, func(t *testing.T) {
+			vendorID, modelID, _ := strings.Cut(route.ref, "/")
+			vendor, ok := catalog.Find(vendorID)
+			if !ok {
+				t.Fatalf("no vendor %s", vendorID)
+			}
+			model := vendor.Model(modelID)
+			if vendorID == "copilot" {
+				catalogServer := jsonEndpoint(t, http.StatusOK, listing)
+				ep := vendor.Endpoint(endpoint.Config{BaseURL: catalogServer.server.URL, APIKey: "k"})
+				if err := ep.Refresh(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if model, ok = ep.Model(modelID); !ok {
+					t.Fatalf("no listed model %s", modelID)
+				}
+			}
+			model.Input = []ai.Modality{ai.ModalityText, ai.ModalityImage}
+			original, reminder1, reminder2 := ai.TextBlock("prompt"), ai.TextBlock("\n\nfirst"), ai.TextBlock("\n\nsecond")
+			image := ai.ImageBlock(ai.Image{MediaType: "image/png", Data: "aW1n"})
+			part := func(b ai.Block) string {
+				text, err := json.Marshal(b.Text)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return fmt.Sprintf(`{"type":%q,"text":%s}`, route.textType, text)
+			}
+			parts := "[" + strings.Join([]string{part(original), part(reminder1), part(reminder2)}, ",") + "]"
+			for _, tc := range []struct {
+				name, want string
+				content    ai.Content
+				flatten    bool
+			}{
+				{"single", `"prompt"`, ai.Content{original, ai.TextBlock("")}, false},
+				{"parts", parts, ai.Content{original, reminder1, reminder2}, false},
+				{"no-compat", parts, ai.Content{original, reminder1, reminder2}, false},
+				{"fallback", `"prompt\n\nfirst\n\nsecond"`, ai.Content{original, reminder1, reminder2}, true},
+				{"mixed", "[" + strings.Join([]string{part(original), route.image, part(reminder1)}, ",") + "]", ai.Content{original, image, reminder1}, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					m := model
+					switch {
+					case tc.flatten && m.API == ai.APIOpenAIChat:
+						compat := ai.CompatOf[ai.OpenAIChatCompat](m)
+						compat.FlattenUserText = true
+						m.Compat = compat
+					case tc.flatten:
+						compat := ai.CompatOf[ai.OpenAIResponsesCompat](m)
+						compat.FlattenUserText = true
+						m.Compat = compat
+					case tc.name == "no-compat":
+						m.Compat = nil
+					}
+					e := sse(t, false, [2]string{"", route.done})
+					_, err := open(t, e.server.URL, m).Complete(t.Context(), []ai.Message{{Role: ai.RoleUser, Content: tc.content}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if e.path != route.path {
+						t.Fatalf("path = %q, want %q", e.path, route.path)
+					}
+					messages, ok := e.body[route.field].([]any)
+					if !ok || len(messages) != 1 {
+						t.Fatalf("want one message in %s, got %#v", route.field, e.body[route.field])
+					}
+					message, ok := messages[0].(map[string]any)
+					if !ok || message["role"] != "user" {
+						t.Fatalf("want a user message, got %#v", messages[0])
+					}
+					var want any
+					if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+						t.Fatal(err)
+					}
+					if got := message["content"]; !reflect.DeepEqual(got, want) {
+						t.Errorf("content = %#v, want %#v", got, want)
+					}
+				})
 			}
 		})
 	}
